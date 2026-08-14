@@ -211,8 +211,8 @@ github.com/k3s-io/containerd/v2 v2.3.2-k3s2 h1:d+bZCem1meQ6dhRmSmm/QCvSsCRiwGz3T
 github.com/k3s-io/containerd/v2 v2.3.2-k3s2/go.mod h1:w0vk2xH0tWd9lLZyBeYQdbs8ITcWqAIVQcraVInLarM=
 github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api v1.36.2-k3s2 h1:YYohH3LUebcOeSI6DZdAPBrElFlWkBC/LZ8WoKHEvCQ=
 github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api v1.36.2-k3s2/go.mod h1:1gMX7udEAiRCWGS4uxscdbxq6vufwhZt38Ri+XH6P00=
-github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJnhSlk=
-github.com/klauspost/compress v1.19.1/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+github.com/klauspost/compress v1.19.2 h1:hMRETovs/pu/dVWN7zIT1PGG8t509MwT6bO7XSi26R8=
+github.com/klauspost/compress v1.19.2/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/knqyf263/go-plugin v0.9.0 h1:CQs2+lOPIlkZVtcb835ZYDEoyyWJWLbSTWeCs0EwTwI=
 github.com/knqyf263/go-plugin v0.9.0/go.mod h1:2z5lCO1/pez6qGo8CvCxSlBFSEat4MEp1DrnA+f7w8Q=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
