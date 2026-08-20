@@ -1,7 +1,7 @@
 #!/bin/bash
 # Edgelet embed pipeline version pins (RFC R16–R19, version-matrix.md).
 
-VERSION_GOLANG="1.26.5"
+VERSION_GOLANG="1.26.6"
 
 GO=${GO-go}
 ARCH=${ARCH:-$("${GO}" env GOARCH)}

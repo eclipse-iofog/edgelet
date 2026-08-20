@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/eclipse-iofog/edgelet/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-iofog/edgelet/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/eclipse-iofog/edgelet?include_prereleases)](https://github.com/eclipse-iofog/edgelet/releases)
-[![Go](https://img.shields.io/badge/Go-1.26.5-blue.svg)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26.6-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Binary size](https://img.shields.io/badge/linux%20thin-~35%20MiB-informational)](https://github.com/eclipse-iofog/edgelet/releases)
 [![govulncheck](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml)
@@ -84,7 +84,7 @@ CLI reference: [docs/cli/README.md](docs/cli/README.md) · [output schemas](docs
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Go | **1.26.5+** | See `go.mod` |
+| Go | **1.26.6+** | See `go.mod` |
 | Make | any | GNU Make |
 | Docker | 26.10+ | Required for macOS release builds and embed CI |
 | Docker / Podman | 26.10+ | When `containerEngine` is `docker` or `podman` |
@@ -137,7 +137,7 @@ RELEASE_FRESH_CI_IMAGE=1 ./test/release/build-all.sh
 
 ```bash
 make build-desktop-darwin build-desktop-windows
-scripts/release-binaries.sh v1.0.1
+scripts/release-binaries.sh v1.0.2
 ```
 
 Local / single-target builds:
@@ -149,7 +149,7 @@ make deps                     # embed pipeline before linux thin build
 make build-linux-amd64        # deps + thin for amd64
 make build-linux-arm64        # deps + thin for arm64
 make build-desktop-darwin     # darwin monolithic
-make release-binaries VERSION=v1.0.1
+make release-binaries VERSION=v1.0.2
 ```
 
 ## Testing
@@ -185,18 +185,18 @@ Identical builds and tags; choose the channel that matches your fleet docs. Over
 ### Eclipse (canonical)
 
 ```bash
-curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.0.1/install.sh -o install.sh
+curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.0.2/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.0.1
+sudo ./install.sh --version=v1.0.2
 # dev / CI: sudo ./install.sh --bin-path=build/edgelet-linux-amd64 --version=dev
 ```
 
 ### Datasance mirror
 
 ```bash
-curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.0.1/install.sh -o install.sh
+curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.0.2/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.0.1
+sudo ./install.sh --version=v1.0.2
 ```
 
 Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples.

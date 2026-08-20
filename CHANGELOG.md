@@ -5,6 +5,14 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - August 2026
+
+### Changed
+
+- **Toolchain:** Go **1.26.6** in `go.mod`, CI workflows, Dockerfiles, and quality scripts.
+- **Security / vulncheck:** stdlib fixes for **GO-2026-5026**, **GO-2026-5972**, **GO-2026-6089**, **GO-2026-6090**, and **GO-2026-6218** (`net/url`, `crypto/tls`, `net/http`, `encoding/asn1`); bump `github.com/cilium/ebpf` to **v0.22.0** (**GO-2026-6238**, BTF parsing on linux cgroup setup); `make vulncheck` passes with zero documented exceptions ([SECURITY.md](SECURITY.md)).
+- **Go dependencies:** minor bumps — `klauspost/compress` 1.19.2, `gopsutil/v4` 4.26.7, `google.golang.org/grpc` 1.83.0, `modernc.org/sqlite` 1.56.0.
+
 ## [1.0.2] - July 2026
 
 ### Added
