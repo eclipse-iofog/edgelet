@@ -5,7 +5,14 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.3] - August 2026
+## [1.0.3-rc.2] - September 2026
+
+### Changed
+
+- **Security / vulncheck:** bump `golang.org/x/crypto` to **v0.56.0** (**GO-2026-6354**, **GO-2026-6355** — SSH channel deadlock DoS on `ssh.Dial` in proxy tunnel); bump `golang.org/x/mod` to **v0.40.0** (indirect, sumdb verification fixes **GO-2026-6179** / **GO-2026-6180**); `make vulncheck` passes with zero documented exceptions ([SECURITY.md](SECURITY.md)).
+- **Go dependencies:** patch/minor bumps — `github.com/miekg/dns` **v1.1.73**, `github.com/sirupsen/logrus` **v1.10.1**, `google.golang.org/grpc` **v1.83.1**, `modernc.org/sqlite` **v1.57.0** (Dependabot; no edgelet API changes required).
+
+## [1.0.3-rc.1] - August 2026
 
 ### Changed
 
