@@ -74,6 +74,32 @@ Evaluator alias policy is canonical + alias tolerant:
   - Resource: `images/remove`
   - Verb: `create`
 
+- Endpoint: `GET /v1/models`
+  - Resource: `models`
+  - Verb: `get`
+
+- Endpoint: `GET /v1/models/{name}`
+  - Resource: `models`
+  - Verb: `get`
+  - ResourceName: `{name}`
+
+- Endpoint: `DELETE /v1/models/{name}`
+  - Resource: `models`
+  - Verb: `delete`
+  - ResourceName: `{name}`
+
+- Endpoint: `POST /v1/models:pull`
+  - Resource: `models/pull`
+  - Verb: `create`
+
+- Endpoint: `GET /v1/models:pull/{operationId}`
+  - Resource: `models/pull/status`
+  - Verb: `get`
+
+- Endpoint: `POST /v1/models:prune`
+  - Resource: `models/prune`
+  - Verb: `create`
+
 - Endpoint: `GET /v1/system/gps`
   - Resource: `system/gps`
   - Verb: `get`
@@ -215,6 +241,14 @@ Evaluator alias policy is canonical + alias tolerant:
 - Endpoint: `DELETE /v1/deploy/registries/{id}`
   - Resource: `deploy/registries`
   - Verb: `delete`
+
+- Endpoint: `POST /v1/deploy/models:apply`
+  - Resource: `deploy/models`
+  - Verb: `create`
+
+- Endpoint: `POST /v1/deploy/models:validate`
+  - Resource: `deploy/models`
+  - Verb: `create`
 
 - Endpoint: `POST /v1/deploy/runtimeclasses:apply`
   - Resource: `deploy/runtimeclasses`

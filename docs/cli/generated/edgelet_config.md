@@ -46,7 +46,6 @@ edgelet config [flags]
       --controller-url string          controller URL. Alias: --a
       --cpu-limit-percent float        CPU limit (%). Alias: --p
       --dev-mode                       developer mode. Alias: --dev
-      --device-scan-frequency int      device scan frequency (seconds). Alias: --sd
       --disk-directory string          disk directory. Alias: --dl
       --disk-limit-gib float           disk usage limit (GiB). Alias: --d
       --edge-guard-frequency int       edge guard frequency. Alias: --egf

@@ -46,6 +46,8 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		augmentWithCgroupStatus(statusMap)
 	}
 	augmentWithRuntimeStatus(statusMap)
+	statusMap["runtimeClasses"] = statusreporter.GetAppliedRuntimeClasses()
+	statusMap["availableCdiDevices"] = statusreporter.GetAvailableCDIDevices()
 
 	// Convert to JSON
 	jsonData, err := json.Marshal(statusMap)
@@ -64,8 +66,8 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseStatusReport parses a status report string into a map
-func parseStatusReport(statusReport string) map[string]string {
-	result := make(map[string]string)
+func parseStatusReport(statusReport string) map[string]any {
+	result := make(map[string]any)
 	lines := strings.Split(statusReport, "\n")
 
 	for _, line := range lines {
@@ -83,7 +85,7 @@ func parseStatusReport(statusReport string) map[string]string {
 	return result
 }
 
-func augmentWithDNSStatus(status map[string]string) {
+func augmentWithDNSStatus(status map[string]any) {
 	if status == nil {
 		return
 	}

@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
+	"github.com/eclipse-iofog/edgelet/internal/containerapply"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
@@ -162,6 +164,13 @@ func PodSandboxConfigFromMicroservice(ms *models.Microservice, hostname, logDir,
 		}
 	}
 
+	if len(ms.Sysctls) > 0 {
+		if config.Linux == nil {
+			config.Linux = &runtimeapi.LinuxPodSandboxConfig{}
+		}
+		config.Linux.Sysctls = cloneStringMap(ms.Sysctls)
+	}
+
 	return config
 }
 
@@ -229,16 +238,38 @@ func ContainerConfigFromMicroservice(ms *models.Microservice, hostname string, e
 			secCtx.RunAsUsername = s
 		}
 	}
+	if ms.RunAsGroup != nil && strings.TrimSpace(*ms.RunAsGroup) != "" {
+		s := strings.TrimSpace(*ms.RunAsGroup)
+		if gid, err := strconv.ParseInt(s, 10, 64); err == nil {
+			if secCtx.RunAsUser == nil && secCtx.RunAsUsername == "" {
+				secCtx.RunAsUser = &runtimeapi.Int64Value{Value: 0}
+			}
+			secCtx.RunAsGroup = &runtimeapi.Int64Value{Value: gid}
+		}
+	}
+	secCtx.ReadonlyRootfs = ms.ReadOnlyRootFilesystem
 
 	secCtx.NamespaceOptions = linuxNamespaceOptionsFromMicroservice(ms)
 
-	// Resources: CPU set, memory limit
+	// Resources: CPU set, memory limit, CPU quota, reservation, swap
 	resources := &runtimeapi.LinuxContainerResources{}
 	if ms.CPUSetCpus != nil && *ms.CPUSetCpus != "" {
 		resources.CpusetCpus = *ms.CPUSetCpus
 	}
 	if ms.MemoryLimit != nil && *ms.MemoryLimit > 0 {
 		resources.MemoryLimitInBytes = *ms.MemoryLimit
+	}
+	if ms.Cpus != nil && *ms.Cpus > 0 {
+		resources.CpuPeriod = containerapply.CPUCFSPeriod
+		resources.CpuQuota = containerapply.CPUQuota(*ms.Cpus)
+	}
+	if ms.MemoryReservation != nil && *ms.MemoryReservation > 0 {
+		resources.Unified = map[string]string{
+			"memory.low": strconv.FormatInt(*ms.MemoryReservation, 10),
+		}
+	}
+	if ms.MemorySwap != nil {
+		resources.MemorySwapLimitInBytes = *ms.MemorySwap
 	}
 
 	// Annotations
@@ -261,12 +292,39 @@ func ContainerConfigFromMicroservice(ms *models.Microservice, hostname string, e
 		}
 	}
 
+	var devices []*runtimeapi.Device
+	for _, d := range ms.Devices {
+		perms := strings.TrimSpace(d.Permissions)
+		if perms == "" {
+			perms = "rwm"
+		}
+		devices = append(devices, &runtimeapi.Device{
+			ContainerPath: d.ContainerPath,
+			HostPath:      d.HostPath,
+			Permissions:   perms,
+		})
+	}
+
+	var command []string
+	if !models.UsesImageDefault(ms.Entrypoint) {
+		command = append(command, (*ms.Entrypoint)...)
+	}
+	args := containerapply.CommandArgs(ms)
+
+	workingDir := ""
+	if ms.WorkingDir != nil {
+		workingDir = strings.TrimSpace(*ms.WorkingDir)
+	}
+
 	config := &runtimeapi.ContainerConfig{
 		Metadata:    metadata,
 		Image:       image,
-		Args:        ms.Args,
+		Command:     command,
+		Args:        args,
+		WorkingDir:  workingDir,
 		Envs:        envs,
 		Mounts:      mounts,
+		Devices:     devices,
 		Labels:      labels,
 		Annotations: annotations,
 		LogPath:     logPath,
@@ -275,6 +333,13 @@ func ContainerConfigFromMicroservice(ms *models.Microservice, hostname string, e
 			SecurityContext: secCtx,
 			Resources:       resources,
 		},
+	}
+
+	if fp, err := containerapply.Marshal(containerapply.FromMicroservice(ms)); err == nil && fp != "" && fp != "{}" {
+		if config.Labels == nil {
+			config.Labels = make(map[string]string)
+		}
+		config.Labels[containerapply.LabelFingerprint] = fp
 	}
 
 	return config, nil
@@ -353,7 +418,52 @@ func buildCRIMounts(ms *models.Microservice, hostsFilePath string, resolvFilePat
 		})
 	}
 
+	diskDir := workloadDiskDirectory()
+	if host, dest, readOnly, ok := containerapply.CatalogBind(ms, diskDir); ok {
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: dest,
+			HostPath:      host,
+			Readonly:      readOnly,
+		})
+	}
+
+	for _, t := range ms.Tmpfs {
+		p := strings.TrimSpace(t.ContainerPath)
+		if p == "" {
+			continue
+		}
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: p,
+			HostPath:      containerapply.TmpfsHostDir(diskDir, ms.MicroserviceUUID, p),
+			Readonly:      false,
+		})
+	}
+
+	if ms.ShmSize != nil && *ms.ShmSize > 0 {
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: "/dev/shm",
+			HostPath:      containerapply.ShmHostDir(diskDir, ms.MicroserviceUUID),
+			Readonly:      false,
+		})
+	}
+
 	return mounts, nil
+}
+
+func workloadDiskDirectory() string {
+	cfg := config.GetInstance()
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.DiskDirectory)
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ResolveRuntimeHandler resolves runtime handler using deterministic fallback

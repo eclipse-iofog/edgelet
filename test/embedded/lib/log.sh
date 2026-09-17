@@ -55,6 +55,22 @@ assert_ok() {
     fi
 }
 
+# assert_ok_verbose <description> <command...>
+# Like assert_ok, but prints captured output when the command fails.
+assert_ok_verbose() {
+    local desc="$1"; shift
+    local output=""
+    local status=0
+    output="$("$@" 2>&1)" || status=$?
+    if [[ "${status}" -eq 0 ]]; then
+        log_ok "${desc}"
+        (( TESTS_PASSED++ )) || true
+    else
+        log_fail "${desc} (command exited ${status}; output: ${output})"
+        (( TESTS_FAILED++ )) || true
+    fi
+}
+
 # assert_contains <description> <substring> <command...>
 # Runs a command and checks its output contains the given substring.
 # Captures non-zero exit without tripping set -e (command substitution otherwise aborts).

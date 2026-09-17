@@ -7,7 +7,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/runtimestate"
 )
 
-func augmentWithRuntimeStatus(status map[string]string) {
+func augmentWithRuntimeStatus(status map[string]any) {
 	if status == nil {
 		return
 	}

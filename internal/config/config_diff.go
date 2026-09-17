@@ -85,9 +85,6 @@ func (c *Config) configKeyUnchangedLocked(option string, value any, effectiveEng
 	case "changeFrequency":
 		v, err := strconv.Atoi(incoming)
 		return err == nil && v == c.ChangeFrequency
-	case "deviceScanFrequency":
-		v, err := strconv.Atoi(incoming)
-		return err == nil && v == c.DeviceScanFrequency
 	case "watchdogEnabled":
 		return watchdogEnabledEqual(incoming, c.WatchdogEnabled)
 	case "edgeGuardFrequency":

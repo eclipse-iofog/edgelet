@@ -3,6 +3,7 @@ package edgeletapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -64,6 +65,81 @@ func TestIsAuthorized_AcceptsVerbAliases(t *testing.T) {
 	}
 }
 
+func TestIsAuthorized_ModelRoutesDenyAndAllow(t *testing.T) {
+	denied := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"images"},
+							"verbs":     []any{"get"},
+						},
+					},
+				},
+			},
+		},
+	}
+	perm := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "models", Verb: "get"}
+	if isAuthorized(denied, perm) {
+		t.Fatal("expected models get to be denied without a models rule")
+	}
+
+	allowed := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"models", "models/pull", "models/prune", "deploy/models"},
+							"verbs":     []any{"get", "create", "delete"},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, resource := range []string{"models", "models/pull", "models/prune", "deploy/models"} {
+		p := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: resource, Verb: "get"}
+		if resource != "models" {
+			p.Verb = "create"
+		}
+		if !isAuthorized(allowed, p) {
+			t.Fatalf("expected %s to be allowed", resource)
+		}
+	}
+	if isAuthorized(jwt.MapClaims{"tokenUse": "serviceaccount", "sub": "system:serviceaccount:app:svc"}, perm) {
+		t.Fatal("expected missing token to stay unauthorized")
+	}
+}
+
+func TestMapRequestToPermission_ModelRoutesWithoutTokenStillMap(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	perm, ok := mapRequestToPermission(req)
+	if !ok || perm.Resource != "models" {
+		t.Fatalf("expected models mapping, got ok=%v perm=%+v", ok, perm)
+	}
+}
+
+func TestAuthMiddlewareV1_ModelsDeniedWithoutToken(t *testing.T) {
+	handler := authMiddlewareV1(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without bearer token, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "UNAUTHORIZED") {
+		t.Fatalf("expected UNAUTHORIZED body, got %s", rr.Body.String())
+	}
+}
+
 func TestMapRequestToPermission_ControlPlaneRoutes(t *testing.T) {
 	tests := []struct {
 		method   string
@@ -110,6 +186,14 @@ func TestMapRequestToPermission_SystemSwitchAndCert(t *testing.T) {
 		{method: http.MethodGet, path: "/v1/images:load/abc", resource: "images/load/status", verb: "get"},
 		{method: http.MethodPost, path: "/v1/images:prune", resource: "images/prune", verb: "create"},
 		{method: http.MethodPost, path: "/v1/images:remove", resource: "images/remove", verb: "create"},
+		{method: http.MethodGet, path: "/v1/models", resource: "models", verb: "get"},
+		{method: http.MethodGet, path: "/v1/models/llama-2-7b-q2k", resource: "models", verb: "get"},
+		{method: http.MethodDelete, path: "/v1/models/llama-2-7b-q2k", resource: "models", verb: "delete"},
+		{method: http.MethodPost, path: "/v1/models:pull", resource: "models/pull", verb: "create"},
+		{method: http.MethodGet, path: "/v1/models:pull/op-1", resource: "models/pull/status", verb: "get"},
+		{method: http.MethodPost, path: "/v1/models:prune", resource: "models/prune", verb: "create"},
+		{method: http.MethodPost, path: "/v1/deploy/models:apply", resource: "deploy/models", verb: "create"},
+		{method: http.MethodPost, path: "/v1/deploy/models:validate", resource: "deploy/models", verb: "create"},
 		{method: http.MethodGet, path: "/v1/deploy/microservices:apply/op-123", resource: "deploy/microservices/apply/status", verb: "get"},
 		{method: http.MethodPost, path: "/v1/deploy/runtimeclasses:apply", resource: "deploy/runtimeclasses", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/runtimeclasses:validate", resource: "deploy/runtimeclasses", verb: "create"},

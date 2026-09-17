@@ -46,6 +46,7 @@ type Manager struct {
 	pruneContainersHook func()
 	pruneVolumesHook    func()
 	pruneImagesHook     func()
+	pruneModelsHook     func()
 }
 
 var (
@@ -82,6 +83,13 @@ func (m *Manager) SetEngine(e engine.ContainerEngine) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.containerEngine = e
+}
+
+// SetPruneModelsCallback runs on the same scheduled tick as image prune.
+func (m *Manager) SetPruneModelsCallback(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneModelsHook = fn
 }
 
 // Start starts the Docker Pruning Manager
@@ -223,6 +231,7 @@ func (m *Manager) runScheduledPrune() {
 	m.pruneContainers()
 	m.pruneVolumes()
 	m.pruneImagesRunner()
+	m.pruneModels()
 }
 
 func (m *Manager) pruneContainers() {
@@ -267,6 +276,12 @@ func (m *Manager) pruneImagesRunner() {
 		return
 	}
 	m.pruneImages()
+}
+
+func (m *Manager) pruneModels() {
+	if m.pruneModelsHook != nil {
+		m.pruneModelsHook()
+	}
 }
 
 // pruneImages removes unused images using the unified getUnwantedImagesList() logic

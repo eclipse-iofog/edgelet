@@ -11,7 +11,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/constants"
 )
 
-func augmentWithCgroupStatus(status map[string]string) {
+func augmentWithCgroupStatus(status map[string]any) {
 	if status == nil {
 		return
 	}

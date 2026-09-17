@@ -1,0 +1,65 @@
+# Catalog bind + expanded container fields for local Docker / Lima functional tests.
+# Bind names match test/deployment-yamls/model-hf-tiny.yaml (tiny-gpt2).
+# Do not use docs/edgelet/examples/microservice.yaml here — those models are multi-GB.
+#
+# Apply after the model is Ready:
+#   edgelet deploy -f test/deployment-yamls/model-hf-tiny.yaml
+#   edgelet deploy -f test/deployment-yamls/microservice-catalog-fields.yaml
+#   edgelet ms exec catalog-fields-test -- ls /models/tiny-gpt2/config.json
+#
+# In-place second item: add `- name: smollm2-135m` under items (model-oci-tiny.yaml Ready).
+# Recreate: change bindPath to /weights (or permissions ro → rw).
+# model rm tiny-gpt2 is refused until this microservice is removed.
+
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: catalog-fields-test
+  labels:
+    test: catalog-fields
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: tiny-gpt2
+  container:
+    runAsUser: "0"
+    runAsGroup: "65534"
+    readOnlyRootFilesystem: true
+    workingDir: /tmp
+    entrypoint:
+      - /bin/sh
+    commands:
+      - -lc
+      - sleep 14000
+    cpuSetCpus: "0"
+    cpus: 0.5
+    memoryLimit: 64
+    memoryReservation: 32
+    memorySwap: -1
+    shmSize: 16
+    annotations:
+      test.edgelet.io/suite: catalog-fields
+    sysctls:
+      net.ipv4.tcp_keepalive_time: "600"
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
+    devices:
+      - hostPath: /dev/zero
+        containerPath: /dev/edgelet-zero
+        permissions: r
+    tmpfs:
+      - containerPath: /tmp
+        size: 16
+        mode: "1777"
+    healthCheck:
+      test: ["CMD", "/bin/true"]
+      interval: 30
+      timeout: 5
+      retries: 1
+  schedule: 50

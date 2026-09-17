@@ -394,7 +394,14 @@ func (fa *FieldAgent) getFogStatus() map[string]any {
 		"volumeMountLastUpdate":     volumeMountStatus.LastUpdate,
 		"gpsStatus":                 string(gps.GetInstance().GetStatus().GetHealthStatus()), // Get from GpsManager
 		"availableRuntimes":         controllerRuntimes,
+		"runtimeClasses":            statusreporter.GetAppliedRuntimeClasses(),
+		"availableCdiDevices":       statusreporter.GetAvailableCDIDevices(),
 	}
+
+	modelStatus, activeModels, modelLastUpdate := fa.fogModelStatus()
+	status["modelStatus"] = modelStatus
+	status["activeModels"] = activeModels
+	status["modelLastUpdate"] = modelLastUpdate
 
 	if phase := runtimestate.GetState().AgentPhase(); phase != "" {
 		status["runtimeAgentPhase"] = phase

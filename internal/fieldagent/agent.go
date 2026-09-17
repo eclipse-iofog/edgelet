@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +13,8 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
+	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
+	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/processmanager"
 	"github.com/eclipse-iofog/edgelet/internal/serviceaccount"
@@ -28,8 +28,6 @@ import (
 
 const (
 	moduleName            = "Field Agent"
-	halHWInfoURL          = "http://localhost:54331/hal/hwc/lshw"
-	halUSBInfoURL         = "http://localhost:54331/hal/hwc/lsusb"
 	DeprovisionScopeAll   = "all"
 	DeprovisionScopeLocal = "local"
 )
@@ -55,6 +53,8 @@ type FieldAgent struct {
 	onRegistriesUpdate    func([]*models.Registry) error
 	onConfigsUpdate       func(changedUUIDs []string) error
 	processManager        *processmanager.ProcessManager
+	modelMgr              *modelmanager.Manager
+	modelLastUpdate       int64
 
 	// Microservice management (for MicroserviceManagerInterface)
 	latestMicroservices  []*models.Microservice
@@ -97,6 +97,10 @@ type FieldAgent struct {
 
 	// test hook: replaces processChanges in the changes worker.
 	processChangesFn func(changes map[string]any) bool
+
+	// test hooks: replace on-demand prune steps for the getChanges prune flag.
+	pruneImagesFn func() error
+	pruneModelsFn func() error
 
 	// test hook: replaces controllerReconcile in unit tests.
 	controllerReconcileHook func() error
@@ -320,6 +324,62 @@ func (fa *FieldAgent) SetProcessManager(pm *processmanager.ProcessManager) {
 	fa.mu.Lock()
 	defer fa.mu.Unlock()
 	fa.processManager = pm
+}
+
+// SetModelManager sets the Model manager used for fleet-desired Model ingest.
+func (fa *FieldAgent) SetModelManager(m *modelmanager.Manager) {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	fa.modelMgr = m
+}
+
+func (fa *FieldAgent) modelManager() *modelmanager.Manager {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	if fa.modelMgr != nil {
+		return fa.modelMgr
+	}
+	disk := ""
+	if fa.config != nil {
+		disk = fa.config.DiskDirectory
+	}
+	fa.modelMgr = modelmanager.New(store.GetInstance(), modelpull.Root(disk))
+	fa.modelMgr.SetLiveConfig(fa.config)
+	return fa.modelMgr
+}
+
+func (fa *FieldAgent) pruneDanglingImages() error {
+	if fa != nil && fa.pruneImagesFn != nil {
+		return fa.pruneImagesFn()
+	}
+	if fa == nil || fa.processManager == nil {
+		return errors.New("process manager is not initialized")
+	}
+	_, err := fa.processManager.PruneDanglingImages()
+	return err
+}
+
+func (fa *FieldAgent) pruneUnusedLocalModels() error {
+	if fa != nil && fa.pruneModelsFn != nil {
+		return fa.pruneModelsFn()
+	}
+	if fa == nil {
+		return errors.New("field agent is not initialized")
+	}
+	_, err := fa.modelManager().PruneDangling()
+	return err
+}
+
+func (fa *FieldAgent) setModelLastUpdate(ts int64) {
+	fa.mu.Lock()
+	fa.modelLastUpdate = ts
+	fa.mu.Unlock()
+}
+
+func (fa *FieldAgent) getModelLastUpdate() int64 {
+	fa.mu.RLock()
+	defer fa.mu.RUnlock()
+	return fa.modelLastUpdate
 }
 
 // SetControllerStatus updates the agent controller connection status.
@@ -954,6 +1014,13 @@ func (fa *FieldAgent) clearSQLiteCacheTablesOnDeprovision(preserveLocal bool) {
 	if err := db.ClearControllerRegistries(); err != nil {
 		logging.LogWarn(moduleName, fmt.Sprintf("Error clearing controller_registries table: %v", err))
 	}
+	if err := db.ClearControllerModels(); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Error clearing controller_models table: %v", err))
+	}
+	if err := db.ClearControllerRuntimeClasses(); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Error clearing controller_runtime_classes table: %v", err))
+	}
+	fa.setModelLastUpdate(0)
 	if !preserveLocal {
 		if err := db.ClearLocalWorkloads(); err != nil {
 			logging.LogWarn(moduleName, fmt.Sprintf("Error clearing local_workloads table: %v", err))
@@ -1078,124 +1145,4 @@ func (fa *FieldAgent) Update() error {
 
 func (fa *FieldAgent) shouldPostFogConfigAfterUpdate() bool {
 	return config.IsLastReloadSuccessful()
-}
-
-// SendUSBInfoFromHalToController sends USB information from HAL to the controller
-func (fa *FieldAgent) SendUSBInfoFromHalToController() {
-	logging.LogDebug(moduleName, "Start send USB Info from hal To Controller")
-	if fa.NotProvisioned() {
-		return
-	}
-
-	// Get USB info from HAL
-	usbInfo, err := fa.getHalResponse(halUSBInfoURL)
-	if err != nil {
-		logging.LogDebug(moduleName, "HAL is not enabled for this Iofog Agent at the moment")
-		return
-	}
-
-	if usbInfo == "" {
-		return
-	}
-
-	// Update status reporter
-	statusreporter.GetInstance().UpdateResourceManagerStatus(func(status *models.ResourceManagerStatus) {
-		status.SetUSBConnectionsInfo(usbInfo)
-	})
-
-	ctx, cancel := context.WithTimeout(fa.ctx, 30*time.Second)
-	defer cancel()
-
-	client := fa.getAPIClient()
-	if client == nil {
-		logging.LogError(moduleName, "API client not initialized for HAL USB post", errors.New("api client is nil"))
-		return
-	}
-	err = client.PutJSON(ctx, "hal/usb", map[string]any{
-		"info": usbInfo,
-	})
-	if err != nil {
-		logging.LogError(moduleName, "Error while sending USBInfo from hal to controller", err)
-	}
-
-	logging.LogDebug(moduleName, "Finished send USB Info from hal To Controller")
-}
-
-// SendHWInfoFromHalToController sends hardware information from HAL to the controller
-func (fa *FieldAgent) SendHWInfoFromHalToController() {
-	logging.LogDebug(moduleName, "Start send HW Info from HAL To Controller")
-	if fa.NotProvisioned() {
-		return
-	}
-
-	// Get HW info from HAL
-	hwInfo, err := fa.getHalResponse(halHWInfoURL)
-	if err != nil {
-		logging.LogDebug(moduleName, "HAL is not enabled for this Iofog Agent at the moment")
-		return
-	}
-
-	if hwInfo == "" {
-		return
-	}
-
-	// Update status reporter
-	statusreporter.GetInstance().UpdateResourceManagerStatus(func(status *models.ResourceManagerStatus) {
-		status.SetHWInfo(hwInfo)
-	})
-
-	ctx, cancel := context.WithTimeout(fa.ctx, 30*time.Second)
-	defer cancel()
-
-	client := fa.getAPIClient()
-	if client == nil {
-		logging.LogError(moduleName, "API client not initialized for HAL HW post", errors.New("api client is nil"))
-		return
-	}
-	err = client.PutJSON(ctx, "hal/hw", map[string]any{
-		"info": hwInfo,
-	})
-	if err != nil {
-		logging.LogError(moduleName, "Error while sending HW Info from hal to controller", err)
-	}
-
-	logging.LogDebug(moduleName, "Finished send HW Info from HAL To Controller")
-}
-
-// getHalResponse makes an HTTP GET request to HAL service and returns the response
-func (fa *FieldAgent) getHalResponse(url string) (string, error) {
-	logging.LogDebug(moduleName, "Start get response from HAL")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logging.LogDebug(moduleName, "HAL is not enabled for this Iofog Agent at the moment")
-		return "", err
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HAL service returned status code: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read HAL response: %w", err)
-	}
-
-	logging.LogDebug(moduleName, "Finished get response from HAL")
-	return string(body), nil
 }

@@ -441,6 +441,71 @@ func TestReconcileLocalDesiredRunning_ExitingNonRestartableRecreates(t *testing.
 	}
 }
 
+func TestReconcileLocalDesiredDeleted_DeletesRowWhenContainerGone(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-gc",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "gc-ms",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "deleted",
+		RuntimeState:     "deleting",
+		ImageName:        "busybox:latest",
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.reconcileLocalDesiredDeleted(item, nil, time.Now().Unix())
+	got, err := store.GetInstance().GetLocalWorkload("local-gc")
+	if err == nil && got != nil {
+		t.Fatalf("expected local row deleted, got %+v", got)
+	}
+}
+
+func TestReconcileLocalDesiredDeleted_DoesNotReinsertMissingRow(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	stale := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-missing",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "missing",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "deleted",
+		RuntimeState:     "deleted",
+	}
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.reconcileLocalDesiredDeleted(stale, nil, time.Now().Unix())
+	got, err := store.GetInstance().GetLocalWorkload("local-missing")
+	if err == nil && got != nil {
+		t.Fatal("expected stale deleted reconcile not to insert a tombstone")
+	}
+}
+
+func TestReconcileOneLocalDeployment_StaleRunningSnapshotAfterDeleteIsNoop(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	stale := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-stale",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "stale",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "running",
+		RuntimeState:     "running",
+	}
+	launchCalled := false
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.launchLocalDeploymentFn = func(*models.LocalDeployedMicroservice, int64) {
+		launchCalled = true
+	}
+	pm.reconcileOneLocalDeployment(stale)
+	if launchCalled {
+		t.Fatal("expected missing row not to launch from stale running snapshot")
+	}
+	got, err := store.GetInstance().GetLocalWorkload("local-stale")
+	if err == nil && got != nil {
+		t.Fatal("expected stale running snapshot not to upsert a row")
+	}
+}
+
 func openLocalReconcileTestDB(t *testing.T) {
 	t.Helper()
 	db := store.GetInstance()

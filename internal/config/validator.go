@@ -60,9 +60,6 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.ChangeFrequency < 1 {
 		errors = append(errors, "change frequency must be greater than 0")
 	}
-	if cfg.DeviceScanFrequency < 1 {
-		errors = append(errors, "device scan frequency must be greater than 0")
-	}
 
 	// Validate edge guard frequency
 	if cfg.EdgeGuardFrequency < 0 {
@@ -207,7 +204,7 @@ func ValidateProperty(key, value string) error {
 		if !validLogLevels[strings.ToUpper(value)] {
 			return errors.New("log level must be one of: DEBUG, INFO, WARN, ERROR, FATAL, OFF")
 		}
-	case "statusFrequency", "changeFrequency", "deviceScanFrequency":
+	case "statusFrequency", "changeFrequency":
 		val, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("invalid frequency value: %w", err)

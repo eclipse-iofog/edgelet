@@ -49,6 +49,8 @@ func TestLoadInitialControllerData_LoadsMicroservicesFromController(t *testing.T
 			_, _ = w.Write([]byte(`{"registries":[]}`))
 		case strings.HasSuffix(r.URL.Path, "/agent/volumeMounts"):
 			_, _ = w.Write([]byte(`{"volumeMounts":[]}`))
+		case strings.HasSuffix(r.URL.Path, "/agent/models"):
+			_, _ = w.Write([]byte(`{"models":[]}`))
 		case strings.HasSuffix(r.URL.Path, "/agent/microservices"):
 			microservicesRequested.Store(true)
 			_ = json.NewEncoder(w).Encode(map[string]any{

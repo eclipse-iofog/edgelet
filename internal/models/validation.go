@@ -77,6 +77,10 @@ func ValidateRegistry(r *Registry) error {
 	if r.ID < 0 {
 		return &ValidationError{Field: "id", Message: "registry ID must be non-negative"}
 	}
+	r.NormalizeDefaults()
+	if !ValidRegistryType(r.Type) {
+		return &ValidationError{Field: "type", Message: "registry type must be oci or hf"}
+	}
 	return nil
 }
 

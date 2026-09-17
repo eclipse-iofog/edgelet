@@ -1,0 +1,20 @@
+# Smallest active public Docker AI catalog model for local / Lima tests.
+# Full OCI artifact is always pulled (spec.files is ignored) — about 101 MiB.
+# Do not use docs/edgelet/examples/model.yaml here — those artifacts are multi-GB.
+#
+# Built-in registry id 1 is docker.io (oci).
+# Hub tag for this digest: ai/smollm2:135m (also 135m-q4_K_M).
+# Apply:  edgelet deploy -f test/deployment-yamls/model-oci-tiny.yaml
+# Pull:   edgelet model pull smollm2-135m
+# Optional second catalog item for microservice-catalog-fields.yaml (in-place add).
+
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: smollm2-135m
+spec:
+  repo: ai/smollm2
+  revision: sha256:eb3483481647229668c7625b080c2d6a632bf49535e0714198de5c026d4f41a5
+  registry: 1
+  files: []
+  format: gguf

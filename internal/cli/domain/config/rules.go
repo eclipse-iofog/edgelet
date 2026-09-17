@@ -46,7 +46,6 @@ var configKeyRules = map[string]configKeyRule{
 	"logLevel":               {Key: "logLevel", Aliases: []string{"ll"}, Type: configValueString, Enums: []string{"DEBUG", "INFO", "WARN", "ERROR"}, Help: "log level"},
 	"statusFrequencySeconds": {Key: "statusFrequencySeconds", Aliases: []string{"sf"}, Type: configValueInt, Help: "status frequency (seconds)"},
 	"changeFrequencySeconds": {Key: "changeFrequencySeconds", Aliases: []string{"cf"}, Type: configValueInt, Help: "change polling frequency (seconds)"},
-	"deviceScanFrequency":    {Key: "deviceScanFrequency", Aliases: []string{"sd"}, Type: configValueInt, Help: "device scan frequency (seconds)"},
 	"watchdogEnabled":        {Key: "watchdogEnabled", Aliases: []string{"wd"}, Type: configValueBool, Help: "watchdog enable"},
 	"edgeGuardFrequency":     {Key: "edgeGuardFrequency", Aliases: []string{"egf"}, Type: configValueInt, Help: "edge guard frequency"},
 	"gpsMode":                {Key: "gpsMode", Aliases: []string{"gps"}, Type: configValueString, Enums: []string{"auto", "dynamic", "manual", "off"}, Help: "GPS mode"},

@@ -2,13 +2,16 @@
 # Edgelet Microservice manifest — annotated reference (edgelet.iofog.org/v1)
 #
 # Apply:  edgelet deploy -f microservice.yaml
-# Prose:  docs/edgelet/manifest-reference.md
+# Prose:  docs/edgelet/manifest-reference.md · docs/edgelet/models.md
 # Schema: internal/models/local_deploy_manifest.go
 #
 # Notes:
 #   - Local deploy sets runtime application to "edgelet" (metadata.namespace is
 #     accepted in YAML but not used for application identity today).
-#   - Fields marked "schema only" parse successfully but are not applied yet.
+#   - spec.config is parsed but not applied. All other fields in this file are
+#     applied (healthCheck and annotations included).
+#   - Catalog items must name Ready local models (source: local). Omit spec.models
+#     if the workload does not bind artifacts.
 # =============================================================================
 
 apiVersion: edgelet.iofog.org/v1 # required — must be edgelet.iofog.org/v1
@@ -24,13 +27,22 @@ spec:
   registry: 1                    # optional — local registry row ID (edgelet registry ls)
   schedule: 50                   # optional — ordering hint for reconcile
 
-  # config:                        # optional — schema only (not applied by local deploy yet)
+  # config:                        # optional — parsed; not applied by local deploy
   #   myKey: value
+
+  models:                        # optional — bind Ready model content/ into the container
+    bindPath: /models            # required when items is non-empty — absolute container path
+    permissions: ro              # optional — ro (default) or rw; catalog-level only
+    items:
+      - name: test-model         # Model metadata.name (DNS-1123); container path /models/test-model/
+      - name: qwen3-8-27b        # one directory per name; never send a host content path
 
   container:
     hostNetworkMode: false       # optional — true = host network (no bridge DNS)
     isPrivileged: false          # optional — privileged container
-    runAsUser: "0"               # optional — UID or username
+    runAsUser: "0"               # optional — UID or username (do not use uid:gid when runAsGroup is set)
+    runAsGroup: "0"              # optional — GID or group name
+    readOnlyRootFilesystem: false # optional — true = read-only root; add a /tmp tmpfs if the image needs it
 
     ipcMode: ""                  # optional — e.g. host, shareable, container:<id>
     pidMode: ""                  # optional — e.g. host
@@ -43,7 +55,37 @@ spec:
     capAdd: []                   # optional — Linux capabilities to add
     capDrop: []                  # optional — Linux capabilities to drop
 
-    annotations: {}              # optional — schema only (not applied yet)
+    annotations:                 # optional — applied as container annotations
+      example.io/owner: demo
+
+    sysctls:                     # optional — Kubernetes safe-sysctl allowlist only
+      net.ipv4.tcp_keepalive_time: "600"
+      net.ipv4.tcp_syncookies: "1"
+      # hostNetworkMode: true rejects net.*; ipcMode: host rejects kernel.shm*/msg*/sem* and fs.mqueue.*
+
+    ulimits:                     # optional — map of {soft, hard}; -1 = unlimited; nested cpu is RLIMIT_CPU (seconds)
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 65536
+        hard: 65536
+      memlock:
+        soft: -1
+        hard: -1
+      # allowed keys: core, cpu, data, fsize, locks, memlock, msgqueue, nice, nofile, nproc, rss, rtprio, rttime, sigpending, stack
+
+    cpuSetCpus: ""               # optional — cpuset.cpus (e.g. "0,1")
+    cpus: 2.5                    # optional — Docker --cpus (float CPU count), not node cpuLimit percent
+    memoryLimit: 512             # optional — memory limit in MiB
+    memoryReservation: 128       # optional — soft memory reservation in MiB (limit not required)
+    memorySwap: 1024             # optional — memory+swap total in MiB; -1 = unlimited (limit not required for -1)
+    shmSize: 64                  # optional — /dev/shm size in MiB (not a generic tmpfs entry)
+
+    devices:                     # optional — host /dev nodes; hostPath must be under /dev
+      - hostPath: /dev/null
+        containerPath: /dev/null
+        permissions: rwm         # optional — combination of r, w, m (default rwm)
 
     volumes:
       # type: bind — hostDestination must be an absolute host path
@@ -57,6 +99,13 @@ spec:
         accessMode: rw
         type: volume
 
+    tmpfs:                       # optional — in-memory mounts; size is MiB; no auto-inject of /tmp
+      - containerPath: /tmp
+        size: 64                 # optional MiB; omit = engine default
+        mode: "1777"             # optional octal string
+      - containerPath: /run
+        size: 16
+
     extraHosts:                  # optional — /etc/hosts entries (name + IP)
       - name: custom.local
         address: 10.0.0.10
@@ -67,14 +116,14 @@ spec:
 
     ports:                       # optional — port mappings
       - internal: 1880           # container port
-        external: 1881         # host port
+        external: 1881           # host port
         protocol: tcp            # tcp (default) or udp
 
-    commands: []                 # optional — overrides container CMD
-    cpuSetCpus: ""               # optional — cpuset.cpus (e.g. "0,1")
-    memoryLimit: 512             # optional — memory limit in MiB
+    workingDir: /usr/src/node-red # optional — absolute container working directory
+    entrypoint: []               # optional — omit or [] = image default ENTRYPOINT (do not send empty argv)
+    commands: []                 # optional — omit or [] = image default CMD
 
-    healthCheck:                 # optional — schema only (not wired in local deploy yet)
+    healthCheck:                 # optional — applied (times in seconds)
       test: ["CMD", "curl", "-f", "http://localhost:1880/"]
       interval: 30
       timeout: 5

@@ -4,7 +4,10 @@ Registry operations
 
 ### Synopsis
 
-Manage local registry credentials used for image pulls and deploy manifests.
+Manage local registry credentials used for image and model pulls.
+
+Built-in rows (cannot be edited or removed): id 1 docker.io (oci),
+id 2 from_cache (oci), id 3 https://huggingface.co (hf).
 
 Subcommands: ls, inspect, rm.
 

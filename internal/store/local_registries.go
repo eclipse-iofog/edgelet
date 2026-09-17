@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -8,24 +9,46 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/models"
 )
 
+const registrySelectColumns = "id, url, is_public, user_name, password, user_email, type, ca_b64, insecure"
+
 // UpsertLocalRegistry inserts or updates one local registry row.
 func (d *DB) UpsertLocalRegistry(reg *models.Registry) error {
 	if reg == nil {
 		return errors.New("registry is nil")
 	}
+	reg.NormalizeDefaults()
+	if err := d.CheckLocalRegistryCollision(reg); err != nil {
+		return err
+	}
 	_, err := d.Conn().Exec(
-		`INSERT OR REPLACE INTO local_registries (id, url, is_public, user_name, password, user_email, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO local_registries (id, url, is_public, user_name, password, user_email, type, ca_b64, insecure, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		reg.ID, reg.URL, boolToInt(reg.IsPublic), reg.UserName, reg.Password, reg.UserEmail,
+		reg.Type, reg.CAB64, boolToInt(reg.Insecure),
 		time.Now().Unix(),
 	)
 	return err
 }
 
+// CheckLocalRegistryCollision returns a validate error when id exists with a different (type, url).
+func (d *DB) CheckLocalRegistryCollision(reg *models.Registry) error {
+	if reg == nil {
+		return errors.New("registry is nil")
+	}
+	existing, err := d.GetLocalRegistry(reg.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return models.RegistryIdentityCollision(existing, reg)
+}
+
 // LoadLocalRegistries retrieves all local registries ordered by id.
 func (d *DB) LoadLocalRegistries() ([]*models.Registry, error) {
 	rows, err := d.Conn().Query(
-		"SELECT id, url, is_public, user_name, password, user_email FROM local_registries ORDER BY id",
+		"SELECT " + registrySelectColumns + " FROM local_registries ORDER BY id",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query local_registries: %w", err)
@@ -48,13 +71,10 @@ func (d *DB) LoadLocalRegistries() ([]*models.Registry, error) {
 	return result, rows.Err()
 }
 
-// EnsureDefaultLocalRegistries ensures default public registries exist in local table.
+// EnsureDefaultLocalRegistries ensures built-in public registries exist
+// (docker.io, from_cache, and Hugging Face Hub).
 func (d *DB) EnsureDefaultLocalRegistries() error {
-	defaults := []*models.Registry{
-		models.NewRegistry(1, "docker.io", true, "", "", ""),
-		models.NewRegistry(2, "from_cache", true, "", "", ""),
-	}
-	for _, reg := range defaults {
+	for _, reg := range models.BuiltInLocalRegistries() {
 		if err := d.UpsertLocalRegistry(reg); err != nil {
 			return err
 		}
@@ -71,14 +91,21 @@ func (d *DB) DeleteLocalRegistry(id int) error {
 // GetLocalRegistry gets one local registry by ID.
 func (d *DB) GetLocalRegistry(id int) (*models.Registry, error) {
 	row := d.Conn().QueryRow(
-		"SELECT id, url, is_public, user_name, password, user_email FROM local_registries WHERE id = ?",
+		"SELECT "+registrySelectColumns+" FROM local_registries WHERE id = ?",
 		id,
 	)
-	reg := &models.Registry{}
-	var isPublic int
-	if err := row.Scan(&reg.ID, &reg.URL, &isPublic, &reg.UserName, &reg.Password, &reg.UserEmail); err != nil {
-		return nil, err
+	return scanRegistryRow(row)
+}
+
+// NextLocalRegistryID allocates the next local registry id after built-in rows.
+func (d *DB) NextLocalRegistryID() (int, error) {
+	floor := models.HighestBuiltInLocalRegistryID()
+	var maxID int
+	if err := d.Conn().QueryRow("SELECT COALESCE(MAX(id), ?) FROM local_registries", floor).Scan(&maxID); err != nil {
+		return 0, fmt.Errorf("failed to allocate local registry id: %w", err)
 	}
-	reg.IsPublic = intToBool(isPublic)
-	return reg, nil
+	if maxID < floor {
+		maxID = floor
+	}
+	return maxID + 1, nil
 }

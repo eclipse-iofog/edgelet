@@ -478,6 +478,10 @@ func (pm *ProcessManager) pullControlPlaneImage(ms *models.Microservice, registr
 	if pm == nil || pm.engine == nil || ms == nil || registry == nil {
 		return
 	}
+	if err := models.RequireOCIForImagePull(registry); err != nil {
+		pm.logger.Warnf("control plane image pull rejected: %v", err)
+		return
+	}
 	pullRef, _, fromCache := imageref.ResolveForRegistry(ms.ImageName, registry.URL)
 	opts := &engine.PullImageOptions{Platform: msPlatform(ms)}
 	if !fromCache {

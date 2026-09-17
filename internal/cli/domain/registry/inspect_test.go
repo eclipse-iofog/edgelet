@@ -35,6 +35,8 @@ func TestInspect_PasswordPlain(t *testing.T) {
 				"userName":  "user",
 				"userEmail": "user@example.com",
 				"password":  "secret",
+				"type":      "oci",
+				"insecure":  false,
 			},
 		},
 	}
@@ -44,6 +46,9 @@ func TestInspect_PasswordPlain(t *testing.T) {
 	}
 	if !strings.Contains(result.Human, "PASSWORD: secret") {
 		t.Fatalf("expected plain password in output, got: %q", result.Human)
+	}
+	if !strings.Contains(result.Human, "TYPE: oci") || !strings.Contains(result.Human, "INSECURE: false") {
+		t.Fatalf("expected type and insecure in inspect output, got: %q", result.Human)
 	}
 }
 

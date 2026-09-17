@@ -18,15 +18,24 @@ func resolveRegistryForMicroservice(msm MicroserviceManagerInterface, ms *models
 	if ms.RegistryID <= 0 {
 		return nil, fmt.Errorf("registry is not valid %d", ms.RegistryID)
 	}
+	var resolved *models.Registry
 	if msm != nil {
 		if reg := msm.GetRegistry(ms.RegistryID); reg != nil {
-			return reg, nil
+			resolved = reg
 		}
 	}
-	if reg, err := store.GetInstance().GetLocalRegistry(ms.RegistryID); err == nil && reg != nil {
-		return reg, nil
+	if resolved == nil {
+		if reg, err := store.GetInstance().GetLocalRegistry(ms.RegistryID); err == nil && reg != nil {
+			resolved = reg
+		}
 	}
-	return nil, fmt.Errorf("registry is not valid %d", ms.RegistryID)
+	if resolved == nil {
+		return nil, fmt.Errorf("registry is not valid %d", ms.RegistryID)
+	}
+	if err := models.RequireOCIForImagePull(resolved); err != nil {
+		return nil, err
+	}
+	return resolved, nil
 }
 
 func registryURLFromRegistry(registry *models.Registry) string {

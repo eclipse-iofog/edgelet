@@ -65,12 +65,56 @@ func TestRegistry(t *testing.T) {
 	if reg.ID != 1 || reg.URL != "https://registry.example.com" || !reg.IsPublic {
 		t.Error("Registry creation failed")
 	}
+	if reg.Type != RegistryTypeOCI || reg.CAB64 != "" || reg.Insecure {
+		t.Errorf("NewRegistry should default to oci, empty CA, insecure=false, got %+v", reg)
+	}
 
 	// Test builder
 	builder := NewRegistryBuilder()
 	reg2 := builder.SetID(2).SetURL("https://registry2.example.com").SetIsPublic(false).Build()
 	if reg2.ID != 2 || reg2.URL != "https://registry2.example.com" || reg2.IsPublic {
 		t.Error("RegistryBuilder failed")
+	}
+}
+
+func TestBuiltInLocalRegistries(t *testing.T) {
+	if !IsBuiltInLocalRegistryID(BuiltInRegistryDockerIO) ||
+		!IsBuiltInLocalRegistryID(BuiltInRegistryFromCache) ||
+		!IsBuiltInLocalRegistryID(BuiltInRegistryHuggingFace) {
+		t.Fatal("expected ids 1-3 to be built-in")
+	}
+	if IsBuiltInLocalRegistryID(4) || IsBuiltInLocalRegistryID(0) {
+		t.Fatal("expected id 0 and 4 not to be built-in")
+	}
+	if HighestBuiltInLocalRegistryID() != BuiltInRegistryHuggingFace {
+		t.Fatalf("highest built-in id: got %d", HighestBuiltInLocalRegistryID())
+	}
+
+	got := BuiltInLocalRegistries()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 local built-ins, got %d", len(got))
+	}
+	if got[0].ID != BuiltInRegistryDockerIO || got[0].Type != RegistryTypeOCI || got[0].URL != "docker.io" {
+		t.Fatalf("unexpected docker.io row: %+v", got[0])
+	}
+	if got[1].ID != BuiltInRegistryFromCache || got[1].Type != RegistryTypeOCI || got[1].URL != "from_cache" {
+		t.Fatalf("unexpected from_cache row: %+v", got[1])
+	}
+	if got[2].ID != BuiltInRegistryHuggingFace || got[2].Type != RegistryTypeHF || got[2].URL != DefaultHuggingFaceHubURL {
+		t.Fatalf("unexpected Hugging Face row: %+v", got[2])
+	}
+	if !got[2].IsPublic || got[2].Insecure || got[2].CAB64 != "" {
+		t.Fatalf("Hugging Face built-in must be public TLS with system CAs, got %+v", got[2])
+	}
+
+	ctrl := BuiltInControllerRegistries()
+	if len(ctrl) != 2 {
+		t.Fatalf("expected 2 controller built-ins, got %d", len(ctrl))
+	}
+	for _, reg := range ctrl {
+		if reg.ID == BuiltInRegistryHuggingFace {
+			t.Fatal("controller built-ins must not include Hugging Face Hub")
+		}
 	}
 }
 

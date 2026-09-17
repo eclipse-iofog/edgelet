@@ -84,7 +84,7 @@ profiles:
     containerEngine: edgelet   # linux default
     containerEngineUrl: unix:///run/edgelet/containerd.sock
     pruningFrequency: 24       # hours between image prune cycles
-    watchdogEnabled: true      # orphan container cleanup
+    watchdogEnabled: true      # orphan container cleanup; also disables local models
     arch: auto
     upgradeScanFrequency: 24   # hours between OTA readiness scans
 ```

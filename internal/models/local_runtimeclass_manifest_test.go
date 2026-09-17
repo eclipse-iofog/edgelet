@@ -49,3 +49,12 @@ func TestLocalRuntimeClassManifestValidateMissingHandler(t *testing.T) {
 		t.Fatalf("expected missing-handler validation error, got: %v", err)
 	}
 }
+
+func TestIsReservedRuntimeClassName(t *testing.T) {
+	if !IsReservedRuntimeClassName("crun") || !IsReservedRuntimeClassName("CRUN") {
+		t.Fatal("expected crun to be reserved")
+	}
+	if IsReservedRuntimeClassName("spin") {
+		t.Fatal("expected spin not to be reserved")
+	}
+}

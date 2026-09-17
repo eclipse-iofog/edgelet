@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProcessManagerStatusPruneMicroserviceStatus(t *testing.T) {
 	pm := NewProcessManagerStatus()
@@ -63,5 +66,45 @@ func TestProcessManagerStatusPruneMicroserviceStatus_RemovesInvalidEntries(t *te
 	}
 	if st, ok := pm.MicroservicesStatus["valid-ms"]; !ok || st == nil || st.Status != MicroserviceStateRunning {
 		t.Fatal("expected valid status entry to remain")
+	}
+}
+
+func TestGetJSONMicroservicesStatus_PodIDNextToContainerID(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	withPod := NewMicroserviceStatusWithState(MicroserviceStateRunning)
+	withPod.ContainerID = "app-1"
+	withPod.PodID = "pause-1"
+	pm.SetMicroservicesStatus("ms-edgelet", withPod)
+
+	dockerOnly := NewMicroserviceStatusWithState(MicroserviceStateRunning)
+	dockerOnly.ContainerID = "cid-1"
+	dockerOnly.PodID = "cid-1"
+	pm.SetMicroservicesStatus("ms-docker", dockerOnly)
+
+	missing := NewMicroserviceStatusWithState(MicroserviceStateRunning)
+	missing.ContainerID = "app-2"
+	pm.SetMicroservicesStatus("ms-missing-sandbox", missing)
+
+	raw := pm.GetJSONMicroservicesStatus()
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		t.Fatalf("parse: %v raw=%s", err, raw)
+	}
+	byID := map[string]map[string]any{}
+	for _, item := range items {
+		id, ok := item["id"].(string)
+		if !ok {
+			t.Fatalf("expected id string, got %#v", item["id"])
+		}
+		byID[id] = item
+	}
+	if byID["ms-edgelet"]["containerId"] != "app-1" || byID["ms-edgelet"]["podId"] != "pause-1" {
+		t.Fatalf("edgelet item: %#v", byID["ms-edgelet"])
+	}
+	if byID["ms-docker"]["podId"] != "cid-1" {
+		t.Fatalf("docker item: %#v", byID["ms-docker"])
+	}
+	if _, ok := byID["ms-missing-sandbox"]["podId"]; ok {
+		t.Fatalf("expected missing sandbox to omit podId, got %#v", byID["ms-missing-sandbox"])
 	}
 }

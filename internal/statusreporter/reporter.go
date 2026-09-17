@@ -1,6 +1,7 @@
 package statusreporter
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
+	"github.com/eclipse-iofog/edgelet/internal/cdidevices"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -32,7 +34,6 @@ type StatusReporter struct {
 	// Status objects for each module
 	supervisorStatus                 *models.SupervisorStatus
 	resourceConsumptionManagerStatus *models.ResourceConsumptionManagerStatus
-	resourceManagerStatus            *models.ResourceManagerStatus
 	fieldAgentStatus                 *models.FieldAgentStatus
 	statusReporterStatus             *models.StatusReporterStatus
 	processManagerStatus             *models.ProcessManagerStatus
@@ -66,7 +67,6 @@ func GetInstance() *StatusReporter {
 			config:                           config.GetInstance(),
 			supervisorStatus:                 models.NewSupervisorStatus(numberOfModules),
 			resourceConsumptionManagerStatus: models.NewResourceConsumptionManagerStatus(),
-			resourceManagerStatus:            models.NewResourceManagerStatus(),
 			fieldAgentStatus:                 models.NewFieldAgentStatus(),
 			statusReporterStatus:             models.NewStatusReporterStatus(),
 			processManagerStatus:             models.NewProcessManagerStatus(),
@@ -232,6 +232,8 @@ func (sr *StatusReporter) GetStatusReport() string {
 	result += fmt.Sprintf("Available Network Interfaces : %s\n", availableInterfacesLine)
 	availableRuntimesLine := strings.Join(GetAvailableRuntimes(), ", ")
 	result += fmt.Sprintf("Available Runtimes          : %s\n", availableRuntimesLine)
+	result += fmt.Sprintf("Runtime Classes             : %s\n", formatRuntimeClassesLine(GetAppliedRuntimeClasses()))
+	result += fmt.Sprintf("Available CDI Devices       : %s\n", strings.Join(GetAvailableCDIDevices(), ", "))
 
 	logging.LogDebug(moduleName, "Finished Getting Status Report")
 	return result
@@ -331,6 +333,83 @@ func sortedUniqueStrings(items []string) []string {
 	return out
 }
 
+// GetAppliedRuntimeClasses returns applied RuntimeClasses for status (sorted by name).
+// Docker and podman report an empty list.
+func GetAppliedRuntimeClasses() (out []models.RuntimeClassStatus) {
+	out = make([]models.RuntimeClassStatus, 0)
+	defer func() {
+		if r := recover(); r != nil {
+			logging.LogWarn(moduleName, fmt.Sprintf("applied runtime class status panicked: %v", r))
+			out = []models.RuntimeClassStatus{}
+		}
+	}()
+	cfg := config.GetInstance()
+	engineName := ""
+	if cfg != nil {
+		engineName = cfg.ContainerEngine
+	}
+	if !strings.EqualFold(strings.TrimSpace(engineName), constants.EngineEdgelet) {
+		return out
+	}
+	items, err := listRuntimeClassesForStatus()
+	if err != nil || len(items) == 0 {
+		return out
+	}
+	for _, rc := range items {
+		if rc == nil {
+			continue
+		}
+		rc.Normalize()
+		if rc.Name == "" {
+			continue
+		}
+		source := rc.Source
+		if source == "" {
+			source = models.RuntimeClassSourceLocal
+		}
+		out = append(out, models.RuntimeClassStatus{
+			Name:    rc.Name,
+			Handler: rc.Handler,
+			Source:  source,
+		})
+	}
+	slices.SortFunc(out, func(a, b models.RuntimeClassStatus) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	return out
+}
+
+// GetAvailableCDIDevices returns unique sorted fully-qualified CDI device names.
+func GetAvailableCDIDevices() (devices []string) {
+	devices = []string{}
+	defer func() {
+		if r := recover(); r != nil {
+			logging.LogWarn(moduleName, fmt.Sprintf("CDI device status panicked: %v", r))
+			devices = []string{}
+		}
+	}()
+	engineName := ""
+	if cfg := config.GetInstance(); cfg != nil {
+		engineName = cfg.ContainerEngine
+	}
+	listed := cdidevices.ListAvailable(engineName)
+	if listed == nil {
+		return devices
+	}
+	return listed
+}
+
+func formatRuntimeClassesLine(items []models.RuntimeClassStatus) string {
+	if len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, item.Display())
+	}
+	return strings.Join(parts, ", ")
+}
+
 // Status getters (thread-safe)
 
 // GetSupervisorStatus returns the supervisor status
@@ -360,13 +439,6 @@ func (sr *StatusReporter) GetResourceConsumptionManagerStatus() *models.Resource
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 	return sr.resourceConsumptionManagerStatus
-}
-
-// GetResourceManagerStatus returns the resource manager status
-func (sr *StatusReporter) GetResourceManagerStatus() *models.ResourceManagerStatus {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	return sr.resourceManagerStatus
 }
 
 // GetFieldAgentStatus returns the field agent status
@@ -449,14 +521,6 @@ func (sr *StatusReporter) UpdateResourceConsumptionManagerStatus(fn func(*models
 	defer sr.mu.Unlock()
 	sr.statusReporterStatus.SetLastUpdate(time.Now().UnixMilli())
 	fn(sr.resourceConsumptionManagerStatus)
-}
-
-// UpdateResourceManagerStatus updates the resource manager status securely
-func (sr *StatusReporter) UpdateResourceManagerStatus(fn func(*models.ResourceManagerStatus)) {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	sr.statusReporterStatus.SetLastUpdate(time.Now().UnixMilli())
-	fn(sr.resourceManagerStatus)
 }
 
 // UpdateFieldAgentStatus updates the field agent status securely

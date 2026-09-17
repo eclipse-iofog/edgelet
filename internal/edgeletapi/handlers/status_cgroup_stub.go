@@ -2,6 +2,6 @@
 
 package handlers
 
-func augmentWithCgroupStatus(map[string]string) {}
+func augmentWithCgroupStatus(map[string]any) {}
 
 func shouldAugmentCgroupStatus() bool { return false }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/containerapply"
 	"github.com/eclipse-iofog/edgelet/internal/dnsresolver"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
@@ -550,6 +551,14 @@ func (c *Client) AreMicroserviceAndContainerEqual(containerID string, ms *models
 		return false
 	}
 
+	label := ""
+	if inspect.Config != nil && inspect.Config.Labels != nil {
+		label = inspect.Config.Labels[containerapply.LabelFingerprint]
+	}
+	if !containerapply.MatchesLabel(label, ms) {
+		return false
+	}
+
 	return true
 }
 
@@ -777,7 +786,6 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 	config := &container.Config{
 		Image: ms.ImageName,
 		Env:   envVars,
-		Cmd:   ms.Args,
 	}
 
 	// Set user
@@ -955,6 +963,16 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 		healthConfig := buildHealthCheck(ms.Healthcheck)
 		if healthConfig != nil {
 			config.Healthcheck = healthConfig
+		}
+	}
+
+	diskDir := ""
+	if cfg != nil {
+		diskDir = strings.TrimSpace(cfg.DiskDirectory)
+	}
+	for _, w := range applyWorkloadCreateConfig(config, hostConfig, ms, diskDir) {
+		if c.logger != nil {
+			c.logger.Warn(w)
 		}
 	}
 

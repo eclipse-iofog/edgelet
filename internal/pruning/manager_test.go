@@ -59,16 +59,17 @@ func TestShouldRunImmediateFrequencyPrune(t *testing.T) {
 }
 
 func TestRunScheduledPrune_Order(t *testing.T) {
-	order := make([]string, 0, 3)
+	order := make([]string, 0, 4)
 	m := &Manager{
 		pruneContainersHook: func() { order = append(order, "containers") },
 		pruneVolumesHook:    func() { order = append(order, "volumes") },
 		pruneImagesHook:     func() { order = append(order, "images") },
+		pruneModelsHook:     func() { order = append(order, "models") },
 	}
 
 	m.runScheduledPrune()
-	if len(order) != 3 || order[0] != "containers" || order[1] != "volumes" || order[2] != "images" {
-		t.Fatalf("expected prune order containers->volumes->images, got %v", order)
+	if len(order) != 4 || order[0] != "containers" || order[1] != "volumes" || order[2] != "images" || order[3] != "models" {
+		t.Fatalf("expected prune order containers->volumes->images->models, got %v", order)
 	}
 }
 
@@ -107,16 +108,17 @@ func TestTriggerPruneOnThresholdBreach_UsesScheduledOrder(t *testing.T) {
 		rcm.AvailableDisk = 10
 	})
 
-	order := make([]string, 0, 3)
+	order := make([]string, 0, 4)
 	m := &Manager{
 		config:              cfg,
 		pruneContainersHook: func() { order = append(order, "containers") },
 		pruneVolumesHook:    func() { order = append(order, "volumes") },
 		pruneImagesHook:     func() { order = append(order, "images") },
+		pruneModelsHook:     func() { order = append(order, "models") },
 	}
 
 	m.triggerPruneOnThresholdBreach()
-	if len(order) != 3 || order[0] != "containers" || order[1] != "volumes" || order[2] != "images" {
-		t.Fatalf("expected threshold prune order containers->volumes->images, got %v", order)
+	if len(order) != 4 || order[0] != "containers" || order[1] != "volumes" || order[2] != "images" || order[3] != "models" {
+		t.Fatalf("expected threshold prune order containers->volumes->images->models, got %v", order)
 	}
 }

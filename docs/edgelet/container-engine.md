@@ -146,6 +146,15 @@ imports = ["/var/lib/edgelet-containerd/config.d/*.toml"]
    ```
    Restart the data plane after changing containerd CDI settings.
 
+**Host discovery vs per-microservice injection:**
+
+| Surface | Meaning |
+|---------|---------|
+| Fog / local status `availableCdiDevices` | Unique sorted **fully-qualified** names found on the host (`nvidia.com/gpu=0`). Linux `edgelet` engine scans `/etc/cdi`, `/var/run/cdi`, plus extra `cdi_spec_dirs` from containerd `config.d`. Docker, podman, and desktop: `[]` |
+| `cdiDevices` on the microservice | Which of those names to inject into **this** workload |
+
+Discovery does not attach a device. Listing a name in `cdiDevices` does.
+
 **Per-microservice devices:** request fully-qualified CDI device names on the microservice spec. Controller (Pot) and local deploy use the same field:
 
 ```yaml
@@ -157,6 +166,16 @@ spec:
 ```
 
 Edgelet maps `cdiDevices` → CRI `CDIDevices` on the embedded engine and to Docker `DeviceRequest` (`driver: cdi`) when `containerEngine: docker`. **Podman** does not wire `cdiDevices` today.
+
+### Podman field coverage
+
+Podman create reuses the Docker HostConfig mapping (catalog bind, entrypoint/commands/workingDir, runAsGroup, read-only root, tmpfs, shm, cpus, memory reservation/swap, sysctls, ulimits, and `/dev` devices). Inspect shows whatever the Podman API stored; Edgelet does not invent applied state that inspect omitted.
+
+| Field | Podman |
+|-------|--------|
+| Catalog bind, process, resources, sysctls, ulimits, devices | Sent as Docker HostConfig (same as `containerEngine: docker`) |
+| `cdiDevices` | Not wired |
+| Engine recreate | Uses the stored apply snapshot (bindPath and catalog permissions, not catalog item membership) |
 
 | Mechanism | Purpose |
 |-----------|---------|
@@ -181,17 +200,32 @@ On linux, use systemd `After=docker.service` (or podman) when relying on an exte
 
 Manual lifecycle (`edgelet ms start`, `stop`, `restart`) behavior may differ per engine — see OpenAPI notes for engine-specific semantics.
 
+### Registry TLS on image pull
+
+The **edgelet** engine applies registry `ca` (extra PEM, in addition to system CAs) and `insecure` (`http://` and skip TLS verify) when pulling container images — the same rules as model artifact pull.
+
+**Docker** and **Podman** image pull use daemon credentials only. Per-registry `ca` and `insecure` are not applied by those engines.
+
 ---
 
 ## RuntimeClass (edgelet engine only)
 
-Runtime extensions use EdgeletAPI deploy manifests:
+Runtime extensions use EdgeletAPI deploy manifests **or** fleet attach from the controller:
 
 - `apiVersion: edgelet.iofog.org/v1`
 - `kind: RuntimeClass`
 - fields: `metadata.name`, `handler`
 
-Each `metadata.name` registers one canonical runtime handler. Network scope (`managed` vs `local`) is selected via workload CNI policy, not by synthesizing handler variants.
+Each `metadata.name` registers one canonical runtime handler. Provenance is `source`: `local` (CLI/API apply) or `managed` (controller). While the node is provisioned, a **managed** class **wins** that name — local apply of a managed name is rejected. Docker and podman ignore fleet RuntimeClass rows; status `runtimeClasses` is `[]`.
+
+Catalog handlers (`spin`, `edgelet-wasmtime`, `wasmtime`, `wasmedge`, `nvidia-cdi`, …) apply **without** bouncing the data plane. A non-catalog handler **may** restart the data plane. Delete is refused while any microservice still uses the class.
+
+Fog and local status:
+
+- `availableRuntimes` — discovered host handlers (names only), including catalog handlers that are not applied
+- `runtimeClasses` — **applied** classes only: `{ name, handler, source }`, sorted by name
+
+Network scope (`managed` vs `local`) for CNI is selected via workload policy, not by synthesizing handler variants.
 
 Built-in catalog handlers include `spin`, `edgelet-wasmtime` (Datasance WASM shim), and upstream `wasmtime` / `wasmedge` when the matching shim binary is on `PATH`. Shim binaries are discovered from `PATH` (for example `containerd-shim-edgelet-v2` for handler `edgelet-wasmtime`).
 

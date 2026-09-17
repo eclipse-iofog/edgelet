@@ -7,7 +7,7 @@ The Field Agent is the **Controller client**. It polls the remote ioFog Controll
 ## Purpose
 
 - Maintain connection and trust with the Controller (ping, certificate verification)
-- Poll `config/changes` and apply microservice, registry, and volume mount deltas
+- Poll `config/changes` and apply microservice, registry, volume mount, model, and RuntimeClass deltas
 - Hydrate agent credentials and Edge Guard signature from SQLite
 - Notify Process Manager when desired microservice set changes
 - POST status/diagnostics on a configurable interval
@@ -38,7 +38,7 @@ Entry: `(*FieldAgent).Start()` in `agent.go`.
 1. Create `APIClient` and `Orchestrator` (Controller HTTPS)
 2. Hydrate `private_key` from `agent_credentials` table; reset JWT manager if missing
 3. If unprovisioned with `edgeGuardFrequency > 0`, force frequency to 0
-4. If provisioned: load initial microservices, registries, volume mounts from Controller into SQLite; notify Process Manager
+4. If provisioned: load initial microservices, registries, volume mounts, models, and RuntimeClasses from Controller into SQLite; notify Process Manager
 5. Start six background workers (see below)
 
 ### Stop
@@ -109,6 +109,8 @@ Field Agent is the primary writer for Controller-sourced rows:
 | `controller_microservices` | Desired microservices from Controller |
 | `controller_registries` | Registry credentials |
 | `controller_volume_mounts` | Secrets/configmaps |
+| `controller_models` | Fleet model snapshot |
+| `controller_runtime_classes` | Fleet RuntimeClass snapshot (`name` + `handler`) |
 | `agent_credentials` | Agent Ed25519 private key (singleton row) |
 | `agent_edgeguard_signature` | Last attested Edge Guard JWT |
 

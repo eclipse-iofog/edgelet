@@ -28,6 +28,14 @@ func FormatApplyHuman(result map[string]any) string {
 				return fmt.Sprintf("registry manifest applied successfully (id=%s url=%s)", output.MapValueAsString(reg, "id"), output.MapValueAsString(reg, "url"))
 			}
 			return "registry manifest applied successfully"
+		case "model":
+			if item, ok := result["model"].(map[string]any); ok {
+				return fmt.Sprintf("model manifest applied successfully (name=%s)", output.MapValueAsString(item, "name"))
+			}
+			if name := output.MapValueAsString(result, "name"); name != "<unknown>" {
+				return fmt.Sprintf("model manifest applied successfully (name=%s)", name)
+			}
+			return "model manifest applied successfully"
 		case "microservice":
 			if id := output.MapValueAsString(result, "deploymentId"); id != "<unknown>" {
 				return fmt.Sprintf("microservice manifest applied successfully (deploymentId=%s)", id)

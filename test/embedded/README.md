@@ -131,6 +131,8 @@ Output: **`build/edgelet-linux-<arch>`** — unified linux thin binary (CLI + em
 | 6 | CLI: `version`, `info` shows engine=edgelet |
 | 7 | Chaos gates (restart storm + child crash recovery) |
 | 8 | RuntimeClass dual-shim flow (Spin + Edgelet), restart convergence, availableRuntimes, runtime-pinned workloads |
+| 9 | Built-in registries (ids 1–3 immutable); tiny HF pull (`hf-internal-testing/tiny-random-gpt2`); tiny OCI pull (`ai/smollm2` 135m, ~101 MiB) |
+| 10 | Catalog bind (`{bindPath}/{name}/`); unknown-name apply reject; `model rm` refuse while bound; in-place add item; bindPath recreate; container fields (cpus, memory, shm, tmpfs, sysctls, ulimits, devices, runAsGroup, read-only root) |
 
 ## RuntimeClass dual-shim coverage (Lima arm64)
 

@@ -9,6 +9,7 @@ type MicroserviceStatus struct {
 	CPUUsage       float32           `json:"cpuUsage" yaml:"cpuUsage"`
 	MemoryUsage    int64             `json:"memoryUsage" yaml:"memoryUsage"`
 	ContainerID    string            `json:"containerId" yaml:"containerId"`
+	PodID          string            `json:"podId,omitempty" yaml:"podId,omitempty"`
 	Percentage     float32           `json:"percentage" yaml:"percentage"`
 	ErrorMessage   *string           `json:"errorMessage,omitempty" yaml:"errorMessage,omitempty"`
 	IPAddress      *string           `json:"ipAddress,omitempty" yaml:"ipAddress,omitempty"`

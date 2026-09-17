@@ -39,7 +39,7 @@ func TestHandleStatus_IncludesCgroupKeysForEmbeddedEdgeletEngine(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.HandleStatus(rec, req)
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode status payload: %v", err)
 	}

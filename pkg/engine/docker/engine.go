@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eclipse-iofog/edgelet/internal/constants"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/pkg/docker"
 	"github.com/eclipse-iofog/edgelet/pkg/engine"
@@ -250,7 +251,14 @@ func (e *Engine) RemoveNamedVolume(_ context.Context, name string) error {
 // --- Inspection / stats ---
 
 func (e *Engine) GetContainerStatus(containerID, microserviceUUID string) (*models.MicroserviceStatus, error) {
-	return e.client.GetMicroserviceStatus(containerID, microserviceUUID)
+	status, err := e.client.GetMicroserviceStatus(containerID, microserviceUUID)
+	if err != nil {
+		return nil, err
+	}
+	if status != nil {
+		status.ApplyPodID(constants.EngineDocker, "")
+	}
+	return status, nil
 }
 
 func (e *Engine) GetContainerStats(containerID string) (*engine.ContainerStats, error) {

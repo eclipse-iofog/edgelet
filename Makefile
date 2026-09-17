@@ -373,7 +373,6 @@ install-dev: build-edgelet-local ## Install edgelet and setup local dev environm
 			'    logLevel: "DEBUG"' \
 			'    statusFrequency: "30"' \
 			'    changeFrequency: "60"' \
-			'    scanDevicesFreq: "60"' \
 			'    gps: "auto"' \
 			'    gpsCoordinates: "0,0"' \
 			'    gpsDevice: ""' \

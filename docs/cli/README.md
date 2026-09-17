@@ -78,6 +78,7 @@ Remote command exit codes from `ms exec` propagate directly (e.g. container exit
 | `ms` | `ls`, `inspect`, `logs`, `exec`, `start`, `stop`, `restart`, `kill`, `rm` |
 | `deploy` | `-f FILE [--dry-run] [--sourceName]` |
 | `registry` / `runtimeclass` / `image` | `ls`, `inspect`, `rm` (+ image `pull`, `load`, `prune`) |
+| `model` | `pull`, `ls`, `inspect`, `prune`, `rm` |
 | `auth` | `whoami`, `tokens`, `revoke` |
 
 ## Examples
@@ -94,6 +95,9 @@ edgelet ms exec <uuid> -- /bin/sh
 
 edgelet registry ls -o json
 edgelet image pull docker.io/library/alpine:3.19
+edgelet model ls
+edgelet model pull llama-2-7b-q2k
+edgelet model pull tiny-gpt2 --repo hf-internal-testing/tiny-random-gpt2 --registry 3 --files config.json
 
 edgelet auth whoami -o json
 ```

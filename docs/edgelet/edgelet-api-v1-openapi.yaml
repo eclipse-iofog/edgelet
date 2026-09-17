@@ -353,6 +353,127 @@ paths:
           $ref: "#/components/responses/NotFound"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/models:
+    get:
+      tags: [Models]
+      summary: List local models
+      responses:
+        "200":
+          description: Model list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models/{name}:
+    get:
+      tags: [Models]
+      summary: Inspect a local model
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Model item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelItemResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Models]
+      summary: Remove a local model and on-disk artifacts
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:pull:
+    post:
+      tags: [Models]
+      summary: Pull model artifacts (async)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelPullRequest"
+      responses:
+        "202":
+          description: Pull accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPullOperationStatusResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:pull/{operationId}:
+    get:
+      tags: [Models]
+      summary: Get model pull operation status
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pull operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPullOperationStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:prune:
+    post:
+      tags: [Models]
+      summary: Prune dangling models
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum: [dangling]
+            default: dangling
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/system/gps:
     get:
       tags: [System]
@@ -1113,6 +1234,40 @@ paths:
           description: Deletion result
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/models:apply:
+    post:
+      tags: [Deploy]
+      summary: Apply local Model YAML (persist, then start pulls)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Apply result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/models:validate:
+    post:
+      tags: [Deploy]
+      summary: Validate local Model YAML
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Validation result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/deploy/controlplane:apply:
     post:
       tags: [Deploy]
@@ -1511,7 +1666,10 @@ components:
               type: string
     SystemStatus:
       type: object
-      required: [daemonStatus, controllerConnection, engine, runningMicroservices]
+      description: >
+        GET /v1/system/status is a JSON object. Existing scalars stay strings.
+        runtimeClasses and availableCdiDevices are typed arrays (not comma-joined strings).
+      additionalProperties: true
       properties:
         daemonStatus:
           type: string
@@ -1529,6 +1687,32 @@ components:
           type: number
         uptimeSeconds:
           type: integer
+        availableRuntimes:
+          type: array
+          description: Discovered host runtime handler names
+          items:
+            type: string
+        runtimeClasses:
+          type: array
+          description: Applied RuntimeClass rows only, sorted by name
+          items:
+            $ref: "#/components/schemas/RuntimeClassStatus"
+        availableCdiDevices:
+          type: array
+          description: Unique sorted fully-qualified CDI device names (linux edgelet engine); empty on docker/podman/desktop
+          items:
+            type: string
+    RuntimeClassStatus:
+      type: object
+      required: [name, handler, source]
+      properties:
+        name:
+          type: string
+        handler:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
     ControlPlaneStatus:
       type: object
       required: [controllerUuid, namespace, name, runtimeState, source, type]
@@ -1847,6 +2031,147 @@ components:
               type: string
             message:
               type: string
+    ModelListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ModelItem"
+            count:
+              type: integer
+    ModelItemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/ModelItem"
+    ModelItem:
+      type: object
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
+          description: Provenance on this node. List and inspect both include source.
+        uuid:
+          type: string
+          description: Controller model uuid when source is managed (inspect only).
+        bindRefCount:
+          type: integer
+          description: Microservices that currently bind this name (inspect only).
+        repo:
+          type: string
+        revision:
+          type: string
+        registryId:
+          type: integer
+        files:
+          type: array
+          items:
+            type: string
+        format:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Pulling, Ready, Failed]
+        generation:
+          type: integer
+          format: int64
+        observedGeneration:
+          type: integer
+          format: int64
+        revisionFloating:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+        lastError:
+          type: string
+        resolvedRevision:
+          type: string
+        digest:
+          type: string
+    ModelPullRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        repo:
+          type: string
+          description: Repository path without host. Required with registryId when upserting.
+        revision:
+          type: string
+        registryId:
+          type: integer
+          description: Local registry id. Required with repo when upserting.
+        files:
+          type: array
+          items:
+            type: string
+          description: HF file paths or globs. Ignored for OCI.
+        format:
+          type: string
+          description: Hint only (gguf, safetensors, onnx, pytorch, tensorrt, unknown).
+    ModelPullOperationStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            operationId:
+              type: string
+            status:
+              type: string
+              enum: [running, succeeded, failed]
+            progress:
+              type: integer
+            name:
+              type: string
+            bytesDownloaded:
+              type: integer
+              format: int64
+            bytesTotal:
+              type: integer
+              format: int64
+            registryId:
+              type: integer
+            error:
+              type: string
+            startedAt:
+              type: string
+            endedAt:
+              type: string
+    ModelPruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [dangling]
+            removed:
+              type: array
+              items:
+                type: string
+            blobsRemoved:
+              type: integer
+            staleCleaned:
+              type: integer
     MicroserviceRef:
       type: object
       required: [uuid, name, source, state]
@@ -1865,6 +2190,11 @@ components:
           type: string
         containerId:
           type: string
+        podId:
+          type: string
+          description: >
+            Pause/sandbox id on the edgelet engine; same as containerId on docker/podman.
+            Omitted when unknown. Never an empty string.
     MicroserviceDetail:
       allOf:
         - $ref: "#/components/schemas/MicroserviceRef"
@@ -1894,6 +2224,25 @@ components:
             errorMessage:
               type: string
               nullable: true
+            models:
+              type: object
+              description: Catalog bind when the microservice lists model items
+              properties:
+                bindPath:
+                  type: string
+                permissions:
+                  type: string
+                  enum: [ro, rw]
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+            statusText:
+              type: string
+              description: Wait or fail text when a bound model is still downloading or Failed
     LogsResponse:
       type: object
       required: [entries]
@@ -1992,9 +2341,26 @@ components:
             registry:
               type: integer
               description: Optional local registry id from /v1/deploy/registries
+            models:
+              type: object
+              description: Catalog bind of Ready local models at bindPath/{name}/
+              properties:
+                bindPath:
+                  type: string
+                permissions:
+                  type: string
+                  enum: [ro, rw]
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
             container:
               type: object
-              description: Container runtime options (volumes, ports, env, etc.)
+              description: Container runtime options (volumes, ports, env, catalog-related fields, healthCheck, annotations)
             schedule:
               type: integer
             config:

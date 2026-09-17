@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -156,6 +157,7 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 		Status            string   `json:"status"`
 		Percentage        float32  `json:"percentage"`
 		ContainerID       string   `json:"containerId,omitempty"`
+		PodID             string   `json:"podId,omitempty"`
 		StartTime         int64    `json:"startTime,omitempty"`
 		OperatingDuration int64    `json:"operatingDuration,omitempty"`
 		CPUUsage          string   `json:"cpuUsage,omitempty"`
@@ -176,6 +178,9 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 
 		if status.ContainerID != "" {
 			msStatus.ContainerID = status.ContainerID
+			if podID := strings.TrimSpace(status.PodID); podID != "" {
+				msStatus.PodID = podID
+			}
 			msStatus.StartTime = status.StartTime
 			msStatus.OperatingDuration = status.GetOperatingDuration()
 			if status.CPUUsage > 0 {

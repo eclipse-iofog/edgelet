@@ -12,6 +12,8 @@ The **EdgeletAPI** is the on-device operator API exposed by the Edgelet daemon. 
 | [edgelet-api-v1-rbac-resources.md](edgelet-api-v1-rbac-resources.md) | Endpoint → RBAC resource/verb mapping (deny-by-default) |
 | [../cli/README.md](../cli/README.md) | CLI command reference |
 | [../cli/output-schemas.md](../cli/output-schemas.md) | JSON/YAML output shapes for `-o json` |
+| [models.md](models.md) | Model artifact lifecycle |
+| [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller JSON contract (status, RuntimeClass, catalog, prune) |
 
 ---
 
@@ -196,6 +198,7 @@ Daemon administration: status, info, version, provision/deprovision, config get/
 
 Notable behaviors:
 
+- `GET /v1/system/status` — daemon status object. Existing scalars stay strings. `runtimeClasses` is applied classes `{ name, handler, source }`; `availableCdiDevices` is fully-qualified CDI names (empty on docker/podman/desktop).
 - `POST /v1/system/reload` — SIGHUP-style config reload; rejected changes do not mutate on-disk config
 - `POST /v1/system/provision` / `DELETE /v1/system/provision` — agent lifecycle; affects JWT mode
 - `GET /v1/system/controlplane` — local Datasance Controller deployment status (see [control-plane.md](control-plane.md))
@@ -206,7 +209,7 @@ Notable behaviors:
 Runtime view and lifecycle for workloads (managed, local, and control-plane sources):
 
 - `GET /v1/ms` — list microservices; **`source` query only**: `managed`, `local`, `controlplane`, or `all` (default). Pagination filters (`cursor`, `limit`, `application`, `name`, `state`) are not implemented.
-- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`)
+- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`). Includes catalog `models` (`bindPath`, `permissions`, `items[].name`) when bound, `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`), and `statusText` when the start gate is waiting for download or a bound model Failed.
 - Lifecycle: `start`, `stop`, `restart`, `kill`
 - Logs: `GET .../logs` (HTTP); `GET .../logs:stream` (WebSocket follow)
 - Exec: session create/get/delete; `GET .../exec/sessions/{sessionId}:attach` (interactive WebSocket). See [exec-sessions.md](exec-sessions.md) for multi-session behavior, the 15s start wait, and `EXEC_START_TIMEOUT`.
@@ -218,7 +221,8 @@ Manifest-driven local persistence and apply:
 | Kind | Apply | Validate | List/get/delete |
 |------|-------|----------|-----------------|
 | Microservice | `POST .../microservices:apply` | `...:validate` | `GET/DELETE .../microservices/{id}` |
-| Registry | `POST .../registries:apply` | `...:validate` | `GET/DELETE .../registries/{id}` |
+| Registry | `POST .../registries:apply` | `...:validate` | `GET/DELETE .../registries/{id}` (ids 1–3 are built-in and cannot be edited or removed) |
+| Model | `POST .../models:apply` | `...:validate` | runtime view via `/v1/models` |
 | RuntimeClass | `POST .../runtimeclasses:apply` | `...:validate` | `GET/DELETE .../runtimeclasses/{name}` |
 | ControlPlane | `POST .../controlplane:apply` (async) | `...:validate` | status via `/v1/system/controlplane` |
 
@@ -236,7 +240,7 @@ Apply uses `multipart/form-data`:
 
 Poll: `GET /v1/deploy/{kind}:apply/{operationId}` (and RuntimeClass delete status route).
 
-Registry apply is synchronous. ControlPlane apply is asynchronous by default (long container pull/start).
+Registry apply is synchronous. Model apply persists desired state and starts artifact pulls (`pulls` in the response). ControlPlane apply is asynchronous by default (long container pull/start).
 
 ### `/v1/auth/*`
 
@@ -248,7 +252,22 @@ Registry apply is synchronous. ControlPlane apply is asynchronous by default (lo
 
 ### `/v1/images/*`
 
-Engine image operations: list, pull (with async status poll), load, prune, remove. Requires a healthy container engine.
+Engine image operations: list, pull (with async status poll), load, prune, remove. Requires a healthy container engine. Image pull rejects registries with `type` other than `oci`.
+
+### `/v1/models/*`
+
+Model artifact operations (not container images). Operator guide: [models.md](models.md).
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/models` | List deployed models (`source` is `local` or `managed`) |
+| `GET /v1/models/{name}` | Inspect (`source`; managed rows also include `uuid` and `bindRefCount`) |
+| `POST /v1/models:pull` | Start async pull — HTTP 202. Body `{"name"}` retries an existing row; optional `repo`, `revision`, `registryId`, `files`, `format` upsert then pull |
+| `GET /v1/models:pull/{operationId}` | Pull progress / terminal status |
+| `POST /v1/models:prune` | Dangling prune (`?mode=dangling`) — unused local models (managed names kept) |
+| `DELETE /v1/models/{name}` | Remove row and on-disk artifacts |
+
+Local Model apply is refused while `watchdogEnabled` is on.
 
 ### Microservice self routes
 

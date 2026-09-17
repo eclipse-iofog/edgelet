@@ -10,7 +10,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [modules/README.md](modules/README.md) | Runtime module deep dives (all tiers) |
 | [installation.md](installation.md) | install.sh, OTA, upgrade/rollback, controller readiness |
 | [deployment.md](deployment.md) | Production topology, engines, systemd, provisioning |
-| [persistence.md](persistence.md) | SQLite backup/restore, wipe-only upgrade, secrets threat model |
+| [persistence.md](persistence.md) | SQLite backup/restore, schema v2 in-place upgrade, secrets threat model |
 | [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity |
 | [logging.md](logging.md) | Structured events, log levels, journald queries |
 
@@ -26,7 +26,8 @@ Operator and developer documentation for the Edgelet edge agent.
 | [edgeguard.md](edgeguard.md) | Hardware attestation (`edgeGuardFrequency`) |
 | [control-plane.md](control-plane.md) | Local Datasance Controller deployment |
 | [exec-sessions.md](exec-sessions.md) | Multi-session exec (local CLI and controller-initiated) |
-| [manifest-reference.md](manifest-reference.md) | Deploy YAML (`Microservice`, `Registry`, `RuntimeClass`, `ControlPlane`) |
+| [manifest-reference.md](manifest-reference.md) | Deploy YAML (`Microservice`, `Registry`, `Model`, `RuntimeClass`, `ControlPlane`) |
+| [models.md](models.md) | Model artifact pull, catalog bind, prune, on-disk layout |
 | [examples/](examples/) | Reference manifest YAML samples |
 
 ## EdgeletAPI
@@ -36,6 +37,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [edgelet-api-v1.md](edgelet-api-v1.md) | Operator guide — transport, auth, errors, route behavior |
 | [edgelet-api-v1-openapi.yaml](edgelet-api-v1-openapi.yaml) | OpenAPI 3.1 contract |
 | [edgelet-api-v1-rbac-resources.md](edgelet-api-v1-rbac-resources.md) | RBAC resource/verb mapping |
+| [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller contract: HAL drop, RuntimeClass, status keys, catalog flag, image TLS, prune |
 
 ## Migration
 

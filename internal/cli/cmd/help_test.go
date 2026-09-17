@@ -276,7 +276,9 @@ func TestHelp_RegistryShowsIntroAndExamples(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q", code, stdout)
 	}
-	if !strings.Contains(stdout, "Subcommands: ls, inspect, rm") || !strings.Contains(stdout, "--password-plain") {
+	if !strings.Contains(stdout, "Subcommands: ls, inspect, rm") ||
+		!strings.Contains(stdout, "--password-plain") ||
+		!strings.Contains(stdout, "https://huggingface.co") {
 		t.Fatalf("expected registry group help, got stdout=%q", stdout)
 	}
 }
@@ -335,6 +337,43 @@ func TestHelp_AuthRevokeShowsJTISyntax(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "revoke <jti>") {
 		t.Fatalf("expected revoke jti syntax in help, got stdout=%q", stdout)
+	}
+}
+
+func TestHelp_ModelPullShowsSpecFlags(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "model", "pull", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"pull <name>", "--repo", "--revision", "--registry", "-r", "--files", "--format"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in model pull help, got stdout=%q", want, stdout)
+		}
+	}
+}
+
+func TestHelp_ModelShowsSubcommands(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "model", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"pull", "ls", "inspect", "prune", "rm"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in model help, got stdout=%q", want, stdout)
+		}
+	}
+}
+
+func TestHelp_DeployMentionsModelKind(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "deploy", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	if !strings.Contains(stdout, "Model") || !strings.Contains(stdout, "model.yaml") {
+		t.Fatalf("expected Model kind in deploy help, got stdout=%q", stdout)
 	}
 }
 

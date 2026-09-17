@@ -3,6 +3,7 @@ package processmanager
 import (
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/workloadmeta"
 )
@@ -190,5 +191,46 @@ func TestWatchdog_CleanupDecision_StillSkipsOtherSystemWorkloads(t *testing.T) {
 	)
 	if removeManaged || removeUnknown {
 		t.Fatalf("expected non-controller system workload to be preserved, got managed=%v unknown=%v", removeManaged, removeUnknown)
+	}
+}
+
+func TestLocalWorkloadsOutOfScope(t *testing.T) {
+	if !LocalWorkloadsOutOfScope(true) {
+		t.Fatal("expected local workloads out of scope when watchdog is enabled")
+	}
+	if LocalWorkloadsOutOfScope(false) {
+		t.Fatal("expected local workloads in scope when watchdog is disabled")
+	}
+}
+
+func TestCleanupLocalModelsForWatchdog_InvokesCallbackWhenEnabled(t *testing.T) {
+	called := false
+	pm := &ProcessManager{}
+	pm.SetWatchdogLocalModelsCallback(func() { called = true })
+
+	cfg := config.GetInstance()
+	orig := cfg.WatchdogEnabled
+	cfg.WatchdogEnabled = true
+	t.Cleanup(func() { cfg.WatchdogEnabled = orig })
+
+	pm.cleanupLocalModelsForWatchdog()
+	if !called {
+		t.Fatal("expected local model cleanup when watchdog is enabled")
+	}
+}
+
+func TestCleanupLocalModelsForWatchdog_SkippedWhenDisabled(t *testing.T) {
+	called := false
+	pm := &ProcessManager{}
+	pm.SetWatchdogLocalModelsCallback(func() { called = true })
+
+	cfg := config.GetInstance()
+	orig := cfg.WatchdogEnabled
+	cfg.WatchdogEnabled = false
+	t.Cleanup(func() { cfg.WatchdogEnabled = orig })
+
+	pm.cleanupLocalModelsForWatchdog()
+	if called {
+		t.Fatal("expected no local model cleanup when watchdog is disabled")
 	}
 }

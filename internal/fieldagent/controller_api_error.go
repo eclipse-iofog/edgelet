@@ -71,6 +71,14 @@ func ParseControllerAPIError(status int, body string) error {
 	return apiErr
 }
 
+// IsControllerEndpointMissing reports a 404 for an unknown controller command path.
+func IsControllerEndpointMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found: controller endpoint not found")
+}
+
 // IsRetryableControllerError reports whether the error should be retried.
 func IsRetryableControllerError(err error) bool {
 	var apiErr *ControllerAPIError

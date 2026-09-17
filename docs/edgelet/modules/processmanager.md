@@ -79,7 +79,7 @@ Local and ControlPlane deployments use desired-state fields (`desired_state`, `r
 
 - **running** — ensure container exists and matches manifest generation
 - **stopped** — stop container, keep record
-- **deleted** — remove container and mark row deleted
+- **deleted** — remove container and **delete** the `local_workloads` row (no persistent tombstone). Reconcile re-reads the row before write and never inserts a missing UUID.
 
 ControlPlane reconcile runs **before** managed microservices on each cycle so the controller container is stable before dependent workloads.
 

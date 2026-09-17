@@ -41,9 +41,11 @@ Entry: `(*Supervisor).Start()` in `supervisor.go`.
    - Edgelet engine: requires prestarted `containerdSvc`; starts socket watchdog goroutine
 6. `processmanager.Start(engine, fieldAgent)`
 7. Optional HealthcheckRunner when engine is `edgelet`
-8. ResourceManager → GPS → EdgeletAPI (waits up to 15s for listeners)
+8. GPS → EdgeletAPI (waits up to 15s for listeners)
 9. Pruning Manager (engine + microservice image list wired)
 10. Edge Guard Manager
+
+Host hardware/USB inventory posting is not started. Edge Guard remains.
 11. Set daemon `RUNNING` (or `WARNING` if external engine degraded)
 
 ### Stop

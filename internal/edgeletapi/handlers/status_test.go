@@ -12,7 +12,7 @@ import (
 )
 
 func TestAugmentWithDNSStatusAddsKeys(t *testing.T) {
-	m := map[string]string{
+	m := map[string]any{
 		"edgeletDaemon": "running",
 	}
 	augmentWithDNSStatus(m)
@@ -66,7 +66,7 @@ func TestHandleStatus_ExcludesDNSKeysWithoutEmbeddedEdgeletEngine(t *testing.T) 
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode status payload: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestHandleStatus_IncludesDNSKeysForEmbeddedEdgeletEngine(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode status payload: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestHandleStatus_IncludesAvailableNetworkInterfaces(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode status payload: %v", err)
 	}
@@ -132,11 +132,54 @@ func TestHandleStatus_IncludesAvailableRuntimes(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var payload map[string]string
+	var payload map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("failed to decode status payload: %v", err)
 	}
 	if _, ok := payload["availableRuntimes"]; !ok {
 		t.Fatalf("expected availableRuntimes key in status payload, payload=%v", payload)
+	}
+	if _, ok := payload["runtimeClasses"].([]any); !ok {
+		t.Fatalf("expected runtimeClasses JSON array, payload=%v", payload)
+	}
+	if _, ok := payload["availableCdiDevices"].([]any); !ok {
+		t.Fatalf("expected availableCdiDevices JSON array, payload=%v", payload)
+	}
+}
+
+func TestHandleStatus_RuntimeClassesAndCDIAreJSONArrays(t *testing.T) {
+	cfg := config.GetInstance()
+	originalEngine := cfg.ContainerEngine
+	cfg.ContainerEngine = constants.EngineDocker
+	t.Cleanup(func() { cfg.ContainerEngine = originalEngine })
+
+	handler := &StatusHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/v1/system/status", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode status payload: %v", err)
+	}
+	classes, ok := payload["runtimeClasses"].([]any)
+	if !ok {
+		t.Fatalf("runtimeClasses type: %#v", payload["runtimeClasses"])
+	}
+	if len(classes) != 0 {
+		t.Fatalf("docker runtimeClasses want [], got %#v", classes)
+	}
+	devices, ok := payload["availableCdiDevices"].([]any)
+	if !ok {
+		t.Fatalf("availableCdiDevices type: %#v", payload["availableCdiDevices"])
+	}
+	if len(devices) != 0 {
+		t.Fatalf("docker CDI devices want [], got %#v", devices)
+	}
+	if _, isString := payload["runtimeClasses"].(string); isString {
+		t.Fatal("runtimeClasses must not be a joined string")
 	}
 }

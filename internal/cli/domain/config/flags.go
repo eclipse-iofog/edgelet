@@ -27,7 +27,6 @@ var longFlagNames = map[string]string{
 	"logLevel":               "log-level",
 	"statusFrequencySeconds": "status-frequency-seconds",
 	"changeFrequencySeconds": "change-frequency-seconds",
-	"deviceScanFrequency":    "device-scan-frequency",
 	"watchdogEnabled":        "watchdog-enabled",
 	"edgeGuardFrequency":     "edge-guard-frequency",
 	"gpsMode":                "gps-mode",

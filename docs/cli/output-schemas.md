@@ -27,7 +27,9 @@ Route: `GET /v1/system/status`
 | `systemTime` | string | Optional agent time |
 | `systemTotalCpu` | string | Host CPU usage percent |
 | `availableNetworkInterfaces` | string | Comma-separated interfaces |
-| `availableRuntimes` | string | Comma-separated runtime handlers |
+| `availableRuntimes` | string or string[] | Discovered runtime handler names |
+| `runtimeClasses` | object[] | Applied classes `{ name, handler, source }` (`local` \| `managed`), sorted by name. Empty on docker/podman |
+| `availableCdiDevices` | string[] | Unique sorted fully-qualified CDI names. Empty on docker/podman/desktop |
 
 Golden fixture (minimal subset):
 
@@ -56,6 +58,7 @@ Each `items[]` element:
 | `name` | string | Microservice name |
 | `state` | string | Runtime state |
 | `containerId` | string | Container identifier |
+| `podId` | string | Pause/sandbox id on the edgelet engine; same as `containerId` on docker/podman; omitted when unknown |
 | `image` | string | Image reference |
 | `type` | string | Source/type label |
 

@@ -1,0 +1,11 @@
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: llama-2-7b-q2k
+spec:
+  repo: https://huggingface.co/second-state/Llama-2-7B-Chat-GGUF
+  revision: 064fe43ea8c1e1f93477ef4a170bdc2b244ef02c
+  registry: 5
+  files:
+    - llama-2-7b-chat.Q5_K_M.gguf
+  format: gguf

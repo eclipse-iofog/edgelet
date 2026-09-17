@@ -59,6 +59,8 @@ flowchart LR
 │   ├── config/               # YAML config load/save, SIGHUP reload
 │   ├── edgeletapi/           # EdgeletAPI HTTP/WebSocket server (:54321)
 │   ├── fieldagent/           # Controller communication and sync
+│   ├── modelmanager/         # Model artifact reconcile, async pull, prune
+│   ├── modelpull/            # OCI + Hugging Face adapters and on-disk store
 │   ├── processmanager/       # Container reconciliation loop
 │   ├── statusreporter/       # Status aggregation
 │   ├── store/                # SQLite persistence
@@ -134,7 +136,7 @@ Route groups include `/v1/system/*`, `/v1/ms/*`, `/v1/deploy/*`, `/v1/auth/*`, a
 
 The **Field Agent** talks to the remote ioFog Controller over HTTPS. Controller REST paths remain under `/api/v3/...` (Pot-compatible). This is separate from EdgeletAPI `/v1/...` on localhost.
 
-The field agent polls for configuration changes, loads microservices/registries/volume mounts into SQLite, and posts aggregated status back to the controller.
+The field agent polls for configuration changes, loads microservices, registries, volume mounts, models, and RuntimeClasses into SQLite, and posts aggregated status back to the controller. Host hardware/USB inventory posting has been removed.
 
 ---
 
