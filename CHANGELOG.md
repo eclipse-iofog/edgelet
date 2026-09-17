@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Image pull TLS:** the edgelet engine applies registry `ca` (additional trust) and `insecure` (`http://` and skip TLS verify) on container image pull. Docker and Podman still use daemon credentials only.
 - **Scheduled prune:** `pruningFrequency`, disk-threshold ticks, `edgelet model prune`, and controller `getChanges.prune` delete unused unbound local models (and dangling images on the prune flag). Unbound managed models stay. `edgelet system prune` still does not prune models.
 - **Watchdog:** when `watchdogEnabled` is on, Edgelet deletes all local models and refuses local `kind: Model` apply.
+- **Security / vulncheck:** bump `google.golang.org/grpc` to **v1.83.2** (**GO-2026-6443** — server panic on requests missing both `:authority` and `Host`); `make vulncheck` passes with zero documented exceptions ([SECURITY.md](SECURITY.md)).
+- **Go dependencies:** patch/minor bumps — `github.com/moby/moby/client` **v0.6.0** (`github.com/moby/moby/api` **v1.56.0**), `github.com/shirou/gopsutil/v4` **v4.26.8**, `github.com/sirupsen/logrus` **v1.10.2**, `modernc.org/sqlite` **v1.58.0** (Dependabot; no edgelet API changes required).
 
 ### Fixed
 
