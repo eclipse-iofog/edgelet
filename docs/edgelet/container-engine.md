@@ -200,6 +200,8 @@ On linux, use systemd `After=docker.service` (or podman) when relying on an exte
 
 Manual lifecycle (`edgelet ms start`, `stop`, `restart`) behavior may differ per engine — see OpenAPI notes for engine-specific semantics.
 
+When a Docker or Podman container is not healthily running, inspect status includes crash text of the form `exitCode=N oomKilled=true|false` (and `error=<engine error>` when that string is set). The embedded engine keeps `CRI reason=… exitCode=… message=…`. That text is the current `errorMessage` until **30 seconds** of continuous RUNNING, then it remains on `lastError` only. Crash-loop recreate backs off (10s … 5 minutes); `STUCK_IN_RESTART` still means too many **restarts** in 10 minutes. See [troubleshooting.md](troubleshooting.md#microservice-crash--restart-loop).
+
 ### Registry TLS on image pull
 
 The **edgelet** engine applies registry `ca` (extra PEM, in addition to system CAs) and `insecure` (`http://` and skip TLS verify) when pulling container images — the same rules as model artifact pull.

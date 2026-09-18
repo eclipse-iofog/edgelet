@@ -11,7 +11,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [installation.md](installation.md) | install.sh, OTA, upgrade/rollback, controller readiness |
 | [deployment.md](deployment.md) | Production topology, engines, systemd, provisioning |
 | [persistence.md](persistence.md) | SQLite backup/restore, schema v2 in-place upgrade, secrets threat model |
-| [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity |
+| [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity, microservice crashes |
 | [logging.md](logging.md) | Structured events, log levels, journald queries |
 
 ## Runtime and workloads
@@ -37,7 +37,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [edgelet-api-v1.md](edgelet-api-v1.md) | Operator guide — transport, auth, errors, route behavior |
 | [edgelet-api-v1-openapi.yaml](edgelet-api-v1-openapi.yaml) | OpenAPI 3.1 contract |
 | [edgelet-api-v1-rbac-resources.md](edgelet-api-v1-rbac-resources.md) | RBAC resource/verb mapping |
-| [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller contract: HAL drop, RuntimeClass, status keys, catalog flag, image TLS, prune |
+| [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller contract: HAL drop, RuntimeClass, status keys, catalog flag, image TLS, prune, microservice last-crash extras |
 
 ## Migration
 

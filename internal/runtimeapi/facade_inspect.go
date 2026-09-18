@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
+	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,5 +64,48 @@ func attachCatalogInspect(item map[string]any, catalog *models.ModelCatalog, req
 	}
 	if storedStatus != "" {
 		item["statusText"] = storedStatus
+	}
+}
+
+func lookupReporterMicroserviceStatus(sr *statusreporter.StatusReporter, uuid string) *models.MicroserviceStatus {
+	if sr == nil {
+		return nil
+	}
+	pmStatus := sr.GetProcessManagerStatus()
+	if pmStatus == nil {
+		return nil
+	}
+	return pmStatus.LookupMicroserviceStatus(uuid)
+}
+
+func attachDurabilityInspect(item map[string]any, status *models.MicroserviceStatus, fallbackLastError string, fallbackRestartCount int) {
+	if item == nil {
+		return
+	}
+	lastError := strings.TrimSpace(fallbackLastError)
+	restartCount := fallbackRestartCount
+	if status != nil {
+		if status.ErrorMessage != nil {
+			item["errorMessage"] = status.ErrorMessage
+		}
+		if trimmed := strings.TrimSpace(status.LastError); trimmed != "" {
+			lastError = trimmed
+		}
+		if status.LastErrorAt != 0 {
+			item["lastErrorAt"] = status.LastErrorAt
+		}
+		if status.RestartCount > 0 {
+			restartCount = status.RestartCount
+		}
+	}
+	if lastError != "" {
+		item["lastError"] = lastError
+	} else {
+		delete(item, "lastError")
+	}
+	if restartCount > 0 {
+		item["restartCount"] = restartCount
+	} else {
+		delete(item, "restartCount")
 	}
 }

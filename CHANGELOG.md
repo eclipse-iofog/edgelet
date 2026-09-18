@@ -5,7 +5,20 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v1.1.0-rc.2]
+
+### Added
+
+- **Microservice last-error extras:** fog `PUT status`, local inspect, and `edgelet ms inspect` include `lastError`, `lastErrorAt` (unix ms), and `restartCount` when set. Older controllers ignore unknown keys. `lastError` is not cleared on recovery; `restartCount` resets on rebuild.
+
+### Changed
+
+- **Crash text durability:** microservice `errorMessage` stays populated through STARTING and brief RUNNING after a crash. Current `errorMessage` is sent as `""` only after 30 seconds of continuous RUNNING for the same container generation.
+- **Docker/Podman exit text:** when a container is not healthily running, status includes `exitCode=`, `oomKilled=`, and engine `error=` (OOM is reported even if the engine still maps the state as running). The embedded engine keeps `CRI reason=…`.
+- **Restart-loop detection:** `STUCK_IN_RESTART` counts actual restarts (RUNNING→EXITING, failed start, crash-driven recreate), not 5-second status polls. Threshold is still 10 restarts in 10 minutes.
+- **Crash recreate backoff:** crash-driven recreate and lifecycle task retries wait 10s, 20s, … up to 5 minutes. Operator `rebuild`, catalog becoming Ready, and one CRI non-restartable recreate skip the delay. During the wait, status stays the real runtime state.
+
+## [v1.1.0-rc.1]
 
 ### Added
 

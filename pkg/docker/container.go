@@ -515,11 +515,48 @@ func (c *Client) GetMicroserviceStatus(containerID, _ string) (*models.Microserv
 		status.HealthStatus = &healthStatus
 	}
 
+	if msg := formatContainerExitMessage(string(inspect.State.Status), inspect.State.ExitCode, inspect.State.OOMKilled, inspect.State.Error); msg != "" {
+		status.ErrorMessage = &msg
+	}
+
 	// Note: RestartStuckChecker integration will be handled in ProcessManager
 	// to avoid circular dependencies. The checker will be called after getting status
 	// to determine if status should be STUCK_IN_RESTART
 
 	return status, nil
+}
+
+// formatContainerExitMessage builds inspect failure text for Docker/Podman
+// workloads. A healthy running container with exit 0, no OOM, and no engine
+// error returns empty so recovery does not keep a stale current error.
+func formatContainerExitMessage(status string, exitCode int, oomKilled bool, stateError string) string {
+	if !shouldAttachContainerExitMessage(status, exitCode, oomKilled, stateError) {
+		return ""
+	}
+	oom := "false"
+	if oomKilled {
+		oom = "true"
+	}
+	msg := fmt.Sprintf("exitCode=%d oomKilled=%s", exitCode, oom)
+	if errText := strings.TrimSpace(stateError); errText != "" {
+		msg += " error=" + errText
+	}
+	return strings.TrimSpace(msg)
+}
+
+func shouldAttachContainerExitMessage(status string, exitCode int, oomKilled bool, stateError string) bool {
+	if oomKilled {
+		return true
+	}
+	errText := strings.TrimSpace(stateError)
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "created":
+		// created: only when an exit was already recorded. running: only when
+		// inspect is not a healthy start (exit 0, empty error).
+		return exitCode != 0 || errText != ""
+	default:
+		return true
+	}
 }
 
 // AreMicroserviceAndContainerEqual checks if a microservice configuration matches a container

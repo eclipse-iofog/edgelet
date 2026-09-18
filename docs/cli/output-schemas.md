@@ -62,6 +62,27 @@ Each `items[]` element:
 | `image` | string | Image reference |
 | `type` | string | Source/type label |
 
+## `edgelet ms inspect -o json`
+
+Route: `GET /v1/ms/{id}`
+
+Default human output is the full inspect JSON (`raw.engineInspect` included). `--summary` prints the short card. Structured `-o json` / `-o yaml` is the inspect object.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `uuid` | string | Microservice UUID |
+| `state` | string | Real runtime state (`RUNNING`, `EXITING`, `STUCK_IN_RESTART`, …). Crash-loop backoff does **not** invent a new state name |
+| `podId` | string | Pause/sandbox id on the edgelet engine; same as `containerId` on docker/podman; omitted when unknown |
+| `errorMessage` | string | Current failure. Kept through STARTING / UPDATING / brief RUNNING. Cleared to `""` after **30 seconds** of continuous RUNNING |
+| `lastError` | string | Last crash text. Not cleared on recovery. Omitted when empty |
+| `lastErrorAt` | integer | Unix milliseconds for `lastError`. Omitted when 0 |
+| `restartCount` | integer | Real restart events since last operator rebuild. Omitted when 0 |
+| `statusText` | string | Wait/fail text when a bound model is still downloading or Failed |
+| `models` | object | Catalog bind (`bindPath`, `permissions`, `items[].name`) when bound |
+| `raw.engineInspect` | object | Engine inspect payload (full inspect only) |
+
+Docker/Podman crash text looks like `exitCode=N oomKilled=…` (plus `error=…` when the engine error is set). The embedded engine keeps `CRI reason=…`. Last crash text for controller-managed workloads is in-memory; an agent restart may drop it until the next failure.
+
 ## `edgelet --version -o json` / `edgelet system version -o json`
 
 Combined CLI + daemon payload:

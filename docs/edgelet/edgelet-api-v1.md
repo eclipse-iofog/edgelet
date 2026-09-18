@@ -209,7 +209,7 @@ Notable behaviors:
 Runtime view and lifecycle for workloads (managed, local, and control-plane sources):
 
 - `GET /v1/ms` — list microservices; **`source` query only**: `managed`, `local`, `controlplane`, or `all` (default). Pagination filters (`cursor`, `limit`, `application`, `name`, `state`) are not implemented.
-- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`). Includes catalog `models` (`bindPath`, `permissions`, `items[].name`) when bound, `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`), and `statusText` when the start gate is waiting for download or a bound model Failed.
+- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`). Includes catalog `models` (`bindPath`, `permissions`, `items[].name`) when bound, `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`), `statusText` when the start gate is waiting for download or a bound model Failed, and crash fields when set: `errorMessage` (current; kept until 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery; omitted when empty), `restartCount` (omitted when 0). Docker/Podman crash text looks like `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
 - Lifecycle: `start`, `stop`, `restart`, `kill`
 - Logs: `GET .../logs` (HTTP); `GET .../logs:stream` (WebSocket follow)
 - Exec: session create/get/delete; `GET .../exec/sessions/{sessionId}:attach` (interactive WebSocket). See [exec-sessions.md](exec-sessions.md) for multi-session behavior, the 15s start wait, and `EXEC_START_TIMEOUT`.

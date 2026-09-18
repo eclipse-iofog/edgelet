@@ -8,6 +8,7 @@ This document is for the **Pot / Datasance Controller** team. It is the agent-si
 - Microservice catalog + container fields
 - `getChanges` flags and GET routes
 - Fog `PUT status` (and the matching local status keys)
+- Microservice last-crash extras (`lastError`, `lastErrorAt`, `restartCount`) — **no controller release required**
 - Prune and watchdog
 
 Existing Pot path prefixes stay **`/api/v3/…`**. JSON is **additive** except the coordinated removals below. Do not rename existing keys or routes.
@@ -415,6 +416,43 @@ Additive key next to `containerId` on each fog `microserviceStatus` item (same f
 
 **Omit** `podId` when unknown (`omitempty`). Do not send `""`.
 
+### Microservice status extras (current vs last crash)
+
+**No controller release is required** for these keys. Older controllers ignore unknown fields. Never fail `PUT status`.
+
+Existing `microserviceStatus[].errorMessage` stays populated while the workload is failing, restarting, or has been RUNNING for **less than 30 seconds** after a crash. After 30 seconds of continuous RUNNING, Edgelet sends `errorMessage:""` so the current dashboard field clears.
+
+Additive keys on each `microserviceStatus` item (same fields on local inspect and `edgelet ms inspect`). Ignore if unknown:
+
+```json
+{
+  "id": "<uuid>",
+  "status": "RUNNING",
+  "errorMessage": "",
+  "lastError": "exitCode=1 oomKilled=false error=config missing",
+  "lastErrorAt": 1726660000123,
+  "restartCount": 4
+}
+```
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `errorMessage` | string (existing) | Current failure. Kept through STARTING, UPDATING, and brief RUNNING. Cleared to `""` only after **30 seconds** of continuous RUNNING. Always send explicit `""` on recovery so the dashboard field clears |
+| `lastError` | string | Last crash text. **Not** cleared on recovery. Overwritten only on a new failure. Omit when empty |
+| `lastErrorAt` | integer | Unix milliseconds for `lastError`. Omit when 0 |
+| `restartCount` | integer | Real restart events since the last operator **rebuild**. Omit when 0. Rebuild resets this to 0 and does **not** wipe `lastError` |
+
+Crash text:
+
+| Engine | Format |
+|--------|--------|
+| `docker` / `podman` | `exitCode=N oomKilled=true\|false`, plus ` error=<engine error>` when that text is non-empty |
+| `edgelet` | Unchanged `CRI reason=… exitCode=… message=…` |
+
+Last crash text for controller-managed workloads is **in-memory**. An agent restart may drop it until the next failure.
+
+No new `getChanges` flags. No new REST paths. `PUT status` top-level keys are unchanged.
+
 ### Model status
 
 `modelStatus` lists **local and managed** models.
@@ -508,13 +546,15 @@ UI: hide or disable local Model deploy on a watchdog node. Fleet model CRUD is s
 
 ## Local EdgeletAPI (same shapes)
 
-`GET /v1/system/status` uses a JSON object: existing scalars stay **strings**; `runtimeClasses` and `availableCdiDevices` are typed arrays (not comma-joined strings). `edgelet system status` and `edgelet ms inspect` show `podId` when present.
+`GET /v1/system/status` uses a JSON object: existing scalars stay **strings**; `runtimeClasses` and `availableCdiDevices` are typed arrays (not comma-joined strings). `edgelet system status` and `edgelet ms inspect` show `podId` when present. Inspect also shows `errorMessage`, `lastError`, `lastErrorAt`, and `restartCount` with the same omitempty rules as fog `microserviceStatus`.
 
 ---
 
 ## Controller work remaining (CRUD / UI)
 
 The agent consume path is implemented. Remaining controller work:
+
+Microservice last-crash extras (`lastError`, `lastErrorAt`, `restartCount`) need **no controller release**. Ignore unknown keys. Dashboards that only read `errorMessage` keep working.
 
 - [ ] Drop HAL hardware/USB GET/PUT and any HW/USB dashboards. Keep Edge Guard.
 - [ ] Drop `deviceScanFrequency` from GET/PATCH config and forms

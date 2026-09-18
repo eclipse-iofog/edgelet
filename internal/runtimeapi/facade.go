@@ -732,6 +732,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		if entry == nil {
 			return nil, errors.New("control plane deployment not found")
 		}
+		attachDurabilityInspect(entry, lookupReporterMicroserviceStatus(f.sr, uuid), item.LastError, item.RestartCount)
 		entry["raw"] = map[string]any{
 			"engineInspect":        f.engineInspectForMicroservice(uuid),
 			"engineType":           currentEngineName(f.cfg),
@@ -756,8 +757,6 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 			"image":        local.ImageName,
 			"desiredState": local.DesiredState,
 			"runtimeState": local.RuntimeState,
-			"lastError":    local.LastError,
-			"restartCount": local.RestartCount,
 			"manifestYAML": local.ManifestYAML,
 			"raw": map[string]any{
 				"localDeployment":      local,
@@ -766,6 +765,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 				"inspectSchemaVersion": "v1",
 			},
 		}
+		attachDurabilityInspect(item, lookupReporterMicroserviceStatus(f.sr, uuid), local.LastError, local.RestartCount)
 		f.attachPodID(item, local.ContainerID, "")
 		attachCatalogInspect(item, catalogFromLocalManifestYAML(local.ManifestYAML), models.ModelSourceLocal, modelcatalog.LookupFromStore(f.db), local.LastError)
 		return item, nil
@@ -802,7 +802,6 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		"containerId":  status.ContainerID,
 		"image":        image,
 		"percentage":   status.Percentage,
-		"errorMessage": status.ErrorMessage,
 		"healthStatus": status.HealthStatus,
 		"raw": map[string]any{
 			"processManager":       status,
@@ -811,6 +810,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 			"inspectSchemaVersion": "v1",
 		},
 	}
+	attachDurabilityInspect(item, status, "", 0)
 	f.attachPodID(item, status.ContainerID, status.PodID)
 	attachCatalogInspect(item, catalog, models.ModelSourceManaged, modelcatalog.LookupFromStore(f.db), storedStatus)
 	return item, nil

@@ -295,7 +295,6 @@ func (pm *ProcessManager) clearLocalWorkloadRuntimeRef(localUUID string) {
 	item.ContainerID = ""
 	item.RuntimeState = "pending"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.FailureCount = 0
 	_ = persistLocalWorkloadIfPresent(item)
 }
@@ -581,6 +580,7 @@ func (pm *ProcessManager) containersMonitor() {
 
 		pm.reconcileControlPlane()
 		pm.handleLatestMicroservices(reconcileStats)
+		pm.enqueueDueRetries()
 		pm.reconcileLocalDeployments()
 		pm.deleteRemainingMicroservices()
 		pm.cleanupLocalModelsForWatchdog()
@@ -811,7 +811,6 @@ func (pm *ProcessManager) reconcileLocalDesiredStopped(item *models.LocalDeploye
 	}
 	item.RuntimeState = "stopped"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.FailureCount = 0
 	_ = persistLocalWorkloadIfPresent(item)
 }
@@ -853,7 +852,6 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 			return
 		}
 		item.ObservedGeneration = item.Generation
-		item.LastError = ""
 		item.FailureCount = 0
 	case "created":
 		if err := pm.startLocalMicroservice(item.LocalUUID); err != nil {
@@ -876,7 +874,6 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 			item.RuntimeState = "running"
 			item.State = item.RuntimeState
 			item.ObservedGeneration = item.Generation
-			item.LastError = ""
 			item.FailureCount = 0
 		}
 	case "exiting":
@@ -911,7 +908,6 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 			item.RuntimeState = "running"
 			item.State = item.RuntimeState
 			item.ObservedGeneration = item.Generation
-			item.LastError = ""
 			item.FailureCount = 0
 		}
 		_ = persistLocalWorkloadIfPresent(item)
@@ -992,7 +988,6 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
 	item.ObservedGeneration = item.Generation
-	item.LastError = ""
 	item.FailureCount = 0
 	item.LastTransitionAt = now
 	_ = persistLocalWorkloadIfPresent(item)
@@ -1071,7 +1066,22 @@ func (pm *ProcessManager) checkTasks() {
 func (pm *ProcessManager) retryTask(task *ContainerTask) {
 	task.IncrementRetries()
 	pm.emitTaskRetry(task)
-	pm.taskQueue.Add(task)
+	checker := GetRestartStuckChecker()
+	delay := checker.ArmFailure(task.MicroserviceUUID)
+	if delay <= 0 {
+		pm.taskQueue.Add(task)
+		return
+	}
+	checker.ParkTask(task)
+}
+
+func (pm *ProcessManager) enqueueDueRetries() {
+	for _, task := range GetRestartStuckChecker().TakeDueTasks() {
+		if task == nil {
+			continue
+		}
+		pm.addTask(task)
+	}
 }
 
 func (pm *ProcessManager) emitTaskRetry(task *ContainerTask) {
@@ -1285,6 +1295,7 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			if !pm.applyCatalogStartGate(ms) {
 				continue
 			}
+			skip := pm.recreateSkipReason(ms)
 			if ms.IsStuckInRestart && !ms.Rebuild {
 				existing := statusreporter.GetInstance().GetProcessManagerStatus().GetMicroserviceStatus(ms.MicroserviceUUID)
 				if forceRecreate, reason, exitCode := shouldForceRecreateFromStatus(existing); forceRecreate {
@@ -1294,6 +1305,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 						"detail":      reason,
 					})
 					ms.IsStuckInRestart = false
+					if skip == recreateSkipNone {
+						skip = recreateSkipNonRestartable
+					}
 				} else {
 					pm.logger.Debugf("Skipping stuck microservice %s (rebuild not requested)", ms.MicroserviceUUID)
 					continue
@@ -1301,11 +1315,21 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			}
 			// If status is FAILED and Rebuild not requested, skip — do not re-add
 			if pmStatus := statusreporter.GetInstance().GetProcessManagerStatus(); pmStatus != nil {
-				if st := pmStatus.GetMicroserviceStatus(ms.MicroserviceUUID); st != nil &&
+				if st := pmStatus.LookupMicroserviceStatus(ms.MicroserviceUUID); st != nil &&
 					st.Status == models.MicroserviceStateFailed && !ms.Rebuild && !ms.Models.HasItems() {
 					pm.logger.Debugf("Skipping failed microservice %s (rebuild not requested)", ms.MicroserviceUUID)
 					continue
 				}
+			}
+			if crashDrivenMissing(lookupReporterStatus(ms.MicroserviceUUID)) && !ms.Rebuild {
+				pm.recordRestart(ms.MicroserviceUUID)
+			}
+			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
+				pm.emitRestartBackoff(ms.MicroserviceUUID, "ADD")
+				statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+					s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateQueued)
+				})
+				continue
 			}
 			// Container is missing — schedule creation. Clear stuck flag when Rebuild=true.
 			if stats != nil {
@@ -1336,7 +1360,22 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			continue
 		}
 		checker := GetRestartStuckChecker()
+		if status.Status == models.MicroserviceStateRunning {
+			checker.ObserveRunning(ms.MicroserviceUUID)
+		}
+		skip := pm.recreateSkipReason(ms)
 		if forceRecreate, reason, exitCode := shouldForceRecreateFromStatus(status); forceRecreate {
+			if !ms.Rebuild {
+				pm.recordRestart(ms.MicroserviceUUID)
+			}
+			if skip == recreateSkipNone {
+				skip = recreateSkipNonRestartable
+			}
+			if !checker.Ready(ms.MicroserviceUUID, skip) {
+				pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
+				pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
+				continue
+			}
 			sandboxID, _ := pm.engine.GetContainerSandboxID(container.ID)
 			if stats != nil {
 				stats.scheduledUpdate++
@@ -1349,6 +1388,7 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 				"criMessage":  safeErrorMessage(status),
 			})
 			ms.IsStuckInRestart = false
+			ms.SetIsUpdating(true)
 			statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
 				s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateUpdating)
 			})
@@ -1356,6 +1396,11 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			continue
 		}
 		if status.Status == models.MicroserviceStateCreated {
+			if !checker.Ready(ms.MicroserviceUUID, skip) {
+				pm.emitRestartBackoff(ms.MicroserviceUUID, "START")
+				pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
+				continue
+			}
 			sandboxID, _ := pm.engine.GetContainerSandboxID(container.ID)
 			pm.emitReconcileDecision(ms.MicroserviceUUID, "START", "created_container", "starting created container", runtimeops.LevelInfo, map[string]any{
 				"containerId": container.ID,
@@ -1364,6 +1409,15 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			})
 			if startErr := pm.containerManager.StartContainerByMicroserviceUUID(pm.reconcileOperationContext(ms.MicroserviceUUID), ms.MicroserviceUUID); startErr != nil {
 				if nr, ok := engine.IsNonRestartableContainerError(startErr); ok {
+					pm.recordFailedStart(ms.MicroserviceUUID)
+					if skip == recreateSkipNone {
+						skip = recreateSkipNonRestartable
+					}
+					if !checker.Ready(ms.MicroserviceUUID, skip) {
+						pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
+						pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
+						continue
+					}
 					if stats != nil {
 						stats.scheduledUpdate++
 					}
@@ -1375,12 +1429,14 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 						"criMessage":  nr.Message,
 					})
 					ms.IsStuckInRestart = false
+					ms.SetIsUpdating(true)
 					statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
 						s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateUpdating)
 					})
 					pm.addTask(NewContainerTask(TaskActionUpdate, ms.MicroserviceUUID))
 					continue
 				}
+				pm.recordFailedStart(ms.MicroserviceUUID)
 				if checker.IsStuckInContainerCreation(ms.MicroserviceUUID) {
 					pm.emitReconcileDecision(ms.MicroserviceUUID, "START", "stuck_in_restart", "created start failed repeatedly", runtimeops.LevelWarn, map[string]any{
 						"containerId": container.ID,
@@ -1401,6 +1457,10 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 					"sandboxId":   sandboxID,
 					"error":       startErr.Error(),
 				})
+				statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+					s.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, startErr.Error())
+					s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateCreated)
+				})
 			} else {
 				pm.emitReconcileDecision(ms.MicroserviceUUID, "START", "created_container", "created container started", runtimeops.LevelInfo, map[string]any{
 					"containerId": container.ID,
@@ -1414,6 +1474,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 		// Prefer existing error message from engine (e.g. Docker) when available; use static fallback otherwise
 		switch status.Status {
 		case models.MicroserviceStateExiting:
+			if !ms.Rebuild {
+				pm.recordRestart(ms.MicroserviceUUID)
+			}
 			if checker.IsStuck(ms.MicroserviceUUID) {
 				status.Status = models.MicroserviceStateStuckInRestart
 				ms.IsStuckInRestart = true
@@ -1437,13 +1500,7 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			}
 		}
 
-		statusreporter.GetInstance().UpdateProcessManagerStatus(func(pmStatus *models.ProcessManagerStatus) {
-			existing := pmStatus.MicroservicesStatus[ms.MicroserviceUUID]
-			if existing != nil && existing.HealthStatus != nil && status.HealthStatus == nil {
-				status.HealthStatus = existing.HealthStatus
-			}
-			syncMicroserviceStatusToReporter(pmStatus, ms.MicroserviceUUID, status)
-		})
+		pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
 
 		pm.updateMicroservice(container, ms, stats)
 	}
@@ -1457,6 +1514,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 func (pm *ProcessManager) addMicroservice(ms *models.Microservice) {
 	ms.SetIsUpdating(true)
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
+		if ms.Rebuild {
+			status.ResetMicroservicesRestartCount(ms.MicroserviceUUID)
+		}
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateQueued)
 	})
 	pm.addTask(NewContainerTask(TaskActionAdd, ms.MicroserviceUUID))
@@ -1499,6 +1559,14 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 		if ms.IsStuckInRestart {
 			ms.IsStuckInRestart = false
 		}
+		skip := pm.recreateSkipReason(ms)
+		if status.Status != models.MicroserviceStateRunning && !ms.Rebuild {
+			pm.recordRestart(ms.MicroserviceUUID)
+			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
+				pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
+				return
+			}
+		}
 		reason := reconcileUpdateReason(ms, status)
 		if stats != nil {
 			stats.scheduledUpdate++
@@ -1507,6 +1575,9 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 			"containerId": container.ID,
 		})
 		statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
+			if ms.Rebuild {
+				status.ResetMicroservicesRestartCount(ms.MicroserviceUUID)
+			}
 			status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateUpdating)
 		})
 		pm.addTask(NewContainerTask(TaskActionUpdate, ms.MicroserviceUUID))
@@ -1559,6 +1630,84 @@ func stuckInRestartErrorMessage(microserviceUUID, fallback string) string {
 		return *existing.ErrorMessage
 	}
 	return fallback
+}
+
+func lookupReporterStatus(uuid string) *models.MicroserviceStatus {
+	pmStatus := statusreporter.GetInstance().GetProcessManagerStatus()
+	if pmStatus == nil {
+		return nil
+	}
+	return pmStatus.LookupMicroserviceStatus(uuid)
+}
+
+func crashDrivenMissing(existing *models.MicroserviceStatus) bool {
+	if existing == nil {
+		return false
+	}
+	switch existing.Status {
+	case models.MicroserviceStateQueued, models.MicroserviceStateUnknown,
+		models.MicroserviceStateDeleted, models.MicroserviceStateMarkedForDeletion:
+		return false
+	default:
+		return true
+	}
+}
+
+func bumpRestartCount(uuid string) {
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+		s.IncrementMicroservicesRestartCount(uuid)
+	})
+}
+
+func (pm *ProcessManager) recordRestart(uuid string) {
+	if GetRestartStuckChecker().RecordIfNew(uuid) {
+		bumpRestartCount(uuid)
+	}
+}
+
+func (pm *ProcessManager) recordFailedStart(uuid string) {
+	GetRestartStuckChecker().RecordFailedStart(uuid)
+	bumpRestartCount(uuid)
+}
+
+func (pm *ProcessManager) recreateSkipReason(ms *models.Microservice) recreateSkip {
+	if ms == nil {
+		return recreateSkipNone
+	}
+	checker := GetRestartStuckChecker()
+	if ms.Rebuild {
+		checker.ResetAfterRebuild(ms.MicroserviceUUID)
+		return recreateSkipRebuild
+	}
+	if checker.ConsumeCatalogReadySkip(ms.MicroserviceUUID) {
+		return recreateSkipCatalogReady
+	}
+	return recreateSkipNone
+}
+
+func (pm *ProcessManager) emitRestartBackoff(uuid, decision string) {
+	checker := GetRestartStuckChecker()
+	pm.emitReconcileDecision(uuid, decision, "restart_backoff", "delaying crash-driven recreate", runtimeops.LevelInfo, map[string]any{
+		"consecutiveFailures": checker.ConsecutiveFailures(uuid),
+		"delayMs":             checker.RemainingDelay(uuid).Milliseconds(),
+	})
+}
+
+func (pm *ProcessManager) syncRuntimeStatus(uuid string, status *models.MicroserviceStatus) {
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(pmStatus *models.ProcessManagerStatus) {
+		existing := pmStatus.MicroservicesStatus[uuid]
+		if existing != nil && existing.HealthStatus != nil && status.HealthStatus == nil {
+			status.HealthStatus = existing.HealthStatus
+		}
+		syncMicroserviceStatusToReporter(pmStatus, uuid, status)
+	})
+	maybeResetRestartBackoff(uuid, status)
+}
+
+func maybeResetRestartBackoff(uuid string, status *models.MicroserviceStatus) {
+	if status != nil && status.Status == models.MicroserviceStateRunning && statusGrace.elapsed(uuid) {
+		GetRestartStuckChecker().ResetBackoff(uuid)
+	}
 }
 
 func shouldForceRecreateFromStatus(status *models.MicroserviceStatus) (bool, string, int32) {
@@ -1890,7 +2039,6 @@ func (pm *ProcessManager) recreateLocalDeployment(item *models.LocalDeployedMicr
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
 	item.ObservedGeneration = item.Generation
-	item.LastError = ""
 	item.FailureCount = 0
 	item.LastTransitionAt = now
 	if pm.engine != nil {
@@ -1909,7 +2057,6 @@ func (pm *ProcessManager) updateLocalContainerAfterRecreate(microserviceUUID, co
 	item.ContainerID = containerID
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.LastTransitionAt = time.Now().Unix()
 	_ = persistLocalWorkloadIfPresent(item)
 	if pm.engine != nil {

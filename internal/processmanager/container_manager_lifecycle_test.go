@@ -25,8 +25,11 @@ func (m *lifecycleTestMSM) SetCurrentMicroservices(_ []*models.Microservice)    
 
 type lifecycleTestEngine struct {
 	engine.ContainerEngine
-	workload  *engine.Container
-	createdID string
+	workload      *engine.Container
+	createdID     string
+	status        *models.MicroserviceStatus
+	startErr      error
+	configDrifted bool
 }
 
 func (e *lifecycleTestEngine) GetContainer(msUUID string) (*engine.Container, error) {
@@ -64,7 +67,22 @@ func (e *lifecycleTestEngine) CreateContainer(*models.Microservice, string) (str
 
 func (e *lifecycleTestEngine) GetContainerIPAddress(string) (string, error) { return "10.0.0.2", nil }
 
-func (e *lifecycleTestEngine) StartContainer(string) error { return nil }
+func (e *lifecycleTestEngine) GetContainerStatus(string, string) (*models.MicroserviceStatus, error) {
+	if e.status != nil {
+		return e.status, nil
+	}
+	return models.NewMicroserviceStatusWithState(models.MicroserviceStateRunning), nil
+}
+
+func (e *lifecycleTestEngine) GetContainerStats(string) (*engine.ContainerStats, error) {
+	return &engine.ContainerStats{}, nil
+}
+
+func (e *lifecycleTestEngine) AreMicroserviceAndContainerEqual(string, *models.Microservice, *models.Registry) bool {
+	return !e.configDrifted
+}
+
+func (e *lifecycleTestEngine) StartContainer(string) error { return e.startErr }
 
 func (e *lifecycleTestEngine) StopContainer(string) error { return nil }
 

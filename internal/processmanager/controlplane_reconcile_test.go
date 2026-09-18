@@ -391,6 +391,69 @@ func assertControlPlaneLaunchSpec(t *testing.T, ms *models.Microservice) {
 	}
 }
 
+func TestReconcileControlPlaneDesiredRunning_KeepsLastErrorOnFirstRunning(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	withStatusSyncClock(t)
+	sr := statusreporter.GetInstance()
+	sr.ResetProcessManagerStatus()
+	t.Cleanup(func() { sr.ResetProcessManagerStatus() })
+
+	errMsg := "controller crashed"
+	sr.UpdateProcessManagerStatus(func(pmStatus *models.ProcessManagerStatus) {
+		pmStatus.SetMicroservicesState("cp-keep-err", models.MicroserviceStateExiting)
+		pmStatus.SetMicroservicesStatusErrorMessage("cp-keep-err", errMsg)
+	})
+
+	eng := &controlPlaneCaptureEngine{}
+	pm := &ProcessManager{
+		logger:           logging.NewModuleLogger("test-process-manager"),
+		engine:           eng,
+		containerManager: NewContainerManager(eng, nil, "docker"),
+	}
+	dep := &models.ControlPlaneDeployment{
+		ControllerUUID:     "cp-keep-err",
+		Namespace:          "default",
+		Name:               "pot",
+		ManifestYAML:       minimalControlPlaneManifestYAML(),
+		DesiredState:       "running",
+		Generation:         1,
+		ObservedGeneration: 1,
+		RuntimeState:       "exiting",
+		ContainerID:        "old-cid",
+		LastError:          errMsg,
+	}
+	if err := store.GetInstance().UpsertSystemControlPlane(dep); err != nil {
+		t.Fatalf("upsert control plane: %v", err)
+	}
+	eng.workload = &engine.Container{
+		ID:    "old-cid",
+		Image: "ghcr.io/datasance/controller:3.8.0-beta.0",
+		Labels: map[string]string{
+			workloadmeta.LabelMicroserviceUID: "cp-keep-err",
+		},
+	}
+	pm.getContainerStatusFn = func(_, _ string) (*models.MicroserviceStatus, error) {
+		return &models.MicroserviceStatus{Status: models.MicroserviceStateRunning, ContainerID: "old-cid"}, nil
+	}
+
+	pm.reconcileControlPlane()
+
+	got, found, err := store.GetInstance().GetSystemControlPlane()
+	if err != nil || !found {
+		t.Fatalf("get control plane: found=%v err=%v", found, err)
+	}
+	if got.LastError != errMsg {
+		t.Fatalf("expected sqlite last_error kept on first running, got %q", got.LastError)
+	}
+	msStatus := sr.GetProcessManagerStatus().GetMicroserviceStatus("cp-keep-err")
+	if msStatus.ErrorMessage == nil || *msStatus.ErrorMessage != errMsg {
+		t.Fatalf("expected reporter error kept before grace, got %#v", msStatus.ErrorMessage)
+	}
+	if msStatus.LastError != errMsg {
+		t.Fatalf("expected reporter lastError kept, got %q", msStatus.LastError)
+	}
+}
+
 func minimalControlPlaneManifestYAML() string {
 	return `apiVersion: edgelet.iofog.org/v1
 kind: ControlPlane

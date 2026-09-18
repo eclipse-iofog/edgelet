@@ -126,6 +126,7 @@ var msInspectOrder = []string{
 	"statusText",
 	"errorMessage",
 	"lastError",
+	"lastErrorAt",
 	"containerId",
 	"podId",
 	"image",

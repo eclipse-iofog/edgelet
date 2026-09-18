@@ -134,7 +134,7 @@ edgelet ms ls --source local
 edgelet ms inspect <uuid-or-name>
 ```
 
-`edgelet ms inspect` prints the full inspect JSON by default (`models` catalog plus `raw.engineInspect`). `--summary` is the short card. Wait/fail `statusText` is on the object when a bound model is still downloading or Failed.
+`edgelet ms inspect` prints the full inspect JSON by default (`models` catalog plus `raw.engineInspect`). `--summary` is the short card. Wait/fail `statusText` is on the object when a bound model is still downloading or Failed. Crash fields: `errorMessage` (current; clears after 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery), `restartCount` (omitted when 0). Docker/Podman text is `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
 
 DNS: [dns.md](dns.md) · Metadata: [workload-metadata.md](workload-metadata.md)
 

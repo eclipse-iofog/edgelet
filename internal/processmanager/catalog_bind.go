@@ -63,6 +63,7 @@ func (pm *ProcessManager) applyCatalogStartGate(ms *models.Microservice) (procee
 	}
 	switch res.Decision {
 	case models.CatalogGateWait:
+		GetRestartStuckChecker().MarkCatalogWaiting(ms.MicroserviceUUID)
 		statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
 			s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateQueued)
 			s.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, res.Message)

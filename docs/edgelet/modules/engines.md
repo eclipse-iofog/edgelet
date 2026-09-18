@@ -95,6 +95,7 @@ Key `ContainerEngine` operations (see `pkg/engine/engine.go`):
 | Start failure on linux edgelet | Containerd not prestarted |
 | WARNING daemon | Docker/Podman socket down |
 | Wrong network/DNS | Engine mismatch vs config reload |
+| Crash looks empty on docker/podman | Inspect must include `exitCode=` / `oomKilled=` / `error=` when not healthily running; embedded engine keeps `CRI reason=…` |
 
 ## Code map
 

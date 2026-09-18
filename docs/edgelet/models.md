@@ -143,7 +143,7 @@ The container is created only when **every** named item is **Ready**.
 | Pending or Pulling | Persist; microservice **QUEUED** | Wait text names the model and state (`waiting for model download: test-model (Pulling)`) |
 | Unknown or Failed | **Validate error** (Failed includes the model `lastError` when present) | **FAILED** with the same text |
 
-`edgelet ms inspect` prints the full inspect JSON by default, including catalog `models` (`bindPath`, `permissions`, item names) and `raw.engineInspect`. `--summary` is the short card. `statusText` is set when the start gate is waiting or failed.
+`edgelet ms inspect` prints the full inspect JSON by default, including catalog `models` (`bindPath`, `permissions`, item names) and `raw.engineInspect`. `--summary` is the short card. `statusText` is set when the start gate is waiting or failed. Crash fields (`errorMessage`, `lastError`, `lastErrorAt`, `restartCount`) use the same rules as fog `microserviceStatus`.
 
 ### In-place updates vs recreate
 

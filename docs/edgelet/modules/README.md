@@ -129,3 +129,4 @@ Edge Guard, Pruning, Volume Mount, and SSH Proxy are not in this fixed array; th
 | Workload labels/env | [../workload-metadata.md](../workload-metadata.md) |
 | Manifest YAML | [../manifest-reference.md](../manifest-reference.md) |
 | Model artifacts | [../models.md](../models.md) |
+| Crash / last-error inspect | [../troubleshooting.md](../troubleshooting.md#microservice-crash--restart-loop) |

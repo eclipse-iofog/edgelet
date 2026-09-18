@@ -134,3 +134,88 @@ spec:
 		t.Fatalf("expected fail status with model name and last error, got %q", statusText)
 	}
 }
+
+func TestAttachDurabilityInspect_OmitemptyAndFallback(t *testing.T) {
+	item := map[string]any{"uuid": "ms-1"}
+	attachDurabilityInspect(item, nil, "", 0)
+	if _, ok := item["lastError"]; ok {
+		t.Fatalf("expected empty lastError omitted, got %#v", item)
+	}
+	if _, ok := item["restartCount"]; ok {
+		t.Fatalf("expected zero restartCount omitted, got %#v", item)
+	}
+
+	attachDurabilityInspect(item, nil, "db crash", 3)
+	if item["lastError"] != "db crash" || item["restartCount"] != 3 {
+		t.Fatalf("expected DB fallback, got %#v", item)
+	}
+
+	empty := ""
+	status := &models.MicroserviceStatus{
+		ErrorMessage: &empty,
+		LastError:    "reporter crash",
+		LastErrorAt:  1726660000123,
+		RestartCount: 4,
+	}
+	attachDurabilityInspect(item, status, "db crash", 3)
+	if item["lastError"] != "reporter crash" {
+		t.Fatalf("expected reporter lastError to win, got %#v", item["lastError"])
+	}
+	if item["lastErrorAt"] != int64(1726660000123) {
+		t.Fatalf("expected lastErrorAt, got %#v", item["lastErrorAt"])
+	}
+	if item["restartCount"] != 4 {
+		t.Fatalf("expected reporter restartCount, got %#v", item["restartCount"])
+	}
+	gotErr, ok := item["errorMessage"].(*string)
+	if !ok || gotErr == nil || *gotErr != "" {
+		t.Fatalf("expected explicit empty errorMessage pointer, got %#v", item["errorMessage"])
+	}
+}
+
+func TestFacadeGetRuntimeMicroservice_LocalDurabilityFromDB(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	f.sr.ResetProcessManagerStatus()
+	t.Cleanup(func() { f.sr.ResetProcessManagerStatus() })
+
+	if err := f.db.UpsertLocalWorkload(&models.LocalDeployedMicroservice{
+		LocalUUID:        "local-durability",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "keep",
+		SourceName:       "local-cli",
+		ImageName:        "nginx:latest",
+		ManifestYAML: `apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: keep
+spec:
+  image: nginx:latest
+`,
+		State:        "running",
+		DesiredState: "running",
+		RuntimeState: "running",
+		LastError:    "previous crash",
+		RestartCount: 2,
+		Generation:   1,
+	}); err != nil {
+		t.Fatalf("seed workload: %v", err)
+	}
+
+	item, err := f.GetRuntimeMicroservice("local-durability")
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if item["lastError"] != "previous crash" {
+		t.Fatalf("expected lastError from sqlite, got %#v", item["lastError"])
+	}
+	if item["restartCount"] != 2 {
+		t.Fatalf("expected restartCount from sqlite, got %#v", item["restartCount"])
+	}
+	if _, ok := item["lastErrorAt"]; ok {
+		t.Fatalf("expected lastErrorAt omitted when reporter is empty, got %#v", item["lastErrorAt"])
+	}
+}

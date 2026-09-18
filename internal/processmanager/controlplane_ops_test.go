@@ -118,6 +118,7 @@ func TestRestartControlPlaneDeployment_DockerInPlaceStopStart(t *testing.T) {
 	pm.containerManager = NewContainerManager(eng, nil, "docker")
 
 	dep := controlPlaneRestartTestDeployment("cp-restart-docker")
+	dep.LastError = "previous crash"
 	if err := store.GetInstance().UpsertSystemControlPlane(dep); err != nil {
 		t.Fatalf("upsert control plane: %v", err)
 	}
@@ -139,8 +140,8 @@ func TestRestartControlPlaneDeployment_DockerInPlaceStopStart(t *testing.T) {
 	if got.RuntimeState != "running" {
 		t.Fatalf("expected runtime_state=running, got %q", got.RuntimeState)
 	}
-	if got.LastError != "" {
-		t.Fatalf("expected cleared last_error, got %q", got.LastError)
+	if got.LastError != "previous crash" {
+		t.Fatalf("expected last_error kept after restart, got %q", got.LastError)
 	}
 }
 

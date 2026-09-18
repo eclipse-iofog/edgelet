@@ -106,7 +106,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredDeleted(item *models.Contr
 		}
 	}
 	item.ContainerID = ""
-	item.LastError = ""
 	item.FailureCount = 0
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
 }
@@ -125,7 +124,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredStopped(item *models.Contr
 	}
 	item.RuntimeState = "stopped"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.FailureCount = 0
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
 }
@@ -171,7 +169,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 	switch runtime {
 	case "running":
 		item.ObservedGeneration = item.Generation
-		item.LastError = ""
 		item.FailureCount = 0
 	case "created":
 		if err := pm.startLocalMicroservice(item.ControllerUUID); err != nil {
@@ -193,7 +190,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 			item.RuntimeState = "running"
 			item.State = item.RuntimeState
 			item.ObservedGeneration = item.Generation
-			item.LastError = ""
 			item.FailureCount = 0
 		}
 	case "exiting":
@@ -228,7 +224,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 			item.RuntimeState = "running"
 			item.State = item.RuntimeState
 			item.ObservedGeneration = item.Generation
-			item.LastError = ""
 			item.FailureCount = 0
 		}
 		_ = store.GetInstance().UpsertSystemControlPlane(item)
@@ -283,23 +278,20 @@ func (pm *ProcessManager) syncControlPlaneProcessManagerStatus(
 	if uuid == "" {
 		return
 	}
+	runtimeStatus := status
+	var synced *models.MicroserviceStatus
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(pmStatus *models.ProcessManagerStatus) {
-		if status != nil {
-			syncMicroserviceStatusToReporter(pmStatus, uuid, status)
-			return
-		}
-		state := controlPlaneRuntimeStateToMicroserviceState(item.RuntimeState)
-		pmStatus.SetMicroservicesState(uuid, state)
-		if container != nil {
-			if existing := pmStatus.GetMicroserviceStatus(uuid); existing != nil {
-				existing.ContainerID = container.ID
-				pmStatus.SetMicroservicesStatus(uuid, existing)
+		next := runtimeStatus
+		if next == nil {
+			next = models.NewMicroserviceStatusWithState(controlPlaneRuntimeStateToMicroserviceState(item.RuntimeState))
+			if container != nil {
+				next.ContainerID = container.ID
 			}
 		}
-		if state == models.MicroserviceStateRunning {
-			pmStatus.SetMicroservicesStatusErrorMessage(uuid, "")
-		}
+		syncMicroserviceStatusToReporter(pmStatus, uuid, next)
+		synced = next
 	})
+	maybeResetRestartBackoff(uuid, synced)
 }
 
 func controlPlaneRuntimeStateToMicroserviceState(runtimeState string) models.MicroserviceState {
@@ -400,7 +392,6 @@ func (pm *ProcessManager) launchControlPlaneWithProgress(item *models.ControlPla
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
 	item.ObservedGeneration = item.Generation
-	item.LastError = ""
 	item.FailureCount = 0
 	item.LastTransitionAt = now
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
@@ -441,7 +432,6 @@ func (pm *ProcessManager) recreateControlPlaneDeploymentWithProgress(item *model
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
 	item.ObservedGeneration = item.Generation
-	item.LastError = ""
 	item.FailureCount = 0
 	item.LastTransitionAt = now
 	if err := store.GetInstance().UpsertSystemControlPlane(item); err != nil {

@@ -55,7 +55,7 @@ Cancel context; wait for worker goroutines (`wg.Wait()`).
 |--------|------------------|------|
 | `pingControllerWorker` | `pingFrequency` | Controller connectivity; updates connection state |
 | `runChangesWorker` | `changeFrequency` | `GET config/changes`; processes add/update/delete |
-| `postStatusWorker` | `statusFrequency` | Aggregated status POST to Controller |
+| `postStatusWorker` | `statusFrequency` | Aggregated status POST to Controller (`PUT status`; per-MS `errorMessage` plus additive last-crash keys) |
 | `upgradeScanWorker` | `upgradeScanFrequency` | Release OTA when `changeVersion` changes |
 | `localAPITokenRotationWorker` | internal | EdgeletAPI admin JWT rotation |
 | `serviceAccountTokenRotationWorker` | internal | Projected SA token lifecycle |
@@ -120,7 +120,7 @@ Local deploy tables (`local_workloads`, etc.) are written by EdgeletAPI/runtimea
 
 | Surface | Role |
 |---------|------|
-| Controller REST | Poll, provision, status, diagnostics, OTA |
+| Controller REST | Poll, provision, status, diagnostics, OTA. Fog `PUT status` top-level keys are unchanged. Each `microserviceStatus` item keeps `errorMessage` through crash + 30s RUNNING grace, then sends `errorMessage:""`. Additive `lastError`, `lastErrorAt`, `restartCount` may be ignored by older controllers. No new `getChanges` flags or REST paths. |
 | EdgeletAPI (via runtimeapi) | `POST/DELETE /v1/system/provision`, exec/log WebSocket upgrade |
 | Process Manager | `Update()` channel; implements microservice list for PM |
 

@@ -108,3 +108,99 @@ func TestGetJSONMicroservicesStatus_PodIDNextToContainerID(t *testing.T) {
 		t.Fatalf("expected missing sandbox to omit podId, got %#v", byID["ms-missing-sandbox"])
 	}
 }
+
+func TestGetJSONMicroservicesStatus_DurabilityFieldsOmitempty(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	empty := NewMicroserviceStatusWithState(MicroserviceStateRunning)
+	empty.ContainerID = "cid-empty"
+	pm.SetMicroservicesStatus("ms-empty", empty)
+
+	full := NewMicroserviceStatusWithState(MicroserviceStateRunning)
+	full.ContainerID = "cid-full"
+	msg := ""
+	full.ErrorMessage = &msg
+	full.LastError = "exitCode=1"
+	full.LastErrorAt = 1726660000123
+	full.RestartCount = 4
+	pm.SetMicroservicesStatus("ms-full", full)
+
+	raw := pm.GetJSONMicroservicesStatus()
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		t.Fatalf("parse: %v raw=%s", err, raw)
+	}
+	byID := map[string]map[string]any{}
+	for _, item := range items {
+		id, ok := item["id"].(string)
+		if !ok {
+			t.Fatalf("expected id string, got %#v", item["id"])
+		}
+		byID[id] = item
+	}
+	if _, ok := byID["ms-empty"]["lastError"]; ok {
+		t.Fatalf("expected empty lastError omitted, got %#v", byID["ms-empty"])
+	}
+	if _, ok := byID["ms-empty"]["lastErrorAt"]; ok {
+		t.Fatalf("expected zero lastErrorAt omitted, got %#v", byID["ms-empty"])
+	}
+	if _, ok := byID["ms-empty"]["restartCount"]; ok {
+		t.Fatalf("expected zero restartCount omitted, got %#v", byID["ms-empty"])
+	}
+	if byID["ms-full"]["errorMessage"] != "" {
+		t.Fatalf("expected explicit empty errorMessage, got %#v", byID["ms-full"]["errorMessage"])
+	}
+	if byID["ms-full"]["lastError"] != "exitCode=1" {
+		t.Fatalf("expected lastError, got %#v", byID["ms-full"])
+	}
+	if byID["ms-full"]["lastErrorAt"] != float64(1726660000123) {
+		t.Fatalf("expected lastErrorAt, got %#v", byID["ms-full"]["lastErrorAt"])
+	}
+	if byID["ms-full"]["restartCount"] != float64(4) {
+		t.Fatalf("expected restartCount 4, got %#v", byID["ms-full"]["restartCount"])
+	}
+}
+
+func TestSetMicroservicesStatusErrorMessage_RecordsLastErrorExceptQueued(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	pm.SetMicroservicesState("ms-fail", MicroserviceStateFailed)
+	pm.SetMicroservicesStatusErrorMessage("ms-fail", "task failed")
+	failed := pm.GetMicroserviceStatus("ms-fail")
+	if failed.LastError != "task failed" || failed.LastErrorAt == 0 {
+		t.Fatalf("expected failure to record lastError, got %+v", failed)
+	}
+
+	pm.SetMicroservicesState("ms-wait", MicroserviceStateQueued)
+	pm.SetMicroservicesStatusErrorMessage("ms-wait", CatalogWaitingMessage)
+	waiting := pm.GetMicroserviceStatus("ms-wait")
+	if waiting.LastError != "" || waiting.LastErrorAt != 0 {
+		t.Fatalf("expected queued wait text not to record lastError, got %+v", waiting)
+	}
+}
+
+func TestResetMicroservicesRestartCount_KeepsLastError(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	st := NewMicroserviceStatusWithState(MicroserviceStateFailed)
+	st.LastError = "crash"
+	st.LastErrorAt = 99
+	st.RestartCount = 7
+	pm.SetMicroservicesStatus("ms-1", st)
+
+	pm.ResetMicroservicesRestartCount("ms-1")
+	got := pm.GetMicroserviceStatus("ms-1")
+	if got.RestartCount != 0 {
+		t.Fatalf("expected restartCount 0, got %d", got.RestartCount)
+	}
+	if got.LastError != "crash" || got.LastErrorAt != 99 {
+		t.Fatalf("expected lastError kept, got %+v", got)
+	}
+}
+
+func TestIncrementMicroservicesRestartCount(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	pm.IncrementMicroservicesRestartCount("ms-1")
+	pm.IncrementMicroservicesRestartCount("ms-1")
+	got := pm.GetMicroserviceStatus("ms-1")
+	if got.RestartCount != 2 {
+		t.Fatalf("expected restartCount 2, got %d", got.RestartCount)
+	}
+}

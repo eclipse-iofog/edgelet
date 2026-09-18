@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Helper functions for formatting
@@ -60,6 +61,13 @@ func (p *ProcessManagerStatus) GetMicroserviceStatus(microserviceUUID string) *M
 	return status
 }
 
+// LookupMicroserviceStatus returns a tracked status without creating a new entry.
+func (p *ProcessManagerStatus) LookupMicroserviceStatus(microserviceUUID string) *MicroserviceStatus {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.MicroservicesStatus[microserviceUUID]
+}
+
 // SetMicroservicesState sets the state of a microservice and returns the status for chaining
 func (p *ProcessManagerStatus) SetMicroservicesState(microserviceUUID string, state MicroserviceState) *ProcessManagerStatus {
 	p.mu.Lock()
@@ -98,6 +106,33 @@ func (p *ProcessManagerStatus) SetMicroservicesStatusErrorMessage(microserviceUU
 	// Keep tri-state semantics:
 	// nil pointer => no update/unspecified, non-nil empty string => explicit clear.
 	status.ErrorMessage = &message
+	if strings.TrimSpace(message) != "" && status.Status != MicroserviceStateQueued {
+		status.LastError = message
+		status.LastErrorAt = time.Now().UnixMilli()
+	}
+	return p
+}
+
+// IncrementMicroservicesRestartCount adds one recorded crash/recreate event.
+func (p *ProcessManagerStatus) IncrementMicroservicesRestartCount(microserviceUUID string) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	status := p.MicroservicesStatus[microserviceUUID]
+	if status == nil {
+		status = NewMicroserviceStatus()
+		p.MicroservicesStatus[microserviceUUID] = status
+	}
+	status.RestartCount++
+	return p
+}
+
+// ResetMicroservicesRestartCount zeros the in-memory restart count without touching last-error fields.
+func (p *ProcessManagerStatus) ResetMicroservicesRestartCount(microserviceUUID string) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if status := p.MicroservicesStatus[microserviceUUID]; status != nil {
+		status.RestartCount = 0
+	}
 	return p
 }
 
@@ -166,6 +201,9 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 		HealthStatus      string   `json:"healthStatus,omitempty"`
 		ExecSessionIDs    []string `json:"execSessionIds,omitempty"`
 		ErrorMessage      *string  `json:"errorMessage,omitempty"`
+		LastError         string   `json:"lastError,omitempty"`
+		LastErrorAt       int64    `json:"lastErrorAt,omitempty"`
+		RestartCount      int      `json:"restartCount,omitempty"`
 	}
 
 	statuses := make([]MicroserviceStatusJSON, 0, len(p.MicroservicesStatus))
@@ -200,6 +238,15 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 
 		if status.ErrorMessage != nil {
 			msStatus.ErrorMessage = status.ErrorMessage
+		}
+		if status.LastError != "" {
+			msStatus.LastError = status.LastError
+		}
+		if status.LastErrorAt != 0 {
+			msStatus.LastErrorAt = status.LastErrorAt
+		}
+		if status.RestartCount > 0 {
+			msStatus.RestartCount = status.RestartCount
 		}
 
 		statuses = append(statuses, msStatus)

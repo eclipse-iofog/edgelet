@@ -275,6 +275,34 @@ func TestFormatEdgeletAPIHuman_MSInspectSummaryCard(t *testing.T) {
 	}
 }
 
+func TestFormatEdgeletAPIHuman_MSInspectDurabilityKeys(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid":         "ms-1",
+		"name":         "infer",
+		"state":        "running",
+		"errorMessage": "crash",
+		"lastError":    "crash",
+		"lastErrorAt":  int64(1726660000123),
+		"restartCount": 4,
+	})
+	for _, want := range []string{
+		"errorMessage: crash",
+		"lastError: crash",
+		"lastErrorAt: 1726660000123",
+		"restartCount: 4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in inspect, got: %s", want, out)
+		}
+	}
+	errIdx := strings.Index(out, "errorMessage:")
+	lastIdx := strings.Index(out, "lastError:")
+	atIdx := strings.Index(out, "lastErrorAt:")
+	if errIdx < 0 || lastIdx < errIdx || atIdx < lastIdx {
+		t.Fatalf("expected errorMessage then lastError then lastErrorAt, got: %s", out)
+	}
+}
+
 func TestFormatEdgeletAPIHuman_RegistryListShowsType(t *testing.T) {
 	out := FormatEdgeletAPIHuman("/v1/deploy/registries", map[string]any{
 		"items": []any{

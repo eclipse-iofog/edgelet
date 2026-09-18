@@ -362,6 +362,30 @@ Ensure the configured `containerEngineUrl` matches the running engine socket.
 
 ---
 
+## Microservice crash / restart loop
+
+**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`.
+
+**Checks:**
+
+1. Inspect the workload. Crash fields are the same on `GET /v1/ms/{id}` and `edgelet ms inspect`:
+
+   ```bash
+   edgelet ms inspect <uuid|namespace.name> --summary
+   ```
+
+   - `errorMessage` is the **current** failure. It stays set while the workload is failing, restarting, or has been RUNNING for less than **30 seconds** after a crash. After 30 seconds of continuous RUNNING it is sent as `""`.
+   - `lastError` / `lastErrorAt` is the last crash text (unix ms). It is **not** cleared on recovery. Operator **rebuild** resets `restartCount` to 0 and keeps `lastError`.
+   - Docker/Podman text looks like `exitCode=N oomKilled=…` (plus `error=…` when the engine error is set). The embedded engine keeps `CRI reason=…`.
+
+2. Crash loops delay recreate (**10s, 20s, … up to 5 minutes**). Status stays the real runtime state (`EXITING`, and so on) — there is no extra “waiting” state. Operator rebuild, catalog becoming Ready, and a single non-restartable CRI recreate skip the delay.
+
+3. `STUCK_IN_RESTART` means **10 real restarts in 10 minutes**, not status-poll ticks. Use operator **rebuild** to retry.
+
+4. Last crash text for controller-managed workloads is in-memory. Restarting `edgelet` may drop it until the next failure.
+
+---
+
 ## Controller connectivity
 
 **Symptoms:** `connectionToController` not ok in `edgelet system status`.

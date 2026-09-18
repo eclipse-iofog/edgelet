@@ -649,7 +649,6 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	})
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateStarting)
-		status.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, "")
 	})
 
 	cfg := config.GetInstance()
@@ -768,10 +767,10 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	// Clear rebuild flag after successful creation
 	ms.Rebuild = false
 
-	// Set status to RUNNING via status reporter
+	// Set status to RUNNING via status reporter. Keep the previous current error
+	// until the running grace window elapses.
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateRunning)
-		status.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, "")
 		// Set start time
 		if msStatus := status.GetMicroserviceStatus(ms.MicroserviceUUID); msStatus != nil {
 			msStatus.StartTime = time.Now().UnixMilli()

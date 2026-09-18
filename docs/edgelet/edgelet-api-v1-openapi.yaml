@@ -772,6 +772,10 @@ paths:
       description: >
         Selector supports UUID, container ID prefix, or dotted application/name.
         Local microservices can be resolved as edgelet.<name> (for example edgelet.router).
+        Crash fields: errorMessage (current; cleared after 30s continuous RUNNING),
+        lastError / lastErrorAt (last crash; not cleared on recovery; omitted when empty),
+        restartCount (omitted when 0). Docker/Podman text is exitCode=N oomKilled=…;
+        the embedded engine keeps CRI reason=….
       parameters:
         - in: path
           name: id
@@ -2224,6 +2228,24 @@ components:
             errorMessage:
               type: string
               nullable: true
+              description: >
+                Current failure. Kept while failing, restarting, or RUNNING for less
+                than 30 seconds after a crash. After 30 seconds of continuous RUNNING,
+                sent as an empty string so the current field clears.
+            lastError:
+              type: string
+              description: >
+                Last crash text. Not cleared on recovery or rebuild. Overwritten only
+                on a new failure. Omitted when empty.
+            lastErrorAt:
+              type: integer
+              format: int64
+              description: Unix milliseconds for lastError. Omitted when 0.
+            restartCount:
+              type: integer
+              description: >
+                Real restart events since the last operator rebuild. Omitted when 0.
+                Rebuild resets this to 0 and does not wipe lastError.
             models:
               type: object
               description: Catalog bind when the microservice lists model items

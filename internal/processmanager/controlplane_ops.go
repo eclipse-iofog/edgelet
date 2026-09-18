@@ -126,7 +126,6 @@ func (pm *ProcessManager) RestartControlPlaneDeployment(item *models.ControlPlan
 
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.LastTransitionAt = nowSec
 	if err := store.GetInstance().UpsertSystemControlPlane(item); err != nil {
 		return err
