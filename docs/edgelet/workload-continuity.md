@@ -27,7 +27,7 @@ Config (`/etc/edgelet/config.yaml`):
 ```yaml
 shutdownPolicy: leave-running   # default for docker/podman
 shutdownGracePeriodSeconds: 90  # used for optional maintenance / data-plane stops
-pruningFrequency: 24            # hours between image prune cycles (engine-neutral key)
+pruningFrequency: 24            # hours between image + unused-local-model prune cycles (not persistent VOLUME data)
 watchdogEnabled: true           # orphan container cleanup; also deletes local models and refuses local Model apply
 ```
 

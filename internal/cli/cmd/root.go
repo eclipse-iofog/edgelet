@@ -117,6 +117,7 @@ func newRootCommand() *cobra.Command {
 	cmd.AddCommand(newRuntimeCommand())
 	cmd.AddCommand(newImageCommand())
 	cmd.AddCommand(newModelCommand())
+	cmd.AddCommand(newVolumeCommand())
 	cmd.AddCommand(newAuthCommand())
 	cmd.AddCommand(newProvisionCommand())
 	cmd.AddCommand(newDeprovisionCommand())

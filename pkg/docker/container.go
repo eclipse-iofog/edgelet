@@ -15,6 +15,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/dnsresolver"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
+	"github.com/eclipse-iofog/edgelet/internal/volumemount"
 	"github.com/eclipse-iofog/edgelet/internal/workloadmeta"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -872,7 +873,7 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 	// Build volume bindings and mounts
 	// Note: We need to handle VOLUME_MOUNT type specially
 	if len(ms.VolumeMappings) > 0 {
-		binds, mounts, err := buildVolumeBindsAndMounts(ms.VolumeMappings, ms.MicroserviceUUID)
+		binds, mounts, err := buildVolumeBindsAndMounts(ms.VolumeMappings, ms.MicroserviceUUID, ms.RunAsUser)
 		if err != nil {
 			return "", err
 		}
@@ -1108,7 +1109,7 @@ func buildPortBindings(portMappings []*models.PortMapping) (network.PortMap, err
 	return bindings, nil
 }
 
-func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserviceUUID string) ([]string, []mount.Mount, error) {
+func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserviceUUID string, runAsUser *string) ([]string, []mount.Mount, error) {
 	if len(volumeMappings) == 0 {
 		return nil, nil, nil
 	}
@@ -1117,33 +1118,44 @@ func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserv
 	mounts := make([]mount.Mount, 0)
 
 	for _, vm := range volumeMappings {
-		// Resolve host destination for volume mounts
-		resolvedHostDestination := vm.HostDestination
-		if vm.Type == models.VolumeMappingTypeVolumeMount {
-			// Use volume mount resolution (will be implemented in volume.go)
-			var err error
-			resolvedHostDestination, err = ResolveVolumeMountPath(vm.HostDestination, vm.Type, microserviceUUID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to resolve volume mount path: %w", err)
-			}
+		if vm == nil {
+			continue
 		}
-
-		// Determine access mode
 		isReadOnly := strings.ToLower(vm.AccessMode) == "ro"
 
 		switch vm.Type {
 		case models.VolumeMappingTypeVolumeMount:
-			// Use Mount API for VOLUME_MOUNT type
-			m := mount.Mount{
+			resolvedHostDestination, err := ResolveVolumeMountPath(vm.HostDestination, vm.Type, microserviceUUID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to resolve volume mount path: %w", err)
+			}
+			mounts = append(mounts, mount.Mount{
 				Type:     mount.TypeBind,
 				Source:   resolvedHostDestination,
 				Target:   vm.ContainerDestination,
 				ReadOnly: isReadOnly,
+			})
+		case models.VolumeMappingTypeVolume:
+			// Bind the per-UUID or shared host directory. Do not create a
+			// node-global Docker named volume from hostDestination.
+			source, err := volumemount.GetInstance().ResolveHostPath(
+				microserviceUUID,
+				vm.HostDestination,
+				false,
+				runAsUser,
+				vm.EffectiveVolumeScope(),
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to resolve persistent volume path: %w", err)
 			}
-			mounts = append(mounts, m)
-		case models.VolumeMappingTypeBind, models.VolumeMappingTypeVolume:
-			// Use bind mount (legacy format; named volumes handled separately)
-			bind := fmt.Sprintf("%s:%s:%s", resolvedHostDestination, vm.ContainerDestination, vm.AccessMode)
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   source,
+				Target:   vm.ContainerDestination,
+				ReadOnly: isReadOnly,
+			})
+		case models.VolumeMappingTypeBind:
+			bind := fmt.Sprintf("%s:%s:%s", vm.HostDestination, vm.ContainerDestination, vm.AccessMode)
 			binds = append(binds, bind)
 		}
 	}

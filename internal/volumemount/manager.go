@@ -16,19 +16,22 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
 
 const (
-	moduleName        = "VolumeMountManager"
-	volumesDir        = "volumes"
-	secretsDir        = "secrets"
-	configMapsDir     = "configMaps"
-	microservicesDir  = "microservices"
-	maxVersionHistory = 1 // Keep only current version for simplicity
-	dataSymlink       = "..data"
+	moduleName          = "VolumeMountManager"
+	volumesDir          = "volumes"
+	secretsDir          = "secrets"
+	configMapsDir       = "configMaps"
+	microservicesDir    = "microservices"
+	persistentDataDir   = "data"
+	persistentSharedDir = "shared"
+	maxVersionHistory   = 1 // Keep only current version for simplicity
+	dataSymlink         = "..data"
 
 	// Permission modes: internal storage uses 750 (owner+group only); bind-mount
 	// targets use 755 dirs and 644 files so non-root container processes can access.
@@ -36,6 +39,15 @@ const (
 	bindMountDirMode  = 0755 // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 	bindMountFileMode = 0644 // #nosec G306 -- bind-mount files readable by non-root containers
 )
+
+// persistentVolumeDirSkip is the set of on-disk trees that survive volume-mount
+// clear. Persistent VOLUME data is destroyed only by explicit reclaim.
+func persistentVolumeDirSkip() map[string]struct{} {
+	return map[string]struct{}{
+		persistentDataDir:   {},
+		persistentSharedDir: {},
+	}
+}
 
 // VolumeMountType represents the type of volume mount
 // VolumeMountType identifies the kind of volume mount.
@@ -1347,21 +1359,23 @@ func parseRunAsUser(s string) (int, int) {
 //     symlinks so that the container gets the real file path
 //
 // For any non-absolute path (VOLUME named volumes, controller omitting type, etc.):
-//   - Creates a persistent data directory at <diskDirectory>/volumes/data/<uuid>/<name>
-//   - This ensures the runtime always receives a writable absolute path, matching
-//     the behavior of Docker named volumes but without Docker's volume subsystem.
+//   - Private: <diskDirectory>/volumes/data/<uuid>/<name>
+//   - Shared: <diskDirectory>/volumes/shared/<name> (same bind for every consumer)
+//   - The runtime always receives a writable absolute bind source. Docker and
+//     Podman must not treat the volume name as a node-global named volume.
 //
 // For absolute paths (BIND and explicit host paths):
-//   - Returns hostDestination unchanged.
+//   - Returns hostDestination unchanged. scope is ignored.
 //
 // This is the engine-agnostic equivalent of docker.ResolveVolumeMountPath and
 // should be called by every container engine implementation before passing
 // mounts to the runtime.
 //
-// runAsUser is optional; when non-nil and non-empty, VOLUME-type dirs under
-// volumes/data/<uuid>/<name> are chown'd to uid:gid for non-root container access.
-// When runAsUser is empty, VOLUME dirs get 0777 for non-root accessibility by default.
-func (vmm *VolumeMountManager) ResolveHostPath(microserviceUUID, hostDestination string, isVolumeMount bool, runAsUser *string) (string, error) {
+// runAsUser is optional; when non-nil and non-empty, private VOLUME dirs are
+// chown'd to uid:gid for non-root container access. When runAsUser is empty,
+// private VOLUME dirs get 0777. Shared dirs are chowned (or chmod'd) only when
+// mkdir created them, so a second consumer cannot steal ownership.
+func (vmm *VolumeMountManager) ResolveHostPath(microserviceUUID, hostDestination string, isVolumeMount bool, runAsUser *string, scope string) (string, error) {
 	if isVolumeMount {
 		var volumeName, keyName string
 		slashIdx := strings.Index(hostDestination, "/")
@@ -1397,53 +1411,72 @@ func (vmm *VolumeMountManager) ResolveHostPath(microserviceUUID, hostDestination
 
 	// Any remaining non-absolute path must be turned into an absolute host path.
 	// This covers:
-	//   - VOLUME-type named volumes (Docker manages these natively; containerd does not)
+	//   - VOLUME-type named volumes (private per UUID, or shared by name)
 	//   - Mappings whose "type" field was omitted by the controller (zero value "")
 	//   - Relative BIND paths (unusual, but must not reach the runtime as-is)
 	// A persistent directory is created so the container always gets a real,
 	// writable bind-mount source instead of a path relative to the runtime's
 	// internal state directory.
 	if !filepath.IsAbs(hostDestination) {
-		dir := filepath.Join(vmm.baseDirectory, "data", microserviceUUID, hostDestination)
+		shared := strings.TrimSpace(scope) == models.VolumeScopeShared
+		var dir string
+		if shared {
+			dir = filepath.Join(vmm.baseDirectory, persistentSharedDir, hostDestination)
+		} else {
+			dir = filepath.Join(vmm.baseDirectory, persistentDataDir, microserviceUUID, hostDestination)
+		}
+		_, statErr := os.Stat(dir)
+		created := os.IsNotExist(statErr)
 		mkdirErr := os.MkdirAll(dir, bindMountDirMode)
 		if mkdirErr != nil {
 			logging.LogWarn(moduleName, fmt.Sprintf("cannot create volume dir %s: %v", dir, mkdirErr))
+			created = false
 		}
-		// Set permissions for non-root container access (VOLUME type only).
-		if runAsUser != nil && *runAsUser != "" {
-			uid, gid := parseRunAsUser(*runAsUser)
-			if uid >= 0 {
-				if chownErr := os.Chown(dir, uid, gid); chownErr != nil {
-					logging.LogWarn(moduleName, fmt.Sprintf("cannot chown volume dir %s to %d:%d: %v", dir, uid, gid, chownErr))
-				}
-			}
-		} else {
-			// RunAsUser empty: make non-root accessible by default (0777).
-			// #nosec G302 -- intentional for VOLUME dirs when runAsUser unset
-			if chmodErr := os.Chmod(dir, 0777); chmodErr != nil {
-				logging.LogWarn(moduleName, fmt.Sprintf("cannot chmod volume dir %s: %v", dir, chmodErr))
-			}
-		}
+		applyPersistentVolumeDirAccess(dir, runAsUser, shared, created)
 		return dir, nil
 	}
 
 	return hostDestination, nil
 }
 
-// clearWalk removes all contents under baseDir (excluding the base itself).
+func applyPersistentVolumeDirAccess(dir string, runAsUser *string, shared, created bool) {
+	if shared && !created {
+		return
+	}
+	if runAsUser != nil && *runAsUser != "" {
+		uid, gid := parseRunAsUser(*runAsUser)
+		if uid >= 0 {
+			if chownErr := os.Chown(dir, uid, gid); chownErr != nil {
+				logging.LogWarn(moduleName, fmt.Sprintf("cannot chown volume dir %s to %d:%d: %v", dir, uid, gid, chownErr))
+			}
+		}
+		return
+	}
+	// RunAsUser empty: make non-root accessible by default (0777).
+	// #nosec G302 -- intentional for VOLUME dirs when runAsUser unset
+	if chmodErr := os.Chmod(dir, 0777); chmodErr != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("cannot chmod volume dir %s: %v", dir, chmodErr))
+	}
+}
+
+// clearWalk removes rebuildable volume-mount artifacts under baseDir.
+// volumes/data and volumes/shared are left in place so persistent VOLUME
+// directories remount after deprovision or re-provision.
 func (vmm *VolumeMountManager) clearWalk(baseDir string) {
-	_ = filepath.Walk(baseDir, func(path string, _ os.FileInfo, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // continue walking past individual entry errors
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return
+	}
+	skip := persistentVolumeDirSkip()
+	for _, entry := range entries {
+		if _, ok := skip[entry.Name()]; ok {
+			continue
 		}
-		if path == baseDir {
-			return nil
-		}
-		if err := os.RemoveAll(path); err != nil { // #nosec G122 -- path from Walk under controlled baseDir
+		path := filepath.Join(baseDir, entry.Name())
+		if err := os.RemoveAll(path); err != nil { // #nosec G122 -- child of controlled baseDir
 			logging.LogWarn(moduleName, fmt.Sprintf("Error deleting: %s: %v", path, err))
 		}
-		return nil
-	})
+	}
 }
 
 // clearVolumeMountStateLocked resets persisted and in-memory volume mount state.
@@ -1463,7 +1496,8 @@ func (vmm *VolumeMountManager) clearVolumeMountStateLocked() {
 	statusreporter.GetInstance().UpdateVolumeMountManagerStatus(0, time.Now().UnixMilli())
 }
 
-// Clear clears all volume mounts
+// Clear clears volume-mount index plus secrets, configMaps, and microservice
+// staging. It does not walk volumes/data or volumes/shared.
 func (vmm *VolumeMountManager) Clear() error {
 	logging.LogDebug(moduleName, "Start clearing volume mounts")
 
@@ -1484,21 +1518,21 @@ func (vmm *VolumeMountManager) Clear() error {
 	return nil
 }
 
-// ClearControllerArtifacts clears only controller-origin volume mount artifacts
-// while preserving local data directories under volumes/data.
+// ClearControllerArtifacts clears controller-origin volume-mount artifacts
+// (secrets and configMaps) while preserving volumes/data and volumes/shared.
 func (vmm *VolumeMountManager) ClearControllerArtifacts() error {
 	logging.LogDebug(moduleName, "Start clearing controller volume-mount artifacts")
-
-	artifactDirs := make([]string, 0, 2)
-	for _, dirName := range []string{secretsDir, configMapsDir} {
-		artifactDirs = append(artifactDirs, filepath.Join(vmm.baseDirectory, dirName))
-	}
 
 	vmm.indexLock.Lock()
 	vmm.clearVolumeMountStateLocked()
 	vmm.indexLock.Unlock()
 
-	for _, dirPath := range artifactDirs {
+	skip := persistentVolumeDirSkip()
+	for _, dirName := range []string{secretsDir, configMapsDir} {
+		if _, ok := skip[dirName]; ok {
+			continue
+		}
+		dirPath := filepath.Join(vmm.baseDirectory, dirName)
 		if err := os.RemoveAll(dirPath); err != nil {
 			logging.LogWarn(moduleName, fmt.Sprintf("Error deleting controller artifact directory %s: %v", dirPath, err))
 		}

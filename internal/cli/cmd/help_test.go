@@ -99,7 +99,7 @@ func TestHelp_DeprovisionShowsFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stdout=%q", code, stdout)
 	}
-	for _, want := range []string{"--scope", "--keep-local", "WARNING:", "Examples:"} {
+	for _, want := range []string{"--scope", "--keep-local", "--purge-volumes", "WARNING:", "Examples:"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected %q in deprovision help, got stdout=%q", want, stdout)
 		}
@@ -169,6 +169,9 @@ func TestHelp_MSRemoveShowsWarning(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "WARNING:") {
 		t.Fatalf("expected ms rm warning in help stdout, got stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout, "--cleanup") {
+		t.Fatalf("expected --cleanup in ms rm help, got stdout=%q", stdout)
 	}
 }
 
@@ -385,5 +388,21 @@ func TestHelp_SystemPruneShowsModeFlag(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "--mode") {
 		t.Fatalf("expected --mode in system prune help, got stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout, "volume prune") {
+		t.Fatalf("expected volume prune pointer in system prune help, got stdout=%q", stdout)
+	}
+}
+
+func TestHelp_VolumeShowsSubcommands(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "volume", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"ls", "rm", "prune", "--shared"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in volume help, got stdout=%q", want, stdout)
+		}
 	}
 }

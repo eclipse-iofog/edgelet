@@ -490,6 +490,42 @@ func (pm *ProcessManager) GetLatestMicroservices() []*models.Microservice {
 	return pm.microserviceManager.GetLatestMicroservices()
 }
 
+// ConfiguredMicroserviceImages returns image names that scheduled prune must keep:
+// controller-managed desired microservices plus local-deployed workloads that are
+// not gone. Stopped or restarting local deploys stay in the keep-set so their
+// images are not deleted before reconcile recreates the container.
+func (pm *ProcessManager) ConfiguredMicroserviceImages() []string {
+	seen := make(map[string]struct{})
+	names := make([]string, 0)
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	for _, ms := range pm.GetLatestMicroservices() {
+		if ms != nil {
+			add(ms.ImageName)
+		}
+	}
+	items, err := store.GetInstance().ListLocalWorkloads()
+	if err != nil {
+		return names
+	}
+	for _, item := range items {
+		if item == nil || item.IsGone() {
+			continue
+		}
+		add(item.ImageName)
+	}
+	return names
+}
+
 // SetWatchdogLocalModelsCallback runs when watchdog is on so local Model rows
 // and trees are removed (fleet-desired models are kept).
 func (pm *ProcessManager) SetWatchdogLocalModelsCallback(fn func()) {
@@ -2248,6 +2284,14 @@ func (pm *ProcessManager) PruneVolumes() (*engine.VolumePruneReport, error) {
 		return nil, errors.New("process manager engine is not initialized")
 	}
 	return pm.engine.PruneVolumes(context.Background())
+}
+
+// ListAllContainers returns every listed container from the active engine.
+func (pm *ProcessManager) ListAllContainers() ([]engine.Container, error) {
+	if pm == nil || pm.engine == nil {
+		return nil, errors.New("process manager engine is not initialized")
+	}
+	return pm.engine.GetAllContainers()
 }
 
 // InspectContainerRaw returns full engine-native inspect payload for a container.

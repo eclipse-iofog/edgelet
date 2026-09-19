@@ -100,6 +100,31 @@ Evaluator alias policy is canonical + alias tolerant:
   - Resource: `models/prune`
   - Verb: `create`
 
+- Endpoint: `GET /v1/volumes`
+  - Resource: `volumes`
+  - Verb: `get`
+
+- Endpoint: `GET /v1/volumes/shared/{name}`
+  - Resource: `volumes`
+  - Verb: `get`
+  - ResourceName: `{name}`
+
+- Endpoint: `DELETE /v1/volumes/{uuid}`
+  - Resource: `volumes`
+  - Verb: `delete`
+  - ResourceName: `{uuid}`
+  - Scope: private persistent VOLUME only
+
+- Endpoint: `DELETE /v1/volumes/shared/{name}`
+  - Resource: `volumes`
+  - Verb: `delete`
+  - ResourceName: `{name}`
+  - Scope: shared persistent VOLUME only
+
+- Endpoint: `POST /v1/volumes:prune`
+  - Resource: `volumes/prune`
+  - Verb: `create`
+
 - Endpoint: `GET /v1/system/gps`
   - Resource: `system/gps`
   - Verb: `get`

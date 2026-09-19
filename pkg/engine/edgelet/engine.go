@@ -1177,6 +1177,8 @@ func (e *Engine) PruneContainers(_ context.Context) (*engine.ContainerPruneRepor
 	return report, nil
 }
 
+// PruneVolumes removes rebuildable staging under volumes/microservices.
+// Persistent VOLUME data under volumes/data and volumes/shared is not deleted.
 func (e *Engine) PruneVolumes(_ context.Context) (*engine.VolumePruneReport, error) {
 	pruneStart := time.Now()
 	ctx := e.ctx()
@@ -1184,45 +1186,29 @@ func (e *Engine) PruneVolumes(_ context.Context) (*engine.VolumePruneReport, err
 	if err != nil {
 		return nil, err
 	}
-	activeUUIDs := make(map[string]struct{}, len(containers))
+	keepUUIDs := make(map[string]struct{}, len(containers))
 	for _, c := range containers {
 		info, infoErr := c.Info(ctx)
 		if infoErr != nil {
 			continue
 		}
 		if uuid := workloadmeta.MicroserviceUIDFromLabels(info.Labels); strings.TrimSpace(uuid) != "" {
-			activeUUIDs[uuid] = struct{}{}
+			keepUUIDs[uuid] = struct{}{}
 		}
 	}
 
 	baseVolumesDir := filepath.Join(config.GetInstance().DiskDirectory, "volumes")
-	deleted := make([]string, 0)
-	for _, subDir := range []string{"data", "microservices"} {
-		entries, readErr := os.ReadDir(filepath.Join(baseVolumesDir, subDir))
-		if readErr != nil {
-			if os.IsNotExist(readErr) {
-				continue
-			}
-			return nil, readErr
+	targets, err := rebuildableVolumeStagingTargets(baseVolumesDir, keepUUIDs)
+	if err != nil {
+		return nil, err
+	}
+	deleted := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if err := os.RemoveAll(target); err != nil {
+			e.emitEngineWarn(runtimeops.EventEnginePrune, "", "", "", runtimeops.ReasonRemoveFailed, "prune volume path failed", pruneStart, err, map[string]any{"operation": "pruneVolumes"})
+			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			uuid := strings.TrimSpace(entry.Name())
-			if uuid == "" {
-				continue
-			}
-			if _, ok := activeUUIDs[uuid]; ok {
-				continue
-			}
-			target := filepath.Join(baseVolumesDir, subDir, uuid)
-			if err := os.RemoveAll(target); err != nil {
-				e.emitEngineWarn(runtimeops.EventEnginePrune, "", "", "", runtimeops.ReasonRemoveFailed, "prune volume path failed", pruneStart, err, map[string]any{"operation": "pruneVolumes"})
-				continue
-			}
-			deleted = append(deleted, target)
-		}
+		deleted = append(deleted, target)
 	}
 
 	report := &engine.VolumePruneReport{
@@ -1234,18 +1220,7 @@ func (e *Engine) PruneVolumes(_ context.Context) (*engine.VolumePruneReport, err
 }
 
 func (e *Engine) RemoveNamedVolume(_ context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return errors.New("volume name is required")
-	}
-	target := filepath.Join(config.GetInstance().DiskDirectory, "volumes", name)
-	if _, err := os.Stat(target); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return os.RemoveAll(target)
+	return discardNamedVolume(name)
 }
 
 // --- Inspection / stats ---

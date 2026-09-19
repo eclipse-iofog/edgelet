@@ -101,12 +101,17 @@ func BuildMicroserviceFromLocalManifest(doc *LocalDeployManifest, deploymentID, 
 		if volumeType == "" {
 			volumeType = string(VolumeMappingTypeBind)
 		}
-		ms.VolumeMappings = append(ms.VolumeMappings, &VolumeMapping{
+		mapping := &VolumeMapping{
 			HostDestination:      volume.HostDestination,
 			ContainerDestination: volume.ContainerDestination,
 			AccessMode:           volume.AccessMode,
 			Type:                 VolumeMappingType(volumeType),
-		})
+			Scope:                VolumeScopePrivate,
+		}
+		if mapping.Type == VolumeMappingTypeVolume {
+			mapping.Scope = CanonicalVolumeScope(volume.Scope)
+		}
+		ms.VolumeMappings = append(ms.VolumeMappings, mapping)
 	}
 	for _, port := range doc.Spec.Container.Ports {
 		ms.PortMappings = append(ms.PortMappings, &PortMapping{

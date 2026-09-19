@@ -46,5 +46,6 @@ edgelet [flags]
 * [edgelet shutdown](edgelet_shutdown.md)	 - Control-plane stop for init systems
 * [edgelet system](edgelet_system.md)	 - System operations
 * [edgelet version](edgelet_version.md)	 - Print edgelet version
+* [edgelet volume](edgelet_volume.md)	 - Persistent volume operations
 
 

@@ -20,6 +20,7 @@ func newProvisionCommand() *cobra.Command {
 func newDeprovisionCommand() *cobra.Command {
 	var scope string
 	var keepLocal bool
+	var purgeVolumes bool
 
 	cmd := &cobra.Command{
 		Use:     "deprovision",
@@ -41,7 +42,10 @@ func newDeprovisionCommand() *cobra.Command {
 			var result *provision.DeprovisionResult
 			err := run.WithSpinner(appCtx, "Deprovisioning agent...", func() error {
 				var err error
-				result, err = provision.Deprovision(appCtx.Client, provision.DeprovisionRequest{Scope: scopeVal})
+				result, err = provision.Deprovision(appCtx.Client, provision.DeprovisionRequest{
+					Scope:        scopeVal,
+					PurgeVolumes: purgeVolumes,
+				})
 				return err
 			})
 			if err != nil {
@@ -52,6 +56,7 @@ func newDeprovisionCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&scope, "scope", "all", "Deprovision scope: all or local")
 	cmd.Flags().BoolVar(&keepLocal, "keep-local", false, "Preserve local microservices (sets scope to local)")
+	cmd.Flags().BoolVar(&purgeVolumes, "purge-volumes", false, "Destroy workload persistent VOLUME data after deprovision")
 	registerDeprovisionScopeCompletion(cmd)
 	return cmd
 }

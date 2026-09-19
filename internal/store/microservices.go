@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -11,6 +12,18 @@ import (
 
 // SaveControllerMicroservices replaces all controller microservice rows in a single transaction.
 func (d *DB) SaveControllerMicroservices(microservices []*models.Microservice) error {
+	previous, err := d.LoadControllerMicroservices()
+	if err != nil {
+		return err
+	}
+	prevUUIDs := make(map[string]struct{}, len(previous))
+	for _, ms := range previous {
+		if ms == nil || strings.TrimSpace(ms.MicroserviceUUID) == "" {
+			continue
+		}
+		prevUUIDs[ms.MicroserviceUUID] = struct{}{}
+	}
+
 	tx, err := d.Conn().Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -21,13 +34,40 @@ func (d *DB) SaveControllerMicroservices(microservices []*models.Microservice) e
 		return fmt.Errorf("failed to clear controller_microservices: %w", err)
 	}
 
+	nextUUIDs := make(map[string]struct{}, len(microservices))
 	for _, ms := range microservices {
+		if ms == nil {
+			continue
+		}
 		if err := insertMicroservice(tx, ms); err != nil {
 			return fmt.Errorf("failed to insert microservice %s: %w", ms.MicroserviceUUID, err)
 		}
+		if uuid := strings.TrimSpace(ms.MicroserviceUUID); uuid != "" {
+			nextUUIDs[uuid] = struct{}{}
+		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	for _, ms := range microservices {
+		if ms == nil || strings.TrimSpace(ms.MicroserviceUUID) == "" {
+			continue
+		}
+		if err := d.UpsertPersistentVolumesFromMappings(ms.MicroserviceUUID, PersistentVolumeKindWorkload, ms.VolumeMappings); err != nil {
+			return fmt.Errorf("failed to record persistent volumes for %s: %w", ms.MicroserviceUUID, err)
+		}
+	}
+	for uuid := range prevUUIDs {
+		if _, ok := nextUUIDs[uuid]; ok {
+			continue
+		}
+		if err := d.MarkPersistentVolumesUnreferenced(uuid); err != nil {
+			return fmt.Errorf("failed to mark persistent volumes unreferenced for %s: %w", uuid, err)
+		}
+	}
+	return nil
 }
 
 // LoadControllerMicroservices retrieves all controller microservices ordered by uuid.

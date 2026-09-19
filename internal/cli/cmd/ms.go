@@ -33,7 +33,7 @@ func newMSCommand() *cobra.Command {
 		newMSLifecycleCommand("stop", "Stop a microservice", "", microservice.Stop),
 		newMSLifecycleCommand("restart", "Restart a microservice", "", microservice.Restart),
 		newMSLifecycleCommand("kill", "Kill a microservice", microservice.KillCommandLong(), microservice.Kill),
-		newMSLifecycleCommand("rm", "Remove a microservice", microservice.RemoveCommandLong(), microservice.Remove),
+		newMSRemoveCommand(),
 	)
 
 	return cmd
@@ -101,6 +101,37 @@ func newMSLogsCommand() *cobra.Command {
 		},
 	}
 	registerLogsFlags(cmd, &flags)
+	return cmd
+}
+
+func newMSRemoveCommand() *cobra.Command {
+	var cleanup bool
+	cmd := &cobra.Command{
+		Use:   "rm <id>",
+		Short: "Remove a microservice",
+		Long:  microservice.RemoveCommandLong(),
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if appCtx == nil {
+				return run.NewCLIError(run.CodeInternal, "cli context is nil", nil)
+			}
+			if err := run.RequireDaemon(appCtx.Client); err != nil {
+				return err
+			}
+			id := args[0]
+			var result *microservice.LifecycleResult
+			err := run.WithSpinner(appCtx, msLifecycleSpinnerMessage("rm", id), func() error {
+				var err error
+				result, err = microservice.Remove(appCtx.Client, id, cleanup)
+				return err
+			})
+			if err != nil {
+				return err
+			}
+			return writeHumanMutationOrRoute(appCtx, result.Path, result.Human, result.Data)
+		},
+	}
+	cmd.Flags().BoolVar(&cleanup, "cleanup", false, "Reserve a cleanup bit for later orphan prune; does not delete persistent VOLUME data now")
 	return cmd
 }
 

@@ -315,6 +315,7 @@ After a thin upgrade, if the embedded bundle hash changed, the next `edgelet dae
 
 1. Extracts to `/var/lib/edgelet/data/<new-hash>/`
 2. Rotates `data/current` and `data/previous` symlinks
+3. Removes other `data/<hash>/` trees (and leftover `<hash>-tmp` dirs). `current` and `previous` are kept so coordinated rollback can reuse the prior unpack.
 
 Operator CLI (`edgelet ms`, `edgelet deploy`, …) runs in the **thin** process and does not trigger extract.
 

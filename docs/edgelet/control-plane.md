@@ -7,7 +7,7 @@ Edgelet can host **one** Datasance Controller container per node when you apply 
 - At most **one** controller deployment per Edgelet (SQLite singleton).
 - Edgelet may run with `controllerUrl` pointing to a **remote** cluster; local ControlPlane is optional.
 - Reconcile runs **before** managed microservices; accidental `docker rm` recreates the container while the DB row exists.
-- Only `edgelet controlplane delete` (or `DELETE /v1/system/controlplane`) removes the deployment and cleans volumes.
+- Only `edgelet controlplane delete` (or `DELETE /v1/system/controlplane`) removes the deployment and its **private** DB/log volumes under `{diskDirectory}/volumes/data/{controller-uuid}/`. Restart keeps those directories. Control-plane volumes are never `scope: shared` and are never dropped by `--purge-volumes`.
 
 ## Fixtures
 
@@ -78,7 +78,7 @@ edgelet controlplane get
 edgelet controlplane delete
 ```
 
-This is the **only** supported way to remove the controller deployment. It remains **provisioned-guarded**: rejected while the agent is provisioned — deprovision the agent first. While unprovisioned, `edgelet ms rm` on the controller UUID is also rejected; Edgelet will reconcile the container back if the ControlPlane record still exists.
+This is the **only** supported way to remove the controller deployment **and** its private DB/log volumes. It remains **provisioned-guarded**: rejected while the agent is provisioned — deprovision the agent first. While unprovisioned, `edgelet ms rm` on the controller UUID is also rejected; Edgelet will reconcile the container back if the ControlPlane record still exists. `edgelet deprovision --purge-volumes` does **not** drop these volumes.
 
 Use **Restart** (above) to bounce the container without deleting the deployment.
 

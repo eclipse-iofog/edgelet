@@ -37,7 +37,7 @@ Common issues when running Edgelet on edge nodes.
    df -h /var/lib/edgelet /var/lib/edgelet-containerd
    ```
 
-   If usage grows after deleting microservices, orphaned `VOLUME` data may remain under `/var/lib/edgelet/volumes/data/` until prune runs — see [volumes.md](volumes.md).
+   If usage grows after deleting microservices, private `VOLUME` data remains under `/var/lib/edgelet/volumes/data/` and shared names under `/var/lib/edgelet/volumes/shared/` until you reclaim with `edgelet volume` — see [volumes.md](volumes.md). Scheduled prune and `edgelet system prune` do not delete those trees.
 
 ---
 
@@ -196,7 +196,7 @@ ls -la /var/lib/edgelet/data/current /var/lib/edgelet/data/.lock
    sudo systemctl start edgelet
    ```
 
-   Replace `<hash-dir>` with the bundle directory name under `/var/lib/edgelet/data/` (not `current` or `previous` symlinks).
+   Replace `<hash-dir>` with the bundle directory name under `/var/lib/edgelet/data/` (not `current` or `previous` symlinks). After a healthy daemon start, only those two hash trees remain; leftover extracts from older upgrades are removed automatically.
 
 Prefer **`systemctl stop` then `systemctl start`** over blind `restart` during shim upgrades — see [container-engine.md](container-engine.md). After five rapid failures within 300s, systemd stops auto-restarting `edgelet-containerd` until `reset-failed` (openrc: `respawn_max=5` per 300s window).
 

@@ -126,8 +126,8 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 2 {
-		t.Fatalf("expected schema version 2 after upgrade, got %d", maxVersion)
+	if maxVersion != 3 {
+		t.Fatalf("expected schema version 3 after upgrade, got %d", maxVersion)
 	}
 
 	got, err := db.GetLocalRegistry(5)
@@ -192,12 +192,12 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 		t.Fatalf("expected omitted entrypoint/cpus, got entrypoint=%v cpus=%v", entrypoint, cpus)
 	}
 
-	if tableExists(t, db, "schema_v3_placeholder") {
-		t.Fatal("unexpected extra schema table")
+	if !tableExists(t, db, "persistent_volumes") {
+		t.Fatal("expected persistent_volumes after schema v3")
 	}
 }
 
-func TestSchemaVersionStaysAt2(t *testing.T) {
+func TestSchemaVersionIs3(t *testing.T) {
 	entries, err := migrationFiles.ReadDir("migrations")
 	if err != nil {
 		t.Fatalf("read migrations: %v", err)
@@ -210,8 +210,8 @@ func TestSchemaVersionStaysAt2(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse %s: %v", entry.Name(), err)
 		}
-		if version > 2 {
-			t.Fatalf("schema version must stay at 2; found %s", entry.Name())
+		if version > 3 {
+			t.Fatalf("schema version must stay at 3; found %s", entry.Name())
 		}
 	}
 
@@ -220,7 +220,7 @@ func TestSchemaVersionStaysAt2(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 2 {
-		t.Fatalf("expected schema version 2, got %d", maxVersion)
+	if maxVersion != 3 {
+		t.Fatalf("expected schema version 3, got %d", maxVersion)
 	}
 }

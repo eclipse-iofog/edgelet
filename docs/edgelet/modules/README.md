@@ -40,7 +40,7 @@ Approximate sequence in `internal/supervisor/supervisor.go`:
 6. `processmanager` — container reconcile (after engine wired)
 7. `gps` — NMEA/device integration
 8. `edgeletapi` — HTTPS + Unix `/v1/...`
-9. `pruning` — scheduled/threshold image prune
+9. `pruning` — scheduled/threshold image + unused-local-model prune (not persistent VOLUME data)
 10. `edgeguard` — hardware attestation loop
 
 Host hardware/USB inventory posting (formerly Resource Manager) is **removed**. Edge Guard stays.

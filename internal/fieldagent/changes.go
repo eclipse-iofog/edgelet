@@ -73,7 +73,8 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 		}
 
-		// Process prune change
+		// Process prune change (images + unused local models only; persistent
+		// VOLUME data is reclaimed only by explicit volume commands).
 		if prune, ok := changes["prune"].(bool); ok && prune && !initialization {
 			logging.LogDebug(moduleName, "Processing prune change")
 			if err := fa.pruneDanglingImages(); err != nil {
@@ -84,6 +85,7 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 				logging.LogError(moduleName, "Unable to prune unused local models", err)
 				resetChanges = false
 			}
+			_ = fa.pruneVolumesFn
 		}
 
 		// Process volumeMounts change

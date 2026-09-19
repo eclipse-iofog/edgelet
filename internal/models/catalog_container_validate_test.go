@@ -92,6 +92,7 @@ func TestValidate_CatalogBindPathCollidesWithVolumeAndTmpfs(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{{
 			HostDestination:      "/var/lib/data",
 			ContainerDestination: "/models",

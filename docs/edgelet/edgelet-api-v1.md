@@ -14,6 +14,8 @@ The **EdgeletAPI** is the on-device operator API exposed by the Edgelet daemon. 
 | [../cli/output-schemas.md](../cli/output-schemas.md) | JSON/YAML output shapes for `-o json` |
 | [models.md](models.md) | Model artifact lifecycle |
 | [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller JSON contract (status, RuntimeClass, catalog, prune) |
+| [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md) | Controller `volumeMappings[].scope` (`private` \| `shared`) |
+| [volumes.md](volumes.md) | Persistent VOLUME retain/reclaim |
 
 ---
 
@@ -268,6 +270,20 @@ Model artifact operations (not container images). Operator guide: [models.md](mo
 | `DELETE /v1/models/{name}` | Remove row and on-disk artifacts |
 
 Local Model apply is refused while `watchdogEnabled` is on.
+
+### `/v1/volumes*`
+
+Persistent `VOLUME` claims (not BIND host paths, not secret/configmap staging). Admin RBAC: `volumes` / `volumes/prune`. Operator guide: [volumes.md](volumes.md).
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/volumes` | List claims. Private rows set `uuid`; shared rows set `uuid` null and list `consumers` (local and/or controller UUIDs) |
+| `GET /v1/volumes/shared/{name}` | Inspect one shared claim |
+| `DELETE /v1/volumes/{uuid}` | Destroy **private** data. Optional `?name=` and `?force=`. Does not delete `volumes/shared/` |
+| `DELETE /v1/volumes/shared/{name}` | Destroy a **shared** claim. Remaining consumers or a mounted path → 409 |
+| `POST /v1/volumes:prune` | Dry-run by default. Destroy requires `yes: true`. 24h grace unless `force`. Control-plane volumes are never pruned |
+
+`DELETE /v1/system/provision?purgeVolumes=true` destroys **workload** persistent volumes only (shared only if no remaining consumers). Control-plane volumes stay.
 
 ### Microservice self routes
 

@@ -104,8 +104,8 @@ func (e *Engine) PruneContainers(_ context.Context) (*engine.ContainerPruneRepor
 func (e *Engine) PruneVolumes(_ context.Context) (*engine.VolumePruneReport, error) {
 	return nil, errors.New("unsupported")
 }
-func (e *Engine) RemoveNamedVolume(_ context.Context, _ string) error {
-	return nil
+func (e *Engine) RemoveNamedVolume(_ context.Context, name string) error {
+	return discardNamedVolume(name)
 }
 func (e *Engine) InspectContainerRaw(_ string) (map[string]any, error) {
 	return nil, errors.New("unsupported")

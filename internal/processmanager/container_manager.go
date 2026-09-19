@@ -208,7 +208,8 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 }
 
 // RemoveContainerByMicroserviceUUID removes a container by microservice UUID.
-// withCleanup controls Docker named-volume removal (passed to engine.RemoveContainer).
+// withCleanup is passed to engine.RemoveContainer. Persistent VOLUME data is
+// bind-mounted and is not deleted when the container is removed.
 // removeImage controls whether the container image is also removed after container deletion —
 // set true for normal lifecycle deletions,
 // false for the deprovision path.

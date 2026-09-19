@@ -252,7 +252,30 @@ func (h *EdgeletAPIHandler) HandleSystemProvision(w http.ResponseWriter, r *http
 		})
 	case http.MethodDelete:
 		scope := strings.TrimSpace(r.URL.Query().Get("scope"))
-		if err := h.facade.Deprovision(scope); err != nil {
+		purgeVolumes, err := parseBooleanFormValue(r.URL.Query().Get("purgeVolumes"), "purgeVolumes")
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+			return
+		}
+		if r.Body != nil {
+			var body struct {
+				Scope        *string `json:"scope"`
+				PurgeVolumes *bool   `json:"purgeVolumes"`
+			}
+			dec := json.NewDecoder(r.Body)
+			if decodeErr := dec.Decode(&body); decodeErr == nil {
+				if body.Scope != nil && scope == "" {
+					scope = strings.TrimSpace(*body.Scope)
+				}
+				if body.PurgeVolumes != nil && strings.TrimSpace(r.URL.Query().Get("purgeVolumes")) == "" {
+					purgeVolumes = *body.PurgeVolumes
+				}
+			} else if !errors.Is(decodeErr, io.EOF) && r.ContentLength > 0 {
+				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, "invalid JSON body", nil)
+				return
+			}
+		}
+		if err := h.facade.Deprovision(scope, purgeVolumes); err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "invalid deprovision scope") {
 				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 				return
@@ -322,6 +345,10 @@ func (h *EdgeletAPIHandler) HandleSystemPrune(w http.ResponseWriter, r *http.Req
 	}
 	result, err := h.facade.Prune(r.URL.Query().Get("mode"))
 	if err != nil {
+		if errors.Is(err, runtimeapi.ErrSystemPruneVolumes) {
+			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+			return
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "invalid prune mode") {
 			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 			return
@@ -1085,16 +1112,25 @@ func (h *EdgeletAPIHandler) HandleMicroservices(w http.ResponseWriter, r *http.R
 			}
 			writeSuccess(w, http.StatusOK, item)
 		case http.MethodDelete:
-			uuid, err := h.facade.RemoveRuntimeMicroservice(id)
+			cleanup, parseErr := parseBooleanFormValue(r.URL.Query().Get("cleanup"), "cleanup")
+			if parseErr != nil {
+				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, parseErr.Error(), nil)
+				return
+			}
+			uuid, err := h.facade.RemoveRuntimeMicroserviceWithCleanup(id, cleanup)
 			if err != nil {
 				writeMicroserviceLifecycleError(w, err)
 				return
 			}
-			writeSuccess(w, http.StatusOK, map[string]any{
+			payload := map[string]any{
 				"status":           "ok",
 				"microserviceUuid": uuid,
 				"warning":          "if microservice is controller-managed, reconcile may recreate it",
-			})
+			}
+			if cleanup {
+				payload["cleanupReserved"] = true
+			}
+			writeSuccess(w, http.StatusOK, payload)
 		default:
 			writeAPIError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed", nil)
 		}

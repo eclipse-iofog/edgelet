@@ -11,10 +11,12 @@ import (
 )
 
 type fakeClient struct {
-	running   bool
-	gets      map[string]map[string]any
-	errs      map[string]error
-	applyPoll int
+	running    bool
+	gets       map[string]map[string]any
+	errs       map[string]error
+	applyPoll  int
+	lastMethod string
+	lastPath   string
 }
 
 func (f *fakeClient) IsDaemonRunning() bool {
@@ -22,6 +24,8 @@ func (f *fakeClient) IsDaemonRunning() bool {
 }
 
 func (f *fakeClient) Request(method, path string, _ any) (map[string]any, error) {
+	f.lastMethod = method
+	f.lastPath = path
 	key := method + " " + path
 	if strings.Contains(path, ":apply/op-1") {
 		f.applyPoll++

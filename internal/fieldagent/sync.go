@@ -339,6 +339,15 @@ func parseMicroservice(data map[string]any) (*models.Microservice, error) {
 						volumeMapping.Type = models.VolumeMappingTypeBind
 					}
 				}
+				scopeStr := ""
+				if rawScope, ok := vmMap["scope"].(string); ok {
+					scopeStr = rawScope
+				}
+				if volumeMapping.Type == models.VolumeMappingTypeVolume {
+					volumeMapping.Scope = models.CanonicalVolumeScope(scopeStr)
+				} else {
+					volumeMapping.Scope = models.VolumeScopePrivate
+				}
 				microservice.VolumeMappings = append(microservice.VolumeMappings, volumeMapping)
 			}
 		}

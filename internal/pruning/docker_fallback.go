@@ -14,12 +14,6 @@ func (m *Manager) pruneContainersDocker() {
 	}
 }
 
-func (m *Manager) pruneVolumesDocker() {
-	if _, err := docker.GetInstance().PruneVolumes(); err != nil {
-		logging.LogError(moduleName, "Error pruning Docker volumes", err)
-	}
-}
-
 func (m *Manager) deleteImageDocker(nameOrID string) error {
 	return docker.GetInstance().RemoveImage(nameOrID)
 }

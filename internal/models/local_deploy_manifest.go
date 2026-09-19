@@ -45,6 +45,7 @@ type LocalDeployManifest struct {
 				ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 				AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 				Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+				Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 			} `yaml:"volumes,omitempty" json:"volumes,omitempty"`
 			ExtraHosts []struct {
 				Name    string `yaml:"name" json:"name"`
@@ -129,10 +130,12 @@ func (m *LocalDeployManifest) Validate() error {
 			if !isValidHostPath(volume.HostDestination) {
 				return fmt.Errorf("spec.container.volumes[%d].hostDestination must be an absolute host path for type BIND", i)
 			}
+			volume.Scope = VolumeScopePrivate
 		case VolumeMappingTypeVolume:
 			if !localDeployVolumeNamePattern.MatchString(strings.TrimSpace(volume.HostDestination)) {
 				return fmt.Errorf("spec.container.volumes[%d].hostDestination includes invalid characters for a local volume name, only \"[a-zA-Z0-9][a-zA-Z0-9_.-]*\" are allowed. If you intended to pass a host directory, use type: bind", i)
 			}
+			volume.Scope = CanonicalVolumeScope(volume.Scope)
 		case VolumeMappingTypeVolumeMount:
 			return fmt.Errorf("spec.container.volumes[%d].type VOLUME_MOUNT is not supported for local manifests", i)
 		default:

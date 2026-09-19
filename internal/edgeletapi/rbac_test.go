@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/auth"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -117,11 +118,104 @@ func TestIsAuthorized_ModelRoutesDenyAndAllow(t *testing.T) {
 	}
 }
 
+func TestIsAuthorized_VolumeRoutesDenyAndAllow(t *testing.T) {
+	denied := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"models"},
+							"verbs":     []any{"get"},
+						},
+					},
+				},
+			},
+		},
+	}
+	destroy := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes", Verb: "delete"}
+	if isAuthorized(denied, destroy) {
+		t.Fatal("expected volumes delete to be denied without a volumes rule")
+	}
+	prune := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes/prune", Verb: "create"}
+	if isAuthorized(denied, prune) {
+		t.Fatal("expected volumes prune to be denied without a volumes/prune rule")
+	}
+
+	allowed := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"volumes", "volumes/prune"},
+							"verbs":     []any{"get", "delete", "create"},
+						},
+					},
+				},
+			},
+		},
+	}
+	if !isAuthorized(allowed, destroy) {
+		t.Fatal("expected volumes delete to be allowed")
+	}
+	if !isAuthorized(allowed, prune) {
+		t.Fatal("expected volumes prune to be allowed")
+	}
+}
+
 func TestMapRequestToPermission_ModelRoutesWithoutTokenStillMap(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	perm, ok := mapRequestToPermission(req)
 	if !ok || perm.Resource != "models" {
 		t.Fatalf("expected models mapping, got ok=%v perm=%+v", ok, perm)
+	}
+}
+
+func TestAuthMiddlewareV1_VolumeDestroyDeniedWithoutVolumesRule(t *testing.T) {
+	origValidate := validateLocalJWTFn
+	defer func() { validateLocalJWTFn = origValidate }()
+	validateLocalJWTFn = func(string) (*auth.LocalJWTValidationResult, error) {
+		return &auth.LocalJWTValidationResult{Claims: jwt.MapClaims{
+			"tokenUse": "serviceaccount",
+			"sub":      "system:serviceaccount:app:ms",
+			"edgelet.iofog.org": map[string]any{
+				"rbac": map[string]any{
+					"rulesByGroup": map[string]any{
+						"edgelet.iofog.org/v1": []any{
+							map[string]any{
+								"resources": []any{"models"},
+								"verbs":     []any{"get"},
+							},
+						},
+					},
+				},
+			},
+		}}, nil
+	}
+	handler := authMiddlewareV1(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodDelete, path: "/v1/volumes/ms-uuid"},
+		{method: http.MethodDelete, path: "/v1/volumes/shared/shared-config"},
+		{method: http.MethodPost, path: "/v1/volumes:prune"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		rr := httptest.NewRecorder()
+		handler(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s %s: expected 403, got %d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		}
 	}
 }
 
@@ -192,6 +286,10 @@ func TestMapRequestToPermission_SystemSwitchAndCert(t *testing.T) {
 		{method: http.MethodPost, path: "/v1/models:pull", resource: "models/pull", verb: "create"},
 		{method: http.MethodGet, path: "/v1/models:pull/op-1", resource: "models/pull/status", verb: "get"},
 		{method: http.MethodPost, path: "/v1/models:prune", resource: "models/prune", verb: "create"},
+		{method: http.MethodGet, path: "/v1/volumes", resource: "volumes", verb: "get"},
+		{method: http.MethodDelete, path: "/v1/volumes/ms-uuid", resource: "volumes", verb: "delete"},
+		{method: http.MethodDelete, path: "/v1/volumes/shared/shared-config", resource: "volumes", verb: "delete"},
+		{method: http.MethodPost, path: "/v1/volumes:prune", resource: "volumes/prune", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/models:apply", resource: "deploy/models", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/models:validate", resource: "deploy/models", verb: "create"},
 		{method: http.MethodGet, path: "/v1/deploy/microservices:apply/op-123", resource: "deploy/microservices/apply/status", verb: "get"},

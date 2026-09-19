@@ -9,6 +9,7 @@ This document is for the **Pot / Datasance Controller** team. It is the agent-si
 - `getChanges` flags and GET routes
 - Fog `PUT status` (and the matching local status keys)
 - Microservice last-crash extras (`lastError`, `lastErrorAt`, `restartCount`) — **no controller release required**
+- Persistent **`VOLUME` `scope`** (`private` default, opt-in `shared`) — additive on `volumeMappings[]`; see [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md)
 - Prune and watchdog
 
 Existing Pot path prefixes stay **`/api/v3/…`**. JSON is **additive** except the coordinated removals below. Do not rename existing keys or routes.
@@ -526,6 +527,8 @@ Keep set for model prune:
 Do **not** keep an unbound `local_models` row. Managed trees are not deleted by watchdog; prune may still collect unmanaged on-disk names that are not in the keep set.
 
 Scheduled `pruningFrequency` and `edgelet model prune` use the same unused-local-model rule. Controller **prune-agent** should expect both image and local-model work.
+
+Do **not** prune persistent `VOLUME` data (`volumes/data/` or `volumes/shared/`). Operators reclaim those with `edgelet volume`. See [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md).
 
 ---
 

@@ -62,8 +62,11 @@ func TestBuildMicroserviceFromControlPlaneLaunchSpec(t *testing.T) {
 	if ms.VolumeMappings[0].HostDestination != VolumeDBName {
 		t.Fatalf("expected db volume %q, got %q", VolumeDBName, ms.VolumeMappings[0].HostDestination)
 	}
-	if ms.VolumeMappings[1].HostDestination != VolumeLogName {
-		t.Fatalf("expected log volume %q, got %q", VolumeLogName, ms.VolumeMappings[1].HostDestination)
+	if ms.VolumeMappings[0].Type != models.VolumeMappingTypeVolume || ms.VolumeMappings[0].EffectiveVolumeScope() != models.VolumeScopePrivate {
+		t.Fatalf("control-plane db volume must be private VOLUME, got type=%q scope=%q", ms.VolumeMappings[0].Type, ms.VolumeMappings[0].EffectiveVolumeScope())
+	}
+	if ms.VolumeMappings[1].Type != models.VolumeMappingTypeVolume || ms.VolumeMappings[1].EffectiveVolumeScope() != models.VolumeScopePrivate {
+		t.Fatalf("control-plane log volume must be private VOLUME, got type=%q scope=%q", ms.VolumeMappings[1].Type, ms.VolumeMappings[1].EffectiveVolumeScope())
 	}
 
 	hasNetRaw := false

@@ -211,6 +211,45 @@ func TestShouldRotateByLifetime(t *testing.T) {
 	}
 }
 
+func TestProvisionedPublicJWKJSON(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+	x := base64.RawURLEncoding.EncodeToString(publicKey)
+	jwk := map[string]any{
+		"kty": "OKP",
+		"crv": "Ed25519",
+		"d":   base64.RawURLEncoding.EncodeToString(privateKey.Seed()),
+		"x":   x,
+	}
+	jwkJSON, err := json.Marshal(jwk)
+	if err != nil {
+		t.Fatalf("failed to marshal jwk: %v", err)
+	}
+	cfg := config.GetInstance()
+	cfg.PrivateKey = base64.StdEncoding.EncodeToString(jwkJSON)
+	cfg.IOFogUUID = "jwk-test-uuid"
+
+	raw, err := ProvisionedPublicJWKJSON()
+	if err != nil {
+		t.Fatalf("ProvisionedPublicJWKJSON: %v", err)
+	}
+	var pub map[string]any
+	if err := json.Unmarshal(raw, &pub); err != nil {
+		t.Fatalf("parse public JWK: %v", err)
+	}
+	if _, exists := pub["d"]; exists {
+		t.Fatal("public JWK must not include d")
+	}
+	if pub["kty"] != "OKP" || pub["crv"] != "Ed25519" || pub["alg"] != "EdDSA" || pub["x"] != x {
+		t.Fatalf("unexpected public JWK: %#v", pub)
+	}
+	if GetProvisionedPublicKey() != x {
+		t.Fatalf("GetProvisionedPublicKey mismatch: got %q want %q", GetProvisionedPublicKey(), x)
+	}
+}
+
 func TestEdgeGuardHashFromJWT_StableAcrossRegeneration(t *testing.T) {
 	openTestSQLite(t)
 

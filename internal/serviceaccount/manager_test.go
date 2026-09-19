@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestWriteProjection(t *testing.T) {
 	utils.VarRun = filepath.Join(tmp, "run")
 
 	m := NewManager()
-	err := m.WriteProjection("ms-1", "jwt-token", []byte("ca-bytes"))
+	err := m.WriteProjection("ms-1", "jwt-token", []byte("ca-bytes"), []byte(`{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","x":"abc"}`))
 	if err != nil {
 		t.Fatalf("WriteProjection returned error: %v", err)
 	}
@@ -40,6 +41,13 @@ func TestWriteProjection(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(m.ProjectionDir("ms-1"), "ca.crt")); err != nil {
 		t.Fatalf("expected ca.crt to be created: %v", err)
+	}
+	jwkBytes, err := os.ReadFile(filepath.Join(m.ProjectionDir("ms-1"), "edgelet.jwk"))
+	if err != nil {
+		t.Fatalf("expected edgelet.jwk to be created: %v", err)
+	}
+	if string(jwkBytes) != `{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","x":"abc"}` {
+		t.Fatalf("unexpected edgelet.jwk contents: %q", string(jwkBytes))
 	}
 }
 
@@ -63,11 +71,14 @@ func TestWriteProjectionValidation(t *testing.T) {
 	utils.SNAPCommon = tmp
 
 	m := NewManager()
-	if err := m.WriteProjection("", "jwt-token", nil); err == nil {
+	if err := m.WriteProjection("", "jwt-token", nil, []byte(`{"kty":"OKP"}`)); err == nil {
 		t.Fatal("expected validation error for empty microservice UUID")
 	}
-	if err := m.WriteProjection("ms-1", "", nil); err == nil {
+	if err := m.WriteProjection("ms-1", "", nil, []byte(`{"kty":"OKP"}`)); err == nil {
 		t.Fatal("expected validation error for empty token")
+	}
+	if err := m.WriteProjection("ms-1", "jwt-token", nil, nil); err == nil {
+		t.Fatal("expected validation error for empty signing JWK")
 	}
 }
 
@@ -181,6 +192,9 @@ func TestRotateExpiringManagedTokens_SelfHealsMissingProjection(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(m.ProjectionDir("ms-1"), "ca.crt")); err != nil {
 		t.Fatalf("expected ca projection to be restored: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(m.ProjectionDir("ms-1"), "edgelet.jwk")); err != nil {
+		t.Fatalf("expected signing JWK projection to be restored: %v", err)
+	}
 }
 
 func TestReconcileManagedMicroservices_EmitsCanonicalRBACEnvelope(t *testing.T) {
@@ -259,6 +273,81 @@ func TestReconcileManagedMicroservices_EmitsCanonicalRBACEnvelope(t *testing.T) 
 	}
 	if _, exists := claims["kuksa.val/v2"]; exists {
 		t.Fatal("external groups must not be top-level claims in canonical payload")
+	}
+
+	assertProjectedSigningJWKVerifiesToken(t, m.ProjectionDir("ms-1"))
+}
+
+func TestReconcileManagedMicroservices_ProjectsPublicSigningJWK(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.GetInstance()
+	cfg.DiskDirectory = tmp
+	utils.SNAPCommon = tmp
+	cfg.Namespace = "default"
+	cfg.IOFogUUID = "agent-uuid"
+
+	db := store.GetInstance()
+	if err := db.Open(tmp); err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	key := createEd25519JWKBase64(t)
+	if err := db.UpsertAgentPrivateKey(key); err != nil {
+		t.Fatalf("failed to seed private key: %v", err)
+	}
+	cfg.PrivateKey = key
+	auth.GetJWTManager().Reset()
+
+	ms := models.NewMicroservice("ms-1", "alpine:latest")
+	ms.ApplicationName = "app"
+	ms.MicroserviceName = "svc"
+
+	m := NewManager()
+	if err := m.ReconcileManagedMicroservices([]*models.Microservice{ms}); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	assertProjectedSigningJWKVerifiesToken(t, m.ProjectionDir("ms-1"))
+}
+
+func assertProjectedSigningJWKVerifiesToken(t *testing.T, projectionDir string) {
+	t.Helper()
+	jwkBytes, err := os.ReadFile(filepath.Join(projectionDir, "edgelet.jwk"))
+	if err != nil {
+		t.Fatalf("failed to read projected signing JWK: %v", err)
+	}
+	var jwk map[string]any
+	if err := json.Unmarshal(jwkBytes, &jwk); err != nil {
+		t.Fatalf("failed to parse projected signing JWK: %v", err)
+	}
+	if _, exists := jwk["d"]; exists {
+		t.Fatal("projected signing JWK must not include private key material")
+	}
+	if jwk["kty"] != "OKP" || jwk["crv"] != "Ed25519" || jwk["alg"] != "EdDSA" {
+		t.Fatalf("unexpected projected JWK fields: %#v", jwk)
+	}
+	x, ok := jwk["x"].(string)
+	if !ok || strings.TrimSpace(x) == "" {
+		t.Fatal("projected signing JWK missing x")
+	}
+	pub, err := base64.RawURLEncoding.DecodeString(x)
+	if err != nil {
+		t.Fatalf("failed to decode projected JWK x: %v", err)
+	}
+	tokenBytes, err := os.ReadFile(filepath.Join(projectionDir, "token"))
+	if err != nil {
+		t.Fatalf("failed to read projected token: %v", err)
+	}
+	parsed, err := jwt.Parse(string(tokenBytes), func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
+			t.Fatalf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return ed25519.PublicKey(pub), nil
+	})
+	if err != nil {
+		t.Fatalf("projected token must verify with edgelet.jwk: %v", err)
+	}
+	if parsed == nil || !parsed.Valid {
+		t.Fatal("projected token is not valid under edgelet.jwk")
 	}
 }
 

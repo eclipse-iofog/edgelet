@@ -2,7 +2,7 @@
 # test/embedded/vm-test.sh
 #
 # Runs the full embedded-containerd integration test suite inside the Lima VM.
-# Tests are grouped into 10 phases:
+# Tests are grouped into 11 phases:
 #
 #   Phase 1 — Extracted embedded binaries
 #   Phase 2 — containerd socket & health
@@ -14,6 +14,7 @@
 #   Phase 8 — RuntimeClass dual-shim (shim discovery + catalog data-plane restart storm)
 #   Phase 9 — Built-in registries + tiny HF and OCI model pulls
 #   Phase 10 — Catalog bind + expanded container fields (keeps Phase 9 models until cleanup)
+#   Phase 11 — Persistent VOLUME scope, retain across restart/prune, explicit reclaim
 #
 # Usage:
 #   ./test/embedded/vm-test.sh [--vm-name=iofog-test]
@@ -530,6 +531,7 @@ test -x /usr/local/bin/containerd-shim-edgelet-v2"
 
 assert_ok "data-plane restart after shim install (edgelet-containerd)" \
     R "set -e
+systemctl reset-failed edgelet-containerd 2>/dev/null || true
 systemctl restart edgelet-containerd
 ok=0
 for i in \$(seq 1 120); do
@@ -954,6 +956,7 @@ for i in \$(seq 1 3); do
   since_ts=\$(date '+%Y-%m-%d %H:%M:%S')
   control_ready
   workloads_running
+  systemctl reset-failed edgelet-containerd 2>/dev/null || true
   systemctl restart edgelet-containerd
   ok=0
   for j in \$(seq 1 120); do
@@ -1386,6 +1389,430 @@ assert_ok "remove tiny OCI model after unbind" \
 
 assert_ok "prune models after remove" \
     R "edgelet model prune"
+
+###############################################################################
+# Phase 11 — Persistent VOLUME scope, retain, explicit reclaim
+###############################################################################
+log_step "Phase 11: Persistent VOLUME retain and reclaim"
+
+assert_ok "install persistent volume helpers" \
+    R "cat >/tmp/vol-it-ops.sh <<'EOF'
+wait_ms_running() {
+  local name=\"\$1\"
+  local out_file=\"\$2\"
+  local i inspect uuid
+  for i in \$(seq 1 90); do
+    inspect=\$(edgelet ms inspect \"edgelet.\${name}\" 2>/dev/null || true)
+    if echo \"\${inspect}\" | grep -Eq '^  \"state\": \"running\"'; then
+      uuid=\$(echo \"\${inspect}\" | sed -n 's/^  \"uuid\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]')
+      if [ -n \"\${uuid}\" ]; then
+        echo \"\${uuid}\" >\"\${out_file}\"
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+  echo \"\${name} not running\" >&2
+  edgelet ms inspect \"edgelet.\${name}\" 2>/dev/null || true
+  return 1
+}
+
+wait_units_ready() {
+  local i
+  for i in \$(seq 1 90); do
+    if systemctl is-active --quiet edgelet \\
+       && systemctl is-active --quiet edgelet-containerd \\
+       && test -S /run/edgelet/edgelet.sock \\
+       && test -S /run/edgelet/containerd.sock \\
+       && edgelet system status >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo 'edgelet units not ready' >&2
+  systemctl status edgelet edgelet-containerd --no-pager || true
+  systemctl show edgelet-containerd -p Result -p NRestarts -p ActiveState || true
+  journalctl -u edgelet-containerd -n 40 --no-pager || true
+  return 1
+}
+
+require_data_plane() {
+  if systemctl is-active --quiet edgelet-containerd \\
+     && test -S /run/edgelet/containerd.sock; then
+    return 0
+  fi
+  echo 'data plane is not active' >&2
+  systemctl status edgelet-containerd --no-pager || true
+  ls -l /run/edgelet/containerd.sock >&2 || true
+  return 1
+}
+
+restart_data_plane() {
+  systemctl reset-failed edgelet-containerd 2>/dev/null || true
+  if ! systemctl restart edgelet-containerd; then
+    echo 'edgelet-containerd restart failed; reset-failed and start' >&2
+    systemctl reset-failed edgelet-containerd 2>/dev/null || true
+    systemctl start edgelet-containerd || true
+  fi
+  wait_units_ready
+}
+
+dump_volume_markers() {
+  local uuid=\"\$1\"
+  echo \"uuid=\${uuid}\" >&2
+  echo '--- volume ls ---' >&2
+  edgelet volume ls >&2 || true
+  echo '--- private ---' >&2
+  ls -la /var/lib/edgelet/volumes/data/\${uuid}/it-mydata/ >&2 || true
+  echo '--- shared ---' >&2
+  ls -la /var/lib/edgelet/volumes/shared/it-shared-config/ >&2 || true
+  echo '--- bind ---' >&2
+  ls -la /tmp/edgelet-it-bind/ >&2 || true
+}
+
+assert_host_markers() {
+  local uuid=\"\$1\"
+  local need_bind=\"\$2\"
+  if [ -z \"\${uuid}\" ]; then
+    echo 'volume-it uuid is empty' >&2
+    dump_volume_markers \"\${uuid}\"
+    return 1
+  fi
+  if ! test -f /var/lib/edgelet/volumes/data/\${uuid}/it-mydata/marker; then
+    echo \"missing private marker for \${uuid}\" >&2
+    dump_volume_markers \"\${uuid}\"
+    return 1
+  fi
+  if ! test -f /var/lib/edgelet/volumes/shared/it-shared-config/marker; then
+    echo 'missing shared marker' >&2
+    dump_volume_markers \"\${uuid}\"
+    return 1
+  fi
+  if [ \"\${need_bind}\" = bind ] && ! test -f /tmp/edgelet-it-bind/host-marker; then
+    echo 'missing BIND host-marker' >&2
+    dump_volume_markers \"\${uuid}\"
+    return 1
+  fi
+}
+
+write_host_markers() {
+  local uuid=\"\$1\"
+  if [ -z \"\${uuid}\" ]; then
+    echo 'volume-it uuid is empty' >&2
+    return 1
+  fi
+  mkdir -p /var/lib/edgelet/volumes/data/\${uuid}/it-mydata /var/lib/edgelet/volumes/shared/it-shared-config
+  echo keep-private >/var/lib/edgelet/volumes/data/\${uuid}/it-mydata/marker
+  echo keep-shared >/var/lib/edgelet/volumes/shared/it-shared-config/marker
+}
+
+wait_container_sees_markers() {
+  local a_uuid=\"\$1\"
+  local b_uuid=\"\$2\"
+  local i
+  for i in \$(seq 1 90); do
+    if edgelet ms exec \"\${a_uuid}\" -- test -f /data/marker \\
+       && edgelet ms exec \"\${a_uuid}\" -- test -f /shared/marker \\
+       && edgelet ms exec \"\${a_uuid}\" -- test -f /host-data/host-marker \\
+       && edgelet ms exec \"\${b_uuid}\" -- test -f /shared/marker; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo 'containers did not see host VOLUME markers' >&2
+  dump_volume_markers \"\${a_uuid}\"
+  return 1
+}
+
+rm_ms_by_name() {
+  local name=\"\$1\"
+  local uuid
+  uuid=\$(edgelet ms ls 2>/dev/null | awk -v n=\"\${name}\" '\$3==n{print \$1; exit}')
+  if [ -n \"\${uuid}\" ]; then
+    edgelet ms rm \"\${uuid}\" >/dev/null 2>&1 || true
+  fi
+}
+
+rm_leftover_workloads() {
+  local uuid name
+  edgelet ms ls 2>/dev/null | awk 'NR>1 {print \$1, \$3}' | while read -r uuid name; do
+    case \"\${name}\" in
+      vol-it-a|vol-it-b|'') continue ;;
+    esac
+    if [ -n \"\${uuid}\" ]; then
+      edgelet ms rm \"\${uuid}\" >/dev/null 2>&1 || true
+    fi
+  done
+}
+EOF
+chmod +x /tmp/vol-it-ops.sh"
+
+assert_ok "remove leftover volume-it microservices from a prior run" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+rm_leftover_workloads
+rm_ms_by_name vol-it-a
+rm_ms_by_name vol-it-b
+edgelet volume rm --shared it-shared-config --force >/dev/null 2>&1 || true
+edgelet volume prune --orphans --yes --force >/dev/null 2>&1 || true
+rm -rf /tmp/edgelet-it-bind
+mkdir -p /tmp/edgelet-it-bind
+echo bind-host >/tmp/edgelet-it-bind/host-marker"
+
+assert_ok "create private+shared+bind volume-it manifest" \
+    R "cat >/tmp/vol-it-a.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: vol-it-a
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  container:
+    hostNetworkMode: false
+    isPrivileged: false
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+    volumes:
+      - hostDestination: it-mydata
+        containerDestination: /data
+        accessMode: rw
+        type: volume
+        scope: foo
+      - hostDestination: it-shared-config
+        containerDestination: /shared
+        accessMode: rw
+        type: volume
+        scope: shared
+      - hostDestination: /tmp/edgelet-it-bind
+        containerDestination: /host-data
+        accessMode: rw
+        type: bind
+        scope: shared
+  schedule: 50
+EOF"
+
+assert_ok "create second shared-volume consumer manifest" \
+    R "cat >/tmp/vol-it-b.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: vol-it-b
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  container:
+    hostNetworkMode: false
+    isPrivileged: false
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+    volumes:
+      - hostDestination: it-shared-config
+        containerDestination: /shared
+        accessMode: rw
+        type: volume
+        scope: shared
+  schedule: 50
+EOF"
+
+assert_contains "deploy volume-it private/shared/bind microservice" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/vol-it-a.yaml"
+
+assert_contains "deploy volume-it second shared consumer" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/vol-it-b.yaml"
+
+assert_ok_verbose "volume-it microservices reach running" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+wait_ms_running vol-it-a /tmp/vol-it-a.uuid
+wait_ms_running vol-it-b /tmp/vol-it-b.uuid"
+
+assert_ok_verbose "unknown VOLUME scope is stored private and BIND scope is ignored" \
+    R "set -e
+a=\$(cat /tmp/vol-it-a.uuid)
+b=\$(cat /tmp/vol-it-b.uuid)
+test -n \"\${a}\"
+test -n \"\${b}\"
+ls_json=\$(edgelet -o json volume ls)
+echo \"\${ls_json}\" | grep -q '\"name\": \"it-mydata\"'
+echo \"\${ls_json}\" | grep -q '\"scope\": \"private\"'
+echo \"\${ls_json}\" | grep -q '\"name\": \"it-shared-config\"'
+echo \"\${ls_json}\" | grep -q '\"scope\": \"shared\"'
+echo \"\${ls_json}\" | grep -q \"\${a}\"
+echo \"\${ls_json}\" | grep -q \"\${b}\"
+! echo \"\${ls_json}\" | grep -q '/tmp/edgelet-it-bind'
+test -d /var/lib/edgelet/volumes/data/\${a}/it-mydata
+test -d /var/lib/edgelet/volumes/shared/it-shared-config
+! test -d /var/lib/edgelet/volumes/shared/it-mydata"
+
+assert_ok_verbose "write markers into private, shared, and BIND mounts" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+a=\$(cat /tmp/vol-it-a.uuid)
+b=\$(cat /tmp/vol-it-b.uuid)
+write_host_markers \"\${a}\"
+wait_container_sees_markers \"\${a}\" \"\${b}\"
+assert_host_markers \"\${a}\" bind"
+
+assert_ok "enable pruningFrequency for restart retain check" \
+    R "set -e
+orig=\$(edgelet -o json system info | awk -F': ' '/pruningFrequency/{print \$2}' | tr -d ' ,')
+echo \"\${orig}\" >/tmp/vol-it-orig-pf
+edgelet config --pruning-frequency 1 >/dev/null"
+
+assert_ok_verbose "markers remain after enabling pruningFrequency" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+a=\$(cat /tmp/vol-it-a.uuid)
+assert_host_markers \"\${a}\""
+
+assert_ok_verbose "control and data-plane restart leaves VOLUME markers" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+restart_data_plane
+systemctl restart edgelet
+wait_units_ready
+wait_ms_running vol-it-a /tmp/vol-it-a.uuid
+wait_ms_running vol-it-b /tmp/vol-it-b.uuid
+a=\$(cat /tmp/vol-it-a.uuid)
+b=\$(cat /tmp/vol-it-b.uuid)
+assert_host_markers \"\${a}\"
+wait_container_sees_markers \"\${a}\" \"\${b}\""
+
+assert_ok_verbose "system prune volumes refuses and points at volume prune" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+out=\$(edgelet system prune volumes 2>&1 || true)
+echo \"\${out}\"
+echo \"\${out}\" | grep -q 'edgelet volume prune'
+a=\$(cat /tmp/vol-it-a.uuid)
+assert_host_markers \"\${a}\""
+
+assert_ok_verbose "system prune all does not delete persistent VOLUME data" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+edgelet system prune all
+a=\$(cat /tmp/vol-it-a.uuid)
+assert_host_markers \"\${a}\" bind"
+
+assert_ok_verbose "volume prune default is dry-run" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+out=\$(edgelet -o json volume prune)
+echo \"\${out}\" | grep -q '\"dryRun\": true'
+a=\$(cat /tmp/vol-it-a.uuid)
+assert_host_markers \"\${a}\""
+
+assert_ok_verbose "volume rm --force while mounted is refused" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+require_data_plane
+a=\$(cat /tmp/vol-it-a.uuid)
+out=\$(edgelet volume rm \"\${a}\" it-mydata --force 2>&1 || true)
+echo \"\${out}\"
+echo \"\${out}\" | grep -qiE 'mounted|keep-set|CONFLICT'
+assert_host_markers \"\${a}\""
+
+assert_ok_verbose "shared volume rm --force while a consumer is running is refused" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+require_data_plane
+out=\$(edgelet volume rm --shared it-shared-config --force 2>&1 || true)
+echo \"\${out}\"
+echo \"\${out}\" | grep -qiE 'mounted|keep-set|consumers|CONFLICT'
+a=\$(cat /tmp/vol-it-a.uuid)
+assert_host_markers \"\${a}\""
+
+assert_ok_verbose "ms rm retains private VOLUME and shared disk" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+require_data_plane
+a=\$(cat /tmp/vol-it-a.uuid)
+echo \"\${a}\" >/tmp/vol-it-a.uuid.removed
+edgelet ms rm \"\${a}\"
+assert_host_markers \"\${a}\"
+wait_ms_running vol-it-b /tmp/vol-it-b.uuid
+b=\$(cat /tmp/vol-it-b.uuid)
+edgelet ms exec \"\${b}\" -- test -f /shared/marker
+ls_json=\$(edgelet -o json volume ls)
+echo \"\${ls_json}\" | grep -q 'it-shared-config'
+echo \"\${ls_json}\" | grep -q \"\${b}\""
+
+assert_contains "redeploy vol-it-a remounts shared VOLUME data" "microservice manifest applied successfully" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+require_data_plane
+edgelet deploy -f /tmp/vol-it-a.yaml"
+
+assert_ok_verbose "new private UUID is empty; shared marker remounts" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+require_data_plane
+wait_ms_running vol-it-a /tmp/vol-it-a.uuid
+a=\$(cat /tmp/vol-it-a.uuid)
+old=\$(cat /tmp/vol-it-a.uuid.removed)
+test \"\${a}\" != \"\${old}\"
+if ! test -f /var/lib/edgelet/volumes/data/\${old}/it-mydata/marker; then
+  echo \"old private marker missing for \${old}\" >&2
+  dump_volume_markers \"\${old}\"
+  exit 1
+fi
+if ! test -f /var/lib/edgelet/volumes/shared/it-shared-config/marker; then
+  echo 'shared marker missing after redeploy' >&2
+  dump_volume_markers \"\${a}\"
+  exit 1
+fi
+ok=0
+for i in \$(seq 1 90); do
+  if edgelet ms exec \"\${a}\" -- test -f /shared/marker; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [ \"\${ok}\" -ne 1 ]; then
+  echo 'new vol-it-a did not remount shared marker' >&2
+  dump_volume_markers \"\${a}\"
+  exit 1
+fi
+if edgelet ms exec \"\${a}\" -- test -f /data/marker; then
+  echo 'new private volume unexpectedly reused previous UUID data' >&2
+  exit 1
+fi"
+
+assert_ok "remove volume-it microservices" \
+    R "set -e
+source /tmp/vol-it-ops.sh
+rm_ms_by_name vol-it-a
+rm_ms_by_name vol-it-b"
+
+assert_ok_verbose "explicit reclaim destroys private and shared VOLUME data" \
+    R "set -e
+old=\$(cat /tmp/vol-it-a.uuid.removed)
+a=\$(cat /tmp/vol-it-a.uuid 2>/dev/null || true)
+edgelet volume rm \"\${old}\" it-mydata --force >/dev/null
+if [ -n \"\${a}\" ] && [ \"\${a}\" != \"\${old}\" ]; then
+  edgelet volume rm \"\${a}\" it-mydata --force >/dev/null
+fi
+edgelet volume rm --shared it-shared-config --force >/dev/null
+! test -e /var/lib/edgelet/volumes/data/\${old}/it-mydata/marker
+! test -e /var/lib/edgelet/volumes/shared/it-shared-config/marker
+test -f /tmp/edgelet-it-bind/host-marker
+ls_json=\$(edgelet -o json volume ls)
+! echo \"\${ls_json}\" | grep -q 'it-shared-config'
+! echo \"\${ls_json}\" | grep -q 'it-mydata'"
+
+assert_ok "restore pruningFrequency and BIND host dir" \
+    R "set -e
+orig=\$(cat /tmp/vol-it-orig-pf 2>/dev/null || true)
+if [ -n \"\${orig}\" ]; then
+  edgelet config --pruning-frequency \"\${orig}\" >/dev/null || true
+fi
+rm -rf /tmp/edgelet-it-bind /tmp/vol-it-a.yaml /tmp/vol-it-b.yaml /tmp/vol-it-ops.sh /tmp/vol-it-a.uuid /tmp/vol-it-b.uuid /tmp/vol-it-a.uuid.removed /tmp/vol-it-orig-pf"
 
 ###############################################################################
 # Summary

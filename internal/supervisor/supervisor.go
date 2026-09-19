@@ -269,16 +269,11 @@ func (s *Supervisor) Start() error {
 
 	// Start Pruning Manager — inject engine so non-Docker engines (iofog/containerd) are pruned correctly.
 	// Also wire in the microservice image callback so scheduled/threshold pruning protects
-	// ALL configured microservice images.
+	// controller-managed and local-deployed microservice images.
 	s.dockerPruningManager = pruning.GetInstance()
 	pm := s.processManager
 	s.dockerPruningManager.SetGetMicroservicesCallback(func() []string {
-		microservices := pm.GetLatestMicroservices()
-		names := make([]string, 0, len(microservices))
-		for _, ms := range microservices {
-			names = append(names, ms.ImageName)
-		}
-		return names
+		return pm.ConfiguredMicroserviceImages()
 	})
 	s.dockerPruningManager.SetEngine(eng)
 	pruneUnusedLocalModels := func() {
@@ -509,7 +504,7 @@ func (s *Supervisor) Stop() error {
 
 	if s.dockerPruningManager != nil {
 		if err := s.dockerPruningManager.Stop(); err != nil {
-			logging.LogError(moduleName, "Error stopping Docker Pruning Manager", err)
+			logging.LogError(moduleName, "Error stopping Edgelet Pruning Manager", err)
 		}
 	}
 

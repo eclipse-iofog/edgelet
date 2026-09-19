@@ -3,6 +3,7 @@ package pruning
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 )
 
 const (
-	moduleName = "Docker Pruning Manager"
+	moduleName = "Edgelet Pruning Manager"
 )
 
 // Manager manages image pruning for all container engine types.
@@ -36,13 +37,10 @@ type Manager struct {
 	// without disrupting the threshold worker (which uses the main ctx).
 	freqCtx    context.Context
 	freqCancel context.CancelFunc
-	// lastAppliedPruningFrequency tracks the last frequency value that was applied.
-	// It is used to trigger an immediate frequency prune only when pruning is
-	// enabled (0 -> N) or the frequency value actually changes (N1 -> N2).
-	lastAppliedPruningFrequency int64
 
 	// Optional test hooks to observe scheduled prune ordering without touching
-	// real runtime daemons.
+	// real runtime daemons. pruneVolumesHook is retained so tests can prove
+	// scheduled prune never reclaims persistent VOLUME data.
 	pruneContainersHook func()
 	pruneVolumesHook    func()
 	pruneImagesHook     func()
@@ -67,8 +65,8 @@ func GetInstance() *Manager {
 }
 
 // SetGetMicroservicesCallback sets a callback that returns image names for ALL
-// currently configured microservices (running or not). These images are protected
-// from scheduled/threshold pruning.
+// currently configured microservices (controller-managed and local-deployed,
+// running or not). These images are protected from scheduled/threshold pruning.
 // Called by the supervisor after ProcessManager is wired up.
 func (m *Manager) SetGetMicroservicesCallback(fn func() []string) {
 	m.mu.Lock()
@@ -92,9 +90,9 @@ func (m *Manager) SetPruneModelsCallback(fn func()) {
 	m.pruneModelsHook = fn
 }
 
-// Start starts the Docker Pruning Manager
+// Start starts the Edgelet Pruning Manager
 func (m *Manager) Start() error {
-	logging.LogInfo(moduleName, "Starting Docker Pruning Manager")
+	logging.LogInfo(moduleName, "Starting Edgelet Pruning Manager")
 
 	// Reset contexts on each start to support supervisor restart cycles.
 	if m.cancel != nil {
@@ -110,28 +108,25 @@ func (m *Manager) Start() error {
 	m.thresholdTicker = time.NewTicker(30 * time.Minute)
 	go m.thresholdPruningWorker()
 
-	// Start frequency-based pruning if configured (0 = disabled)
+	// Start frequency-based pruning if configured (0 = disabled).
+	// The first run waits for the ticker; enabling frequency does not prune
+	// immediately. Disk-threshold prune and explicit system prune stay on-demand.
 	pruningFrequency := m.config.PruningFrequency
-	runImmediate := m.shouldRunImmediateFrequencyPrune(pruningFrequency)
 	if pruningFrequency > 0 {
 		duration := time.Duration(pruningFrequency) * time.Hour
 		m.frequencyTicker = time.NewTicker(duration)
 		go m.frequencyPruningWorker()
-		if runImmediate {
-			go m.triggerPruneOnFrequency()
-		}
-		logging.LogInfo(moduleName, fmt.Sprintf("Docker pruning manager started with frequency: %d hours", pruningFrequency))
+		logging.LogInfo(moduleName, fmt.Sprintf("Edgelet Pruning Manager started with frequency: %d hours", pruningFrequency))
 	} else {
-		logging.LogInfo(moduleName, "Docker pruning manager started without frequency-based pruning (frequency set to 0)")
+		logging.LogInfo(moduleName, "Edgelet Pruning Manager started without frequency-based pruning (frequency set to 0)")
 	}
-	m.setLastAppliedPruningFrequency(pruningFrequency)
 
 	return nil
 }
 
-// Stop stops the Docker Pruning Manager
+// Stop stops the Edgelet Pruning Manager
 func (m *Manager) Stop() error {
-	logging.LogInfo(moduleName, "Stopping Docker Pruning Manager")
+	logging.LogInfo(moduleName, "Stopping Edgelet Pruning Manager")
 	if m.cancel != nil {
 		m.cancel()
 	}
@@ -227,9 +222,11 @@ func (m *Manager) triggerPruneOnFrequency() {
 	logging.LogInfo(moduleName, "Pruning of unwanted images finished")
 }
 
+// runScheduledPrune reclaims unused images, unused local models, and
+// unmanaged stopped containers. Persistent VOLUME data under volumes/data
+// and volumes/shared is not deleted here; operators reclaim it explicitly.
 func (m *Manager) runScheduledPrune() {
 	m.pruneContainers()
-	m.pruneVolumes()
 	m.pruneImagesRunner()
 	m.pruneModels()
 }
@@ -252,24 +249,6 @@ func (m *Manager) pruneContainers() {
 	m.pruneContainersDocker()
 }
 
-func (m *Manager) pruneVolumes() {
-	if m.pruneVolumesHook != nil {
-		m.pruneVolumesHook()
-		return
-	}
-	ctx := context.Background()
-	m.mu.Lock()
-	eng := m.containerEngine
-	m.mu.Unlock()
-	if eng != nil {
-		if _, err := eng.PruneVolumes(ctx); err != nil {
-			logging.LogError(moduleName, "Error pruning volumes via container engine", err)
-		}
-		return
-	}
-	m.pruneVolumesDocker()
-}
-
 func (m *Manager) pruneImagesRunner() {
 	if m.pruneImagesHook != nil {
 		m.pruneImagesHook()
@@ -285,9 +264,9 @@ func (m *Manager) pruneModels() {
 }
 
 // pruneImages removes unused images using the unified getUnwantedImagesList() logic
-// for all engine types. This scheduled/threshold
-// pruning: protect images for ALL configured microservices + non-ioFog containers,
-// delete everything else.
+// for all engine types. Scheduled/threshold pruning keeps images for configured
+// microservices (controller and local) and images still referenced by running
+// containers, then deletes everything else.
 func (m *Manager) pruneImages() {
 	ctx := context.Background()
 	m.mu.Lock()
@@ -315,9 +294,12 @@ func (m *Manager) pruneImages() {
 // getUnwantedImagesList returns image IDs/names that should be deleted during
 // scheduled or threshold pruning. The logic:
 //
-//   - Protect images used by running non-managed containers (by image name/ID).
+//   - Protect images used by any running container (managed local/controller
+//     workloads and unmanaged containers).
+//   - Protect images with a known in-use count greater than zero (covers CRI
+//     pause/sandbox images skipped by GetRunningContainers).
 //   - Protect images for ALL configured microservices via getMicroserviceImages
-//     callback (includes stopped/restarting, not just running ones).
+//     (controller-managed and local-deployed, including stopped/restarting).
 //   - Delete every other image.
 //
 // Works for all engine types via the ContainerEngine interface. When eng is nil
@@ -354,6 +336,7 @@ func (m *Manager) getUnwantedImagesList(ctx context.Context, eng engine.Containe
 	// Build a lookup map from tag → image ID for quick resolution.
 	tagToID := make(map[string]string, len(allImages))
 	for _, img := range allImages {
+		tagToID[img.ID] = img.ID
 		for _, tag := range img.RepoTags {
 			tagToID[tag] = img.ID
 		}
@@ -361,38 +344,33 @@ func (m *Manager) getUnwantedImagesList(ctx context.Context, eng engine.Containe
 
 	usedImageIDs := make(map[string]bool)
 
-	// Protect images used by running non-managed containers.
-	nonIoFogCount := 0
 	for _, cont := range runningContainers {
-		if isManagedContainer(cont) {
-			continue
-		}
-		nonIoFogCount++
-		if id, ok := tagToID[cont.Image]; ok {
-			usedImageIDs[id] = true
-		} else {
-			usedImageIDs[cont.Image] = true // fallback: use image name directly
+		markUsedImage(usedImageIDs, tagToID, cont.Image)
+	}
+	logging.LogDebug(moduleName, fmt.Sprintf("Running containers contributing image keep-set: %d", len(runningContainers)))
+
+	for _, img := range allImages {
+		if img.InUse > 0 {
+			markUsedImage(usedImageIDs, tagToID, img.ID)
+			for _, tag := range img.RepoTags {
+				markUsedImage(usedImageIDs, tagToID, tag)
+			}
 		}
 	}
-	logging.LogDebug(moduleName, fmt.Sprintf("Running non-managed containers: %d", nonIoFogCount))
 
 	// Protect images for ALL configured microservices (running + stopped).
 	if m.getMicroserviceImages != nil {
 		msImages := m.getMicroserviceImages()
 		logging.LogInfo(moduleName, fmt.Sprintf("Configured microservice images to protect: %d", len(msImages)))
 		for _, imgName := range msImages {
-			if id, ok := tagToID[imgName]; ok {
-				usedImageIDs[id] = true
-			} else {
-				usedImageIDs[imgName] = true
-			}
+			markUsedImage(usedImageIDs, tagToID, imgName)
 		}
 	}
 
 	// Collect images not in the protected set.
 	toBePruned := make([]string, 0)
 	for _, img := range allImages {
-		if usedImageIDs[img.ID] {
+		if imageProtected(img, usedImageIDs) {
 			continue
 		}
 		// Use the first tag as the deletion key, fall back to ID.
@@ -406,6 +384,29 @@ func (m *Manager) getUnwantedImagesList(ctx context.Context, eng engine.Containe
 	logging.LogInfo(moduleName, fmt.Sprintf("Images total: %d, used: %d, to prune: %d",
 		len(allImages), len(usedImageIDs), len(toBePruned)))
 	return toBePruned
+}
+
+func markUsedImage(used map[string]bool, tagToID map[string]string, ref string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return
+	}
+	used[ref] = true
+	if id := strings.TrimSpace(tagToID[ref]); id != "" {
+		used[id] = true
+	}
+}
+
+func imageProtected(img engine.ImageInfo, used map[string]bool) bool {
+	if used[img.ID] {
+		return true
+	}
+	for _, tag := range img.RepoTags {
+		if used[tag] {
+			return true
+		}
+	}
+	return img.InUse > 0
 }
 
 // PruneAgent prunes dangling images on demand (CLI command / controller API).
@@ -434,9 +435,10 @@ func (m *Manager) PruneAgent() string {
 
 // ChangePruningFreqInterval reschedules frequency-based pruning with new interval.
 // Cancels the old frequency goroutine before launching a new one to prevent leaks.
+// Enabling or changing frequency does not prune immediately; the next run is the
+// new ticker. Disk-threshold prune is unchanged.
 func (m *Manager) ChangePruningFreqInterval() {
 	pruningFrequency := m.config.PruningFrequency
-	runImmediate := m.shouldRunImmediateFrequencyPrune(pruningFrequency)
 
 	// Cancel the old frequency worker goroutine first.
 	if m.freqCancel != nil {
@@ -454,29 +456,10 @@ func (m *Manager) ChangePruningFreqInterval() {
 		duration := time.Duration(pruningFrequency) * time.Hour
 		m.frequencyTicker = time.NewTicker(duration)
 		go m.frequencyPruningWorker()
-		if runImmediate {
-			go m.triggerPruneOnFrequency()
-		}
 		logging.LogInfo(moduleName, fmt.Sprintf("Edgelet pruning frequency updated to: %d hours", pruningFrequency))
 	} else {
 		logging.LogInfo(moduleName, "Edgelet pruning frequency set to 0 - frequency-based pruning disabled")
 	}
-	m.setLastAppliedPruningFrequency(pruningFrequency)
-}
-
-func (m *Manager) shouldRunImmediateFrequencyPrune(newFrequency int64) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if newFrequency <= 0 {
-		return false
-	}
-	return m.lastAppliedPruningFrequency != newFrequency
-}
-
-func (m *Manager) setLastAppliedPruningFrequency(freq int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.lastAppliedPruningFrequency = freq
 }
 
 // GetName returns the module name
@@ -484,9 +467,9 @@ func (m *Manager) GetName() string {
 	return moduleName
 }
 
-// GetModuleIndex returns the module index (Docker Pruning Manager doesn't have a specific index)
+// GetModuleIndex returns the module index (Edgelet Pruning Manager doesn't have a specific index)
 func (m *Manager) GetModuleIndex() int {
-	return -1 // Docker Pruning Manager is not tracked in status
+	return -1 // Edgelet Pruning Manager is not tracked in status
 }
 
 func isManagedContainer(cont engine.Container) bool {

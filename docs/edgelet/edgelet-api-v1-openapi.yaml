@@ -116,6 +116,8 @@ paths:
       description: >
         Optional scope controls cleanup behavior. Default scope is all.
         scope=local preserves local microservices while deprovisioning from controller.
+        purgeVolumes destroys workload persistent VOLUME data after deprovision. Control-plane
+        volumes are never purged. Shared names stay while any consumer remains. Local API only.
       parameters:
         - in: query
           name: scope
@@ -123,6 +125,12 @@ paths:
           schema:
             type: string
             enum: [all, local]
+        - in: query
+          name: purgeVolumes
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Deprovisioned successfully
@@ -150,6 +158,11 @@ paths:
     post:
       tags: [System]
       summary: Trigger prune operation
+      description: >
+        dangling prunes unused images (and unused local models). containers prunes stopped
+        containers. all prunes containers, dangling images, and unused local models.
+        volumes does not destroy persistent VOLUME data under volumes/data or volumes/shared;
+        use POST /v1/volumes:prune instead.
       parameters:
         - in: query
           name: mode
@@ -161,6 +174,8 @@ paths:
       responses:
         "200":
           description: Prune accepted
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /v1/system/logs:
@@ -474,6 +489,158 @@ paths:
           $ref: "#/components/responses/InvalidArgument"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/volumes:
+    get:
+      tags: [Volumes]
+      summary: List persistent VOLUME claims
+      description: >
+        One row per claim. Private claims set uuid and have a single consumer.
+        Shared claims set uuid to null and list every local and controller consumer.
+      responses:
+        "200":
+          description: Volume claim list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes/{uuid}:
+    delete:
+      tags: [Volumes]
+      summary: Destroy a private persistent VOLUME
+      description: >
+        Private claims only. Does not delete volumes/shared. Refuses if the UUID is still
+        desired or the path is mounted. force bypasses the desired-state gate when unmounted.
+      parameters:
+        - in: path
+          name: uuid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: name
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes/shared/{name}:
+    get:
+      tags: [Volumes]
+      summary: Inspect a shared persistent VOLUME claim
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Shared volume claim
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumeClaim"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Volumes]
+      summary: Destroy a shared persistent VOLUME
+      description: >
+        Shared claims only. Remaining consumers return 409. Mounted paths return 409 even with force.
+        Missing name returns 404.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes:prune:
+    post:
+      tags: [Volumes]
+      summary: List or destroy unreferenced persistent VOLUME claims
+      description: >
+        Defaults to dry-run. Destroy requires yes=true. force bypasses the 24h grace window when
+        unmounted. Control-plane volumes are never pruned.
+      parameters:
+        - in: query
+          name: orphans
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - in: query
+          name: yes
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: dryRun
+          required: false
+          schema:
+            type: boolean
+            default: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumePruneRequest"
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumePruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /v1/system/gps:
     get:
       tags: [System]
@@ -796,12 +963,22 @@ paths:
     delete:
       tags: [Microservices]
       summary: Remove microservice
+      description: >
+        Persistent VOLUME directories are retained. Shared claims drop this consumer only.
+        cleanup=true records a reserved bit for later explicit volume prune and does not
+        delete data now.
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+        - in: query
+          name: cleanup
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Remove result
@@ -2035,6 +2212,91 @@ components:
               type: string
             message:
               type: string
+    VolumeListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            volumes:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            count:
+              type: integer
+    VolumeClaim:
+      type: object
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [private, shared]
+        kind:
+          type: string
+          enum: [workload, controlplane]
+        uuid:
+          type: string
+          nullable: true
+        consumers:
+          type: array
+          items:
+            type: string
+        hostPath:
+          type: string
+        desired:
+          type: boolean
+        unreferencedAt:
+          type: string
+          format: date-time
+          nullable: true
+    VolumePruneRequest:
+      type: object
+      properties:
+        orphans:
+          type: boolean
+          default: true
+        yes:
+          type: boolean
+          default: false
+        force:
+          type: boolean
+          default: false
+        dryRun:
+          type: boolean
+          default: true
+    VolumePruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+            orphans:
+              type: boolean
+            yes:
+              type: boolean
+            force:
+              type: boolean
+            dryRun:
+              type: boolean
+            candidates:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            deleted:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            skipped:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
     ModelListResponse:
       type: object
       properties:

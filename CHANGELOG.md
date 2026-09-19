@@ -5,6 +5,27 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.3]
+
+### Added
+
+- **Persistent volume ledger:** SQLite schema v3 records `VOLUME` ownership. Default is **private** (per UUID under `{diskDirectory}/volumes/data/{uuid}/{name}/`). Opt-in `scope: shared` is a node-global name under `{diskDirectory}/volumes/shared/{name}/` for local and controller-managed microservices. Backup `edgelet.db` plus `volumes/data/` and `volumes/shared/` before upgrade. Existing on-disk trees seed as private.
+- **Volume reclaim:** `edgelet volume ls|rm|prune` and EdgeletAPI `/v1/volumes*` (`DELETE /v1/volumes/{uuid}` private; `DELETE /v1/volumes/shared/{name}` / `volume rm --shared`). Orphan prune is dry-run unless `--yes`; a 24h grace applies unless `--force`. Mounted paths refuse even with `--force`. Admin RBAC: `volumes` (`get` / `delete`), `volumes/prune` (`create`).
+- **Projected signing JWK:** managed microservice service-account mounts include `edgelet.jwk` (public Ed25519 JWK: `kty`, `crv`, `alg=EdDSA`, `x`) beside `token` and `ca.crt`, so on-node workloads can verify peer service-account JWTs without reading the key from their own token claims.
+
+### Changed
+
+- **VOLUME retain:** persistent `VOLUME` data is kept across OTA, drain, crash, recreate, microservice delete, and deprovision. `pruningFrequency`, disk-threshold prune, and start-up prune no longer delete `volumes/data/` or `volumes/shared/`.
+- **system prune:** `volumes` and `all` do not destroy persistent volume data; reclaim with `edgelet volume prune`.
+- **Deprovision:** default (including controller `delete-node`) preserves both volume trees. `deprovision --purge-volumes` destroys workload volumes only (shared only if no remaining consumers; never control-plane). `controlplane delete` removes controller DB/log volumes. `BIND` host paths are never deleted; `scope` on BIND is ignored.
+- **Pruning log module name:** structured logs and journald use module **`Edgelet Pruning Manager`** instead of **`Docker Pruning Manager`**. Behavior is unchanged (all container engines); only the log `module` field changed. Filter old entries with either name during upgrade.
+
+### Fixed
+
+- **Fat embed extract prune:** after a successful `edgelet daemon` extract, `/var/lib/edgelet/data/<hash>/` trees other than `current` and `previous` (and the running fat binary’s tree, if it still lives under `data/`) are removed. Coordinated rollback can still reuse `data/previous`. Older leftover extracts are no longer kept unbounded.
+- **Scheduled image prune keep-set:** `pruningFrequency` and disk-threshold prune keep images used by running workloads (including local deploys and CRI pause images still in use) and images listed for local-deployed microservices, not only controller-managed desired state.
+- **Frequency prune is ticker-only:** enabling or changing `pruningFrequency` (including daemon start with frequency already set) no longer runs an immediate image prune. The next automatic image prune is the frequency tick, disk-threshold prune, or an explicit `system prune` / controller prune.
+
 ## [v1.1.0-rc.2]
 
 ### Added

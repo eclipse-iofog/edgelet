@@ -97,6 +97,16 @@ In-place migration `migrations/002_edgelet_schema_v2.sql` (v1 → v2). No wipe.
 
 Operator backup of `{diskDirectory}/models/`: [../persistence.md](../persistence.md), [../models.md](../models.md).
 
+## Schema v3
+
+In-place migration `migrations/003_edgelet_schema_v3.sql` (v2 → v3). No wipe.
+
+| Table / column | Purpose |
+|----------------|---------|
+| `persistent_volumes` | Ownership ledger for persistent `VOLUME` claims (`scope` `private` \| `shared`, `kind` `workload` \| `controlplane`). Local and controller consumers share this table. |
+
+Operator backup of `{diskDirectory}/volumes/data/` and `{diskDirectory}/volumes/shared/`: [../persistence.md](../persistence.md), [../volumes.md](../volumes.md).
+
 ## Access patterns
 
 Store exposes methods on `*DB` split by domain file:
@@ -106,6 +116,7 @@ Store exposes methods on `*DB` split by domain file:
 | `microservices.go` | Save/load/clear controller microservices |
 | `registries.go` | Controller registries |
 | `volumes.go` | Volume mount upsert/replace |
+| `persistent_volumes.go` | Persistent VOLUME ledger |
 | `local_deployed_microservices.go` | Local workload CRUD |
 | `local_registries.go` | Local registry CRUD |
 | `local_models.go` | Local model CRUD |
@@ -152,7 +163,7 @@ Restore procedure: [../persistence.md](../persistence.md).
 |------|------|
 | `db.go` | Singleton, open/close, integrity |
 | `schema.go` | Migration runner |
-| `migrations/*.sql` | Embedded DDL (v1, v2) |
-| `*_test.go`, `schema_v1_contract_test.go`, `schema_v2_test.go` | Contract tests |
+| `migrations/*.sql` | Embedded DDL (v1, v2, v3) |
+| `*_test.go`, `schema_v1_contract_test.go`, `schema_v2_test.go`, `persistent_volumes_test.go` | Contract tests |
 
 Related: [fieldagent.md](fieldagent.md), [processmanager.md](processmanager.md), [edgeletapi.md](edgeletapi.md).

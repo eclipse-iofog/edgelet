@@ -24,12 +24,15 @@ func DeprovisionLong() string {
 	return strings.TrimSpace(`Remove agent provisioning and begin cleanup of managed resources.
 
 WARNING: Deprovisioning stops controller management and may remove managed microservices.
-Use --keep-local or --scope local to preserve locally deployed microservices.`)
+Use --keep-local or --scope local to preserve locally deployed microservices.
+Persistent VOLUME data under volumes/data and volumes/shared is preserved unless
+--purge-volumes is set. Control-plane volumes are never purged.`)
 }
 
 // DeprovisionExamples returns deprovision command examples for Cobra.
 func DeprovisionExamples() string {
 	return strings.TrimSpace(`edgelet deprovision
   edgelet deprovision --scope local
-  edgelet deprovision --keep-local`)
+  edgelet deprovision --keep-local
+  edgelet deprovision --scope all --purge-volumes`)
 }

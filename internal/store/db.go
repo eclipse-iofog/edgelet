@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite" // driver registration
@@ -35,15 +36,16 @@ func GetInstance() *DB {
 // Open opens (or creates) the SQLite database at the given directory and runs migrations
 func (d *DB) Open(dir string) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		d.mu.Unlock()
 		return fmt.Errorf("failed to create db directory: %w", err)
 	}
 
 	d.path = filepath.Join(dir, dbFileName)
 	db, err := sql.Open("sqlite", d.path+"?_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=ON")
 	if err != nil {
+		d.mu.Unlock()
 		return fmt.Errorf("failed to open sqlite db: %w", err)
 	}
 
@@ -52,9 +54,20 @@ func (d *DB) Open(dir string) error {
 
 	d.db = db
 	if err := d.migrate(); err != nil {
+		d.mu.Unlock()
 		return err
 	}
-	return d.checkIntegrity()
+	if err := d.checkIntegrity(); err != nil {
+		d.mu.Unlock()
+		return err
+	}
+	d.mu.Unlock()
+
+	cpUUID := ""
+	if cp, found, err := d.GetSystemControlPlane(); err == nil && found && cp != nil {
+		cpUUID = strings.TrimSpace(cp.ControllerUUID)
+	}
+	return d.SeedPersistentVolumesFromDisk(dir, cpUUID)
 }
 
 // Close checkpoints the WAL (TRUNCATE) then closes the connection.

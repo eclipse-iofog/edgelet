@@ -60,6 +60,7 @@ func EnsureExtracted() error {
 	if err := loadKernelModules(dir); err != nil {
 		dataLogger.Warnf("Failed to load kernel modules (non-fatal): %v", err)
 	}
+	pruneStaleBundles("")
 	return nil
 }
 

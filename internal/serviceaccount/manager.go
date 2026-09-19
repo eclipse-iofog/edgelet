@@ -29,7 +29,16 @@ const (
 	defaultServiceAccountVolumeKey = "default"
 	bindMountDirMode               = 0755
 	bindMountFileMode              = 0644
+	projectionTokenFilename        = "token"
+	projectionCAFilename           = "ca.crt"
+	projectionSigningJWKFilename   = "edgelet.jwk"
 )
+
+var projectionFilenames = []string{
+	projectionTokenFilename,
+	projectionCAFilename,
+	projectionSigningJWKFilename,
+}
 
 // Manager manages host-side projected serviceaccount artifacts.
 type Manager struct {
@@ -60,8 +69,8 @@ func (m *Manager) ProjectionDir(microserviceUUID string) string {
 	return filepath.Join(m.stagingRoot, microserviceUUID, serviceAccountTypePrefix, defaultServiceAccountVolumeKey)
 }
 
-// WriteProjection writes token and CA materials for a microservice in an atomic directory scope.
-func (m *Manager) WriteProjection(microserviceUUID, token string, caPEM []byte) error {
+// WriteProjection writes token, CA, and public signing JWK materials for a microservice.
+func (m *Manager) WriteProjection(microserviceUUID, token string, caPEM, jwkJSON []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -71,8 +80,11 @@ func (m *Manager) WriteProjection(microserviceUUID, token string, caPEM []byte) 
 	if token == "" {
 		return errors.New("serviceaccount token is required")
 	}
+	if len(jwkJSON) == 0 {
+		return errors.New("edgelet signing JWK is required")
+	}
 
-	return m.writeProjectionAtomic(m.ProjectionDir(microserviceUUID), token, caPEM)
+	return m.writeProjectionAtomic(m.ProjectionDir(microserviceUUID), token, caPEM, jwkJSON)
 }
 
 // ReconcileManagedMicroservices mints and projects service-account material for managed microservices.
@@ -223,7 +235,11 @@ func (m *Manager) rotateForMicroservice(cfg *config.Config, ms *models.Microserv
 	if caErr != nil {
 		return fmt.Errorf("failed to read edgeletapi CA: %w", caErr)
 	}
-	if err := m.writeProjectionAtomic(projectionDir, token, caPEM); err != nil {
+	jwkJSON, jwkErr := auth.ProvisionedPublicJWKJSON()
+	if jwkErr != nil {
+		return fmt.Errorf("failed to read edgelet signing JWK: %w", jwkErr)
+	}
+	if err := m.writeProjectionAtomic(projectionDir, token, caPEM, jwkJSON); err != nil {
 		return err
 	}
 	ensureServiceAccountVolumeMapping(ms, projectionDir)
@@ -280,7 +296,7 @@ func normalizeServiceAccountRules(ms *models.Microservice) models.RBACEnvelopeV1
 	return ms.ServiceAccount.CanonicalRBACV1()
 }
 
-func (m *Manager) writeProjectionAtomic(projectionDir, token string, caPEM []byte) error {
+func (m *Manager) writeProjectionAtomic(projectionDir, token string, caPEM, jwkJSON []byte) error {
 	if err := os.MkdirAll(projectionDir, bindMountDirMode); err != nil {
 		return fmt.Errorf("failed to create projection dir: %w", err)
 	}
@@ -289,11 +305,14 @@ func (m *Manager) writeProjectionAtomic(projectionDir, token string, caPEM []byt
 	if err := os.MkdirAll(versionPath, bindMountDirMode); err != nil {
 		return fmt.Errorf("failed to create service-account version dir: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(versionPath, "token"), []byte(token), bindMountFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(versionPath, projectionTokenFilename), []byte(token), bindMountFileMode); err != nil {
 		return fmt.Errorf("failed to write service-account token projection: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(versionPath, "ca.crt"), caPEM, bindMountFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(versionPath, projectionCAFilename), caPEM, bindMountFileMode); err != nil {
 		return fmt.Errorf("failed to write service-account ca projection: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(versionPath, projectionSigningJWKFilename), jwkJSON, bindMountFileMode); err != nil {
+		return fmt.Errorf("failed to write service-account signing JWK projection: %w", err)
 	}
 	tmpData := filepath.Join(projectionDir, "..data.tmp")
 	_ = os.Remove(tmpData)
@@ -303,7 +322,7 @@ func (m *Manager) writeProjectionAtomic(projectionDir, token string, caPEM []byt
 	if err := os.Rename(tmpData, filepath.Join(projectionDir, "..data")); err != nil {
 		return fmt.Errorf("failed to activate data symlink: %w", err)
 	}
-	for _, name := range []string{"token", "ca.crt"} {
+	for _, name := range projectionFilenames {
 		linkPath := filepath.Join(projectionDir, name)
 		_ = os.Remove(linkPath)
 		if err := os.Symlink(filepath.Join("..data", name), linkPath); err != nil {
@@ -347,11 +366,10 @@ func (m *Manager) cleanupOldVersions(projectionDir string) {
 
 func (m *Manager) projectionIsReady(microserviceUUID string) bool {
 	projectionDir := m.ProjectionDir(microserviceUUID)
-	if _, err := os.Stat(filepath.Join(projectionDir, "token")); err != nil {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(projectionDir, "ca.crt")); err != nil {
-		return false
+	for _, name := range projectionFilenames {
+		if _, err := os.Stat(filepath.Join(projectionDir, name)); err != nil {
+			return false
+		}
 	}
 	return true
 }

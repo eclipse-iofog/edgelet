@@ -94,6 +94,8 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 		return formatImageList(result)
 	case "/v1/models":
 		return formatModelList(result)
+	case "/v1/volumes":
+		return formatVolumeList(result)
 	case "/v1/deploy/registries":
 		return formatRegistryList(result)
 	case "/v1/deploy/runtimeclasses":
@@ -111,6 +113,9 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 		}
 		if strings.HasPrefix(routePath, "/v1/models/") {
 			return formatModelInspect(result)
+		}
+		if strings.HasPrefix(routePath, "/v1/volumes/shared/") || strings.HasPrefix(routePath, "/v1/volumes/") {
+			return formatVolumeInspect(result)
 		}
 		return ""
 	}
@@ -557,6 +562,74 @@ func formatModelInspect(result map[string]any) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatVolumeList(result map[string]any) string {
+	rawItems, ok := result["volumes"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return "No persistent volumes found."
+	}
+	rows := [][]string{
+		{"NAME", "SCOPE", "KIND", "UUID", "CONSUMERS", "DESIRED", "HOSTPATH"},
+	}
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		uuid := MapValueAsString(item, "uuid")
+		if uuid == "<unknown>" || uuid == "<nil>" || strings.EqualFold(uuid, "null") {
+			uuid = "-"
+		}
+		rows = append(rows, []string{
+			MapValueAsString(item, "name"),
+			ValueOrDefault(MapValueAsString(item, "scope"), "-"),
+			ValueOrDefault(MapValueAsString(item, "kind"), "-"),
+			uuid,
+			formatConsumers(item["consumers"]),
+			formatBoolFlag(item["desired"]),
+			ValueOrDefault(MapValueAsString(item, "hostPath"), "-"),
+		})
+	}
+	return formatAlignedTable(rows)
+}
+
+func formatConsumers(raw any) string {
+	switch typed := raw.(type) {
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "-"
+		}
+		return strings.Join(parts, ",")
+	case []string:
+		if len(typed) == 0 {
+			return "-"
+		}
+		return strings.Join(typed, ",")
+	default:
+		s := strings.TrimSpace(fmt.Sprintf("%v", raw))
+		if s == "" || s == "<nil>" {
+			return "-"
+		}
+		return s
+	}
+}
+
+func formatVolumeInspect(result map[string]any) string {
+	if len(result) == 0 {
+		return ""
+	}
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	return formatMSInspect(result)
 }
 
 func formatBoolFlag(raw any) string {

@@ -80,6 +80,18 @@ func mapRequestToPermission(r *http.Request) (rbacPermission, bool) {
 	case strings.HasPrefix(path, "/v1/models/"):
 		name := strings.TrimSpace(strings.TrimPrefix(path, "/v1/models/"))
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "models", Verb: verb, ResourceName: name}, true
+	case path == "/v1/volumes:prune":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes/prune", Verb: verb}, true
+	case strings.HasPrefix(path, "/v1/volumes/shared/"):
+		name := strings.TrimSpace(strings.TrimPrefix(path, "/v1/volumes/shared/"))
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes", Verb: verb, ResourceName: name}, true
+	case path == "/v1/volumes/shared":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes", Verb: verb}, true
+	case path == "/v1/volumes":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes", Verb: verb}, true
+	case strings.HasPrefix(path, "/v1/volumes/"):
+		uuid := strings.TrimSpace(strings.TrimPrefix(path, "/v1/volumes/"))
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes", Verb: verb, ResourceName: uuid}, true
 	case path == "/v1/microservices/config":
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "microservices/config/self", Verb: verb}, true
 	case path == "/v1/microservices/control":

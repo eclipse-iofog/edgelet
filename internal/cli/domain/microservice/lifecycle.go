@@ -47,7 +47,11 @@ func Kill(client run.EdgeletAPIClient, id string) (*LifecycleResult, error) {
 	return lifecycle(client, "POST", "/v1/ms/"+id+"/kill")
 }
 
-// Remove deletes a microservice.
-func Remove(client run.EdgeletAPIClient, id string) (*LifecycleResult, error) {
-	return lifecycle(client, "DELETE", "/v1/ms/"+id)
+// Remove deletes a microservice. Persistent VOLUME data is retained.
+func Remove(client run.EdgeletAPIClient, id string, cleanup bool) (*LifecycleResult, error) {
+	path := "/v1/ms/" + id
+	if cleanup {
+		path += "?cleanup=true"
+	}
+	return lifecycle(client, "DELETE", path)
 }

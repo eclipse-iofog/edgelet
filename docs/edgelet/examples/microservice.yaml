@@ -88,16 +88,23 @@ spec:
         permissions: rwm         # optional — combination of r, w, m (default rwm)
 
     volumes:
-      # type: bind — hostDestination must be an absolute host path
-      - hostDestination: /var/lib/edgelet/volumes/nodered-data
-        containerDestination: /data
+      # type: bind — hostDestination must be an absolute host path (never deleted)
+      - hostDestination: /opt/nodered-host
+        containerDestination: /host-data
         accessMode: rw           # optional — rw or ro
         type: bind
-      # type: volume — hostDestination is a named local volume
+      # type: volume, scope private (default) — per microservice UUID
       - hostDestination: nodered_data
         containerDestination: /backup
         accessMode: rw
         type: volume
+        # scope: private         # optional — omit/unknown → private
+      # type: volume, scope shared — node-global name under volumes/shared/
+      - hostDestination: nodered-config
+        containerDestination: /data
+        accessMode: rw
+        type: volume
+        scope: shared
 
     tmpfs:                       # optional — in-memory mounts; size is MiB; no auto-inject of /tmp
       - containerPath: /tmp

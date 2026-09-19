@@ -23,7 +23,6 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/utils"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 	"github.com/eclipse-iofog/edgelet/internal/version"
-	"github.com/eclipse-iofog/edgelet/internal/volumemount"
 )
 
 const (
@@ -85,6 +84,9 @@ type FieldAgent struct {
 	// test hook: replaces Deprovision in status auth gate tests.
 	deprovisionFn func(clearCredentials bool) error
 
+	// test hook: replaces DeprovisionWithOptions in unit tests.
+	deprovisionOptsFn func(clearCredentials bool, scope string, purgeVolumes bool) error
+
 	// test hook: overrides time.Now for status auth gate tests.
 	statusAuthNowFn func() time.Time
 
@@ -99,8 +101,9 @@ type FieldAgent struct {
 	processChangesFn func(changes map[string]any) bool
 
 	// test hooks: replace on-demand prune steps for the getChanges prune flag.
-	pruneImagesFn func() error
-	pruneModelsFn func() error
+	pruneImagesFn  func() error
+	pruneModelsFn  func() error
+	pruneVolumesFn func() error
 
 	// test hook: replaces controllerReconcile in unit tests.
 	controllerReconcileHook func() error
@@ -735,7 +738,7 @@ func (fa *FieldAgent) getDeprovisionBody() map[string]any {
 // Deprovision deprovisions the agent
 // clearCredentials=true skip controller request
 func (fa *FieldAgent) Deprovision(clearCredentials bool) error {
-	return fa.DeprovisionWithScope(clearCredentials, DeprovisionScopeAll)
+	return fa.DeprovisionWithOptions(clearCredentials, DeprovisionScopeAll, false)
 }
 
 func normalizeDeprovisionScope(scope string) (string, error) {
@@ -753,7 +756,18 @@ func normalizeDeprovisionScope(scope string) (string, error) {
 
 // DeprovisionWithScope deprovisions the agent and controls cleanup scope.
 // scope=all removes managed+local workloads; scope=local preserves local workloads.
+// Persistent VOLUME trees are preserved unless purgeVolumes is set via DeprovisionWithOptions.
 func (fa *FieldAgent) DeprovisionWithScope(clearCredentials bool, scope string) error {
+	return fa.DeprovisionWithOptions(clearCredentials, scope, false)
+}
+
+// DeprovisionWithOptions deprovisions the agent with cleanup scope and optional
+// persistent-volume purge. Automatic callers (delete-node, Edge Guard, status-auth)
+// must pass purgeVolumes=false so volumes/data and volumes/shared remount later.
+func (fa *FieldAgent) DeprovisionWithOptions(clearCredentials bool, scope string, purgeVolumes bool) error {
+	if fa.deprovisionOptsFn != nil {
+		return fa.deprovisionOptsFn(clearCredentials, scope, purgeVolumes)
+	}
 	normalizedScope, scopeErr := normalizeDeprovisionScope(scope)
 	if scopeErr != nil {
 		return scopeErr
@@ -918,29 +932,21 @@ func (fa *FieldAgent) DeprovisionWithScope(clearCredentials bool, scope string) 
 			}()
 		}
 
-		// Lite all-scope deprovision: prune residual runtime artifacts after workload removal.
+		// Lite all-scope deprovision: prune residual containers after workload removal.
+		// Do not prune persistent VOLUME data here.
 		fa.clearLiteRuntimeArtifactsOnDeprovision(preserveLocal, func() error {
 			if fa.processManager == nil {
 				return nil
 			}
 			_, err := fa.processManager.PruneContainers()
 			return err
-		}, func() error {
-			if fa.processManager == nil {
-				return nil
-			}
-			_, err := fa.processManager.PruneVolumes()
-			return err
 		})
 
-		// Clear volume mounts with scope-aware behavior:
-		// - keep-local: clear controller artifacts only (volume_mounts + secrets/configMaps)
-		// - all-scope: full volume-mount clear
-		fa.clearVolumeMountsOnDeprovision(preserveLocal, func() error {
-			return volumemount.GetInstance().Clear()
-		}, func() error {
-			return volumemount.GetInstance().ClearControllerArtifacts()
-		})
+		// Persistent VOLUME trees under volumes/data and volumes/shared stay unless
+		// the operator asked to purge workload claims. Ledger rows keep
+		// unreferenced_at NULL so re-provision remounts the same host paths
+		// and orphan prune does not start a grace clock.
+		fa.applyDeprovisionVolumePolicy(preserveLocal, purgeVolumes)
 
 		// Clear service-account token projections and metadata.
 		serviceaccount.GetInstance().Clear()
@@ -1050,7 +1056,7 @@ func (fa *FieldAgent) clearVolumeMountsOnDeprovision(preserveLocal bool, clearAl
 	}
 }
 
-func (fa *FieldAgent) clearLiteRuntimeArtifactsOnDeprovision(preserveLocal bool, pruneContainersFn func() error, pruneVolumesFn func() error) {
+func (fa *FieldAgent) clearLiteRuntimeArtifactsOnDeprovision(preserveLocal bool, pruneContainersFn func() error) {
 	if preserveLocal {
 		return
 	}
@@ -1065,25 +1071,16 @@ func (fa *FieldAgent) clearLiteRuntimeArtifactsOnDeprovision(preserveLocal bool,
 		return
 	}
 
-	logging.LogDebug(moduleName, "Start lite runtime artifact prune on deprovision (containers -> volumes)")
-	for _, step := range []struct {
-		name string
-		fn   func() error
-	}{
-		{name: "container prune", fn: pruneContainersFn},
-		{name: "volume prune", fn: pruneVolumesFn},
-	} {
-		if step.fn == nil {
-			continue
-		}
+	logging.LogDebug(moduleName, "Start lite runtime artifact prune on deprovision (containers)")
+	if pruneContainersFn != nil {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					logging.LogError(moduleName, fmt.Sprintf("Error during deprovision %s", step.name), fmt.Errorf("%v", r))
+					logging.LogError(moduleName, "Error during deprovision container prune", fmt.Errorf("%v", r))
 				}
 			}()
-			if err := step.fn(); err != nil {
-				logging.LogError(moduleName, fmt.Sprintf("Error during deprovision %s", step.name), err)
+			if err := pruneContainersFn(); err != nil {
+				logging.LogError(moduleName, "Error during deprovision container prune", err)
 			}
 		}()
 	}

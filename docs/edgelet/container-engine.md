@@ -46,8 +46,8 @@ Isolated from host Docker/Podman installations:
 | `/usr/local/bin/edgelet` | **Thin** download binary (linux): CLI + embed; systemd entry |
 | `/var/lib/edgelet/data/current/bin/edgelet` | **Fat** runtime ELF (linux): daemon + in-process containerd |
 | `/var/lib/edgelet/data/current/bin/` | Shim (`containerd-shim-runc-v2`), `crun`, CNI multicall + symlinks |
-| `/var/lib/edgelet/data/current` / `previous` | Symlinks to active / prior extracted bundle directories |
-| `/var/lib/edgelet/` | User data (`diskDirectory`); workload volume data under `volumes/data/` — see [volumes.md](volumes.md) |
+| `/var/lib/edgelet/data/current` / `previous` | Symlinks to active / prior extracted bundle directories. Older hash trees are removed after a successful extract |
+| `/var/lib/edgelet/` | User data (`diskDirectory`); persistent `VOLUME` data under `volumes/data/` (private) and `volumes/shared/` (shared) — see [volumes.md](volumes.md) |
 | `/var/lib/edgelet-containerd/` | Containerd images, snapshots, CNI state |
 | `/run/edgelet/containerd.sock` | Containerd API socket |
 | `/run/edgelet/edgelet.sock` | EdgeletAPI Unix socket |

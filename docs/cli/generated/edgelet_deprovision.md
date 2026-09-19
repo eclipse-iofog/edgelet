@@ -8,6 +8,8 @@ Remove agent provisioning and begin cleanup of managed resources.
 
 WARNING: Deprovisioning stops controller management and may remove managed microservices.
 Use --keep-local or --scope local to preserve locally deployed microservices.
+Persistent VOLUME data under volumes/data and volumes/shared is preserved unless
+--purge-volumes is set. Control-plane volumes are never purged.
 
 ```
 edgelet deprovision [flags]
@@ -19,14 +21,16 @@ edgelet deprovision [flags]
 edgelet deprovision
   edgelet deprovision --scope local
   edgelet deprovision --keep-local
+  edgelet deprovision --scope all --purge-volumes
 ```
 
 ### Options
 
 ```
-  -h, --help           help for deprovision
-      --keep-local     Preserve local microservices (sets scope to local)
-      --scope string   Deprovision scope: all or local (default "all")
+  -h, --help            help for deprovision
+      --keep-local      Preserve local microservices (sets scope to local)
+      --purge-volumes   Destroy workload persistent VOLUME data after deprovision
+      --scope string    Deprovision scope: all or local (default "all")
 ```
 
 ### Options inherited from parent commands

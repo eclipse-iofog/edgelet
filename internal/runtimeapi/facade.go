@@ -247,14 +247,16 @@ func (f *Facade) Provision(provisioningKey string) error {
 }
 
 // Deprovision deprovisions the agent.
-func (f *Facade) Deprovision(scope string) error {
+// purgeVolumes destroys workload persistent VOLUME claims; control-plane
+// volumes are never purged. Shared names stay while any consumer remains.
+func (f *Facade) Deprovision(scope string, purgeVolumes bool) error {
 	normalized := strings.ToLower(strings.TrimSpace(scope))
 	if normalized == "" {
 		normalized = fieldagent.DeprovisionScopeAll
 	}
 	switch normalized {
 	case fieldagent.DeprovisionScopeAll, fieldagent.DeprovisionScopeLocal:
-		return f.fa.DeprovisionWithScope(false, normalized)
+		return f.fa.DeprovisionWithOptions(false, normalized, purgeVolumes)
 	default:
 		return fmt.Errorf("invalid deprovision scope %q (allowed: %s|%s)", scope, fieldagent.DeprovisionScopeAll, fieldagent.DeprovisionScopeLocal)
 	}
@@ -324,28 +326,10 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		result["deletedCount"] = deletedCount
 		result["message"] = "pruned containers"
 	case PruneModeVolumes:
-		report, pruneErr := pm.PruneVolumes()
-		if pruneErr != nil {
-			return nil, pruneErr
-		}
-		deleted := make([]string, 0)
-		deletedCount := 0
-		reclaimed := int64(0)
-		if report != nil {
-			deleted = append(deleted, report.Deleted...)
-			deletedCount = report.DeletedCount
-			reclaimed = report.SpaceReclaimedBytes
-		}
-		slices.Sort(deleted)
-		result["deleted"] = deleted
-		result["deletedCount"] = deletedCount
-		result["spaceReclaimedBytes"] = reclaimed
-		result["spaceReclaimedHuman"] = humanBytes(reclaimed)
-		result["message"] = "pruned volumes"
+		return nil, ErrSystemPruneVolumes
 	case PruneModeAll:
 		var (
 			containerReport *engine.ContainerPruneReport
-			volumeReport    *engine.VolumePruneReport
 			imageReport     *engine.ImagePruneReport
 			errorsByStep    = map[string]string{}
 		)
@@ -353,11 +337,6 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 			errorsByStep["containers"] = pruneErr.Error()
 		} else {
 			containerReport = r
-		}
-		if r, pruneErr := pm.PruneVolumes(); pruneErr != nil {
-			errorsByStep["volumes"] = pruneErr.Error()
-		} else {
-			volumeReport = r
 		}
 		if r, pruneErr := pm.PruneDanglingImages(); pruneErr != nil {
 			errorsByStep["images"] = pruneErr.Error()
@@ -375,15 +354,6 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 			containerDeletedCount = containerReport.DeletedCount
 		}
 		slices.Sort(containerDeleted)
-		volumeDeleted := make([]string, 0)
-		volumeDeletedCount := 0
-		volumeReclaimed := int64(0)
-		if volumeReport != nil {
-			volumeDeleted = append(volumeDeleted, volumeReport.Deleted...)
-			volumeDeletedCount = volumeReport.DeletedCount
-			volumeReclaimed = volumeReport.SpaceReclaimedBytes
-		}
-		slices.Sort(volumeDeleted)
 		imageDeleted := make([]string, 0)
 		imageDeletedCount := 0
 		imageReclaimed := int64(0)
@@ -395,20 +365,20 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		slices.Sort(imageDeleted)
 		result["containersDeleted"] = containerDeleted
 		result["containersDeletedCount"] = containerDeletedCount
-		result["volumesDeleted"] = volumeDeleted
-		result["volumesDeletedCount"] = volumeDeletedCount
+		result["volumesDeleted"] = []string{}
+		result["volumesDeletedCount"] = 0
 		result["imagesDeleted"] = imageDeleted
 		result["imagesDeletedCount"] = imageDeletedCount
 		attachModelPruneReport(result, modelReport)
-		result["deletedCount"] = containerDeletedCount + volumeDeletedCount + imageDeletedCount + modelRemovedCount(modelReport)
-		result["spaceReclaimedBytes"] = volumeReclaimed + imageReclaimed
-		result["spaceReclaimedHuman"] = humanBytes(volumeReclaimed + imageReclaimed)
+		result["deletedCount"] = containerDeletedCount + imageDeletedCount + modelRemovedCount(modelReport)
+		result["spaceReclaimedBytes"] = imageReclaimed
+		result["spaceReclaimedHuman"] = humanBytes(imageReclaimed)
 		if len(errorsByStep) > 0 {
 			result["status"] = "partial"
 			result["errors"] = errorsByStep
-			result["message"] = "pruned containers, volumes, dangling images, and unused local models with partial failures"
+			result["message"] = "pruned containers, dangling images, and unused local models with partial failures"
 		} else {
-			result["message"] = "pruned containers, volumes, dangling images, and unused local models"
+			result["message"] = "pruned containers, dangling images, and unused local models"
 		}
 	default:
 		return nil, fmt.Errorf("unsupported prune mode %q", normalizedMode)
@@ -1154,7 +1124,7 @@ func isMicroserviceNotFound(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "microservice not found")
 }
 
-func (f *Facade) removeLocalWorkloadRecord(local *models.LocalDeployedMicroservice) (string, error) {
+func (f *Facade) removeLocalWorkloadRecord(local *models.LocalDeployedMicroservice, cleanup bool) (string, error) {
 	uuid := strings.TrimSpace(local.LocalUUID)
 	nowSec := time.Now().Unix()
 	local.DesiredState = "deleted"
@@ -1174,10 +1144,22 @@ func (f *Facade) removeLocalWorkloadRecord(local *models.LocalDeployedMicroservi
 	if err := f.db.DeleteLocalWorkload(uuid); err != nil {
 		return "", err
 	}
+	if cleanup {
+		if err := f.db.AddPersistentVolumeCleanupUUID(uuid); err != nil {
+			return "", err
+		}
+	}
 	return uuid, nil
 }
 
 func (f *Facade) RemoveRuntimeMicroservice(selector string) (string, error) {
+	return f.RemoveRuntimeMicroserviceWithCleanup(selector, false)
+}
+
+// RemoveRuntimeMicroserviceWithCleanup removes a microservice. Persistent
+// VOLUME data is retained. cleanup records a reserved bit for later explicit
+// orphan prune and does not delete files or start a sweeper.
+func (f *Facade) RemoveRuntimeMicroserviceWithCleanup(selector string, cleanup bool) (string, error) {
 	trimmed := strings.TrimSpace(selector)
 	if trimmed == "" {
 		return "", errors.New("microservice id is required")
@@ -1186,7 +1168,7 @@ func (f *Facade) RemoveRuntimeMicroservice(selector string) (string, error) {
 		if err := f.guardControlPlaneMicroserviceMutation(trimmed, "rm"); err != nil {
 			return "", err
 		}
-		return f.removeLocalWorkloadRecord(local)
+		return f.removeLocalWorkloadRecord(local, cleanup)
 	}
 	uuid, err := f.ResolveMicroserviceID(selector)
 	if err != nil {
@@ -1199,10 +1181,15 @@ func (f *Facade) RemoveRuntimeMicroservice(selector string) (string, error) {
 		return "", err
 	}
 	if local, localErr := f.db.GetLocalWorkload(uuid); localErr == nil && local != nil {
-		return f.removeLocalWorkloadRecord(local)
+		return f.removeLocalWorkloadRecord(local, cleanup)
 	}
 	if err := processmanager.GetInstance().RemoveMicroservice(uuid); err != nil {
 		return "", err
+	}
+	if cleanup {
+		if err := f.db.AddPersistentVolumeCleanupUUID(uuid); err != nil {
+			return "", err
+		}
 	}
 	return uuid, nil
 }

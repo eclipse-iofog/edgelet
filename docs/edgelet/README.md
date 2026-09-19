@@ -10,7 +10,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [modules/README.md](modules/README.md) | Runtime module deep dives (all tiers) |
 | [installation.md](installation.md) | install.sh, OTA, upgrade/rollback, controller readiness |
 | [deployment.md](deployment.md) | Production topology, engines, systemd, provisioning |
-| [persistence.md](persistence.md) | SQLite backup/restore, schema v2 in-place upgrade, secrets threat model |
+| [persistence.md](persistence.md) | SQLite backup/restore, schema v3 in-place upgrade, secrets threat model |
 | [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity, microservice crashes |
 | [logging.md](logging.md) | Structured events, log levels, journald queries |
 
@@ -22,7 +22,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [dns.md](dns.md) | Bridge DNS, embedded resolver, docker/podman aliases and ExtraHosts |
 | [workload-metadata.md](workload-metadata.md) | Container labels and `EDGELET_*` env contract |
 | [workload-continuity.md](workload-continuity.md) | Reconcile behavior across restarts and engine changes |
-| [volumes.md](volumes.md) | Volume types, delete vs prune behavior, disk layout |
+| [volumes.md](volumes.md) | Persistent VOLUME retain/reclaim, private vs shared, BIND |
 | [edgeguard.md](edgeguard.md) | Hardware attestation (`edgeGuardFrequency`) |
 | [control-plane.md](control-plane.md) | Local Datasance Controller deployment |
 | [exec-sessions.md](exec-sessions.md) | Multi-session exec (local CLI and controller-initiated) |
@@ -38,6 +38,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [edgelet-api-v1-openapi.yaml](edgelet-api-v1-openapi.yaml) | OpenAPI 3.1 contract |
 | [edgelet-api-v1-rbac-resources.md](edgelet-api-v1-rbac-resources.md) | RBAC resource/verb mapping |
 | [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller contract: HAL drop, RuntimeClass, status keys, catalog flag, image TLS, prune, microservice last-crash extras |
+| [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md) | Controller contract: additive `volumeMappings[].scope` (`private` \| `shared`) |
 
 ## Migration
 

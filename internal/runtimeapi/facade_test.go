@@ -721,7 +721,7 @@ func TestFacadeStopRuntimeMicroservice_LocalPersistsDesiredState(t *testing.T) {
 
 func TestFacadeDeprovision_RejectsInvalidScope(t *testing.T) {
 	f := NewFacade()
-	err := f.Deprovision("bad")
+	err := f.Deprovision("bad", false)
 	if err == nil {
 		t.Fatal("expected invalid scope error")
 	}
@@ -772,6 +772,17 @@ func TestFacadePrune_AllModeReturnsPartialOnStepFailures(t *testing.T) {
 	}
 	if _, ok := result["modelsRemoved"]; !ok {
 		t.Fatalf("expected unused local model prune in all mode, got %#v", result)
+	}
+	if fmt.Sprintf("%v", result["volumesDeletedCount"]) != "0" {
+		t.Fatalf("expected no persistent VOLUME destroy, got %#v", result)
+	}
+}
+
+func TestFacadePrune_VolumesModeRefusesPersistentData(t *testing.T) {
+	f := NewFacade()
+	_, err := f.Prune("volumes")
+	if err == nil || !errors.Is(err, ErrSystemPruneVolumes) {
+		t.Fatalf("expected volumes mode refusal, got %v", err)
 	}
 }
 

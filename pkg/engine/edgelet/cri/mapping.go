@@ -386,7 +386,7 @@ func buildCRIMounts(ms *models.Microservice, hostsFilePath string, resolvFilePat
 
 	for _, vm := range ms.VolumeMappings {
 		isVolumeMount := vm.Type == models.VolumeMappingTypeVolumeMount
-		source, err := vmm.ResolveHostPath(ms.MicroserviceUUID, vm.HostDestination, isVolumeMount, ms.RunAsUser)
+		source, err := vmm.ResolveHostPath(ms.MicroserviceUUID, vm.HostDestination, isVolumeMount, ms.RunAsUser, vm.EffectiveVolumeScope())
 		if err != nil {
 			return nil, err
 		}

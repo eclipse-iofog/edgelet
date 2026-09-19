@@ -111,6 +111,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("/v1/models:pull", chainMiddleware(withRoute("/v1/models:pull", r.apiHandler.HandleModelPull), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
 	r.mux.HandleFunc("/v1/models:pull/", chainMiddleware(withRoute("/v1/models:pull/", r.apiHandler.HandleModelPullStatus), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
 	r.mux.HandleFunc("/v1/models:prune", chainMiddleware(withRoute("/v1/models:prune", r.apiHandler.HandleModelPrune), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
+	r.mux.HandleFunc("/v1/volumes:prune", chainMiddleware(withRoute("/v1/volumes:prune", r.apiHandler.HandleVolumePrune), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
+	r.mux.HandleFunc("/v1/volumes/shared/", chainMiddleware(withRoute("/v1/volumes/shared/", r.apiHandler.HandleVolumeShared), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
+	r.mux.HandleFunc("/v1/volumes/shared", chainMiddleware(withRoute("/v1/volumes/shared", r.apiHandler.HandleVolumeShared), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
+	r.mux.HandleFunc("/v1/volumes/", chainMiddleware(withRoute("/v1/volumes/", r.apiHandler.HandleVolumes), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
+	r.mux.HandleFunc("/v1/volumes", chainMiddleware(withRoute("/v1/volumes", r.apiHandler.HandleVolumes), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
 
 	r.mux.HandleFunc("/v1/microservices/config", chainMiddleware(withRoute("/v1/microservices/config", r.apiHandler.HandleMicroserviceConfigSelf), authMiddlewareV1, accessLoggingMiddleware, requestIDMiddleware))
 	r.mux.HandleFunc("/v1/microservices/control", r.controlWSHandler.Handle)

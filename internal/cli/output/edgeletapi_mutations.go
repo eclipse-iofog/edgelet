@@ -29,6 +29,8 @@ func formatMutationRoute(routePath string, result map[string]any) string {
 		return formatImageRemoveResult(result)
 	case "/v1/models:prune":
 		return formatModelPruneResult(result)
+	case "/v1/volumes:prune":
+		return formatVolumePruneResult(result)
 	case "/v1/models:pull":
 		return formatModelPullResult(result)
 	case "/v1/deploy/microservices:validate", "/v1/deploy/registries:validate", "/v1/deploy/models:validate", "/v1/deploy/runtimeclasses:validate", "/v1/deploy/controlplane:validate":
@@ -52,6 +54,16 @@ func formatMutationRoute(routePath string, result map[string]any) string {
 		if strings.HasPrefix(routePath, "/v1/models/") {
 			if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
 				return formatModelRemoveResult(result)
+			}
+		}
+		if strings.HasPrefix(routePath, "/v1/volumes/shared/") {
+			if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+				return formatVolumeRemoveResult(result, true)
+			}
+		}
+		if strings.HasPrefix(routePath, "/v1/volumes/") {
+			if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+				return formatVolumeRemoveResult(result, false)
 			}
 		}
 		if strings.HasPrefix(routePath, "/v1/deploy/registries/") {
@@ -260,6 +272,47 @@ func formatModelRemoveResult(result map[string]any) string {
 		return fmt.Sprintf("model removed successfully (name=%s)", name)
 	}
 	return "model removed successfully"
+}
+
+func formatVolumeRemoveResult(result map[string]any, shared bool) string {
+	if shared {
+		if name := MapValueAsString(result, "name"); name != "<unknown>" {
+			return fmt.Sprintf("shared volume removed successfully (name=%s)", name)
+		}
+		return "shared volume removed successfully"
+	}
+	if uuid := MapValueAsString(result, "uuid"); uuid != "<unknown>" {
+		return fmt.Sprintf("persistent volume removed successfully (uuid=%s)", uuid)
+	}
+	return "persistent volume removed successfully"
+}
+
+func formatVolumePruneResult(result map[string]any) string {
+	dryRun := true
+	switch typed := result["dryRun"].(type) {
+	case bool:
+		dryRun = typed
+	case string:
+		dryRun = !strings.EqualFold(typed, "false")
+	}
+	count := 0
+	switch typed := result["candidates"].(type) {
+	case []any:
+		count = len(typed)
+	case []string:
+		count = len(typed)
+	}
+	if dryRun {
+		return fmt.Sprintf("volume prune dry-run: candidates=%d; pass --yes to destroy", count)
+	}
+	deleted := 0
+	switch typed := result["deleted"].(type) {
+	case []any:
+		deleted = len(typed)
+	case []string:
+		deleted = len(typed)
+	}
+	return fmt.Sprintf("pruned persistent volumes: deleted=%d", deleted)
 }
 
 func formatImagePruneResult(result map[string]any) string {

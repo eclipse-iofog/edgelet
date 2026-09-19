@@ -68,6 +68,63 @@ func seedStatus(uuid string, state models.MicroserviceState) {
 	})
 }
 
+func TestConfiguredMicroserviceImages_IncludesLocalDeployAndController(t *testing.T) {
+	openLocalReconcileTestDB(t)
+
+	local := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-vol-it",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "vol-it-a",
+		SourceName:       "local-cli",
+		ManifestYAML:     "kind: Microservice",
+		ImageName:        "docker.io/library/alpine:3.19",
+		State:            "running",
+		DesiredState:     "running",
+		RuntimeState:     "running",
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(local); err != nil {
+		t.Fatalf("failed to seed local deployment: %v", err)
+	}
+	gone := &models.LocalDeployedMicroservice{
+		LocalUUID:        "gone-local",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "old",
+		SourceName:       "local-cli",
+		ManifestYAML:     "kind: Microservice",
+		ImageName:        "docker.io/library/busybox:1.36",
+		DesiredState:     "deleted",
+		RuntimeState:     "deleted",
+		State:            "deleted",
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(gone); err != nil {
+		t.Fatalf("failed to seed gone local deployment: %v", err)
+	}
+
+	pm := newPruneTestProcessManager([]*models.Microservice{
+		{MicroserviceUUID: "ctrl-1", ImageName: "docker.io/library/nginx:latest"},
+	}, &pruneTestEngine{})
+
+	got := pm.ConfiguredMicroserviceImages()
+	want := map[string]bool{
+		"docker.io/library/nginx:latest": false,
+		"docker.io/library/alpine:3.19":  false,
+		"docker.io/library/busybox:1.36": true,
+	}
+	seen := make(map[string]bool, len(got))
+	for _, name := range got {
+		seen[name] = true
+	}
+	for name, mustOmit := range want {
+		_, ok := seen[name]
+		if mustOmit && ok {
+			t.Fatalf("gone local image %q must not be in keep-set, got %v", name, got)
+		}
+		if !mustOmit && !ok {
+			t.Fatalf("expected image %q in keep-set, got %v", name, got)
+		}
+	}
+}
+
 func TestPruneStaleProcessManagerStatuses_PrunesOrphanManagedStatus(t *testing.T) {
 	openLocalReconcileTestDB(t)
 	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })

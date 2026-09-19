@@ -52,14 +52,13 @@ func newSystemCommand() *cobra.Command {
 			pruneCmd := &cobra.Command{
 				Use:       "prune [dangling|containers|volumes|all]",
 				Short:     "Prune unused resources",
-				Long:      "Prune unused resources. Default mode is dangling images.",
+				Long:      "Prune unused resources. Default mode is dangling images. volumes does not destroy persistent VOLUME data; use edgelet volume prune.",
 				Args:      cobra.MaximumNArgs(1),
 				ValidArgs: []string{"dangling", "containers", "volumes", "all"},
 				Example: strings.Join([]string{
 					"edgelet system prune",
 					"edgelet system prune all",
 					"edgelet system prune --mode all",
-					"edgelet system prune --mode volumes",
 				}, "\n"),
 				RunE: runSystemPrune,
 			}
@@ -152,6 +151,9 @@ func runSystemPrune(cmd *cobra.Command, args []string) error {
 	mode, err := prune.ParseMode(parseArgs, "Usage: edgelet system prune [dangling|containers|volumes|all]")
 	if err != nil {
 		return err
+	}
+	if mode == "volumes" {
+		return run.NewCLIError(run.CodeInvalidArgument, "system prune volumes does not destroy persistent VOLUME data; use edgelet volume prune", nil)
 	}
 	path := "/v1/system/prune"
 	if mode != "" {

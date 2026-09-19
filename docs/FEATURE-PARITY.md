@@ -71,7 +71,7 @@ Host hardware/USB inventory posting (former Resource Manager / HAL) has been **r
 - [x] Network interface detection
 - [x] Interface status monitoring
 
-### Docker Pruning Manager
+### Edgelet Pruning Manager
 - [x] Automatic Docker cleanup
 - [x] Image pruning
 - [x] Container pruning

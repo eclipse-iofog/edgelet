@@ -99,7 +99,7 @@ Local deploy binds **local** models only. The container starts only when every n
 | `env` | `{key,value}[]` | User env (`EDGELET_*` reserved) |
 | `extraHosts` | `{name,address}[]` or legacy strings | `/etc/hosts` + docker ExtraHosts |
 | `ports` | `{internal,external,protocol}[]` | Port mappings |
-| `volumes` | `{hostDestination,containerDestination,accessMode,type}[]` | `BIND`, `VOLUME`, or controller `VOLUME_MOUNT`. **Delete does not remove `VOLUME` data** on the embedded engine — see [volumes.md](volumes.md). |
+| `volumes` | `{hostDestination,containerDestination,accessMode,type,scope?}[]` | `BIND`, `VOLUME`, or controller `VOLUME_MOUNT`. On `type: volume`, `scope` is `private` (default) or `shared`. Omit / unknown → private. `scope` on BIND / volumeMount is ignored. **Delete does not remove `VOLUME` data** — see [volumes.md](volumes.md). Same `scope` field on controller `volumeMappings[]`. |
 | `tmpfs` | `{containerPath,size?,mode?}[]` | In-memory mounts. `size` is MiB. Absolute `containerPath` required |
 | `sysctls` | string map | Kubernetes **safe sysctls** only (see allowlist below). `hostNetworkMode: true` rejects `net.*`. `ipcMode: host` rejects IPC-namespaced names (`kernel.shm*`, `kernel.msg*`, `kernel.sem*`, `fs.mqueue.*`). `pidMode: host` does not change sysctl validation |
 | `ulimits` | map of `{soft,hard}` | Keys are Docker/RLIMIT names (see allowlist). `-1` = unlimited. Nested `cpu` is RLIMIT_CPU (seconds), not `cpus`. If neither side is `-1`, `soft` must be `<= hard`; unlimited soft requires unlimited hard. Scalar values are rejected |
@@ -117,6 +117,10 @@ Local deploy binds **local** models only. The container starts only when every n
 | `healthCheck` | object | **Applied.** `test` argv; `interval`, `timeout`, `startPeriod`, `retries` in **seconds** |
 
 There is no per-microservice `stopSignal`. The image STOPSIGNAL and engine default SIGTERM apply.
+
+#### Volume `scope`
+
+On `type: volume`, `scope` is **`private`** (default, per microservice UUID) or **`shared`** (node-global name under `{diskDirectory}/volumes/shared/{name}/`). Omit, empty, or unknown → private; apply does not fail. `scope` on `BIND` / `VOLUME_MOUNT` is ignored. The same field is on controller `volumeMappings[]`. See [volumes.md](volumes.md).
 
 #### Sysctl allowlist
 

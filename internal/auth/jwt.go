@@ -389,23 +389,66 @@ func ShouldRotateByLifetime(iat, exp int64, now time.Time) bool {
 
 // GetProvisionedPublicKey returns the base64url public key from provisioned JWK.
 func GetProvisionedPublicKey() string {
+	jwk, err := provisionedSigningJWK()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(jwk.X)
+}
+
+// ProvisionedPublicJWKJSON returns the compact public-only signing JWK for
+// projected workload verification (no private key material).
+func ProvisionedPublicJWKJSON() ([]byte, error) {
+	jwk, err := provisionedSigningJWK()
+	if err != nil {
+		return nil, err
+	}
+	x := strings.TrimSpace(jwk.X)
+	if x == "" {
+		return nil, errors.New("provisioned public key is missing")
+	}
+	kty := strings.TrimSpace(jwk.Kty)
+	if kty == "" {
+		kty = "OKP"
+	}
+	crv := strings.TrimSpace(jwk.Crv)
+	if crv == "" {
+		crv = "Ed25519"
+	}
+	if kty != "OKP" || crv != "Ed25519" {
+		return nil, fmt.Errorf("unsupported signing JWK: kty=%s crv=%s", kty, crv)
+	}
+	return json.Marshal(struct {
+		Kty string `json:"kty"`
+		Crv string `json:"crv"`
+		Alg string `json:"alg"`
+		X   string `json:"x"`
+	}{
+		Kty: kty,
+		Crv: crv,
+		Alg: "EdDSA",
+		X:   x,
+	})
+}
+
+func provisionedSigningJWK() (JWK, error) {
 	cfg := config.GetInstance()
 	if strings.TrimSpace(cfg.PrivateKey) == "" {
 		if _, err := hydrateProvisionedPrivateKeyFromDB(); err != nil {
-			return ""
+			return JWK{}, err
 		}
 		cfg = config.GetInstance()
 	}
 	if strings.TrimSpace(cfg.PrivateKey) == "" {
-		return ""
+		return JWK{}, errors.New("agent is not provisioned")
 	}
 	keyBytes, err := base64.StdEncoding.DecodeString(cfg.PrivateKey)
 	if err != nil {
-		return ""
+		return JWK{}, fmt.Errorf("failed to decode provisioned JWK: %w", err)
 	}
 	var jwk JWK
 	if err := json.Unmarshal(keyBytes, &jwk); err != nil {
-		return ""
+		return JWK{}, fmt.Errorf("failed to parse provisioned JWK: %w", err)
 	}
-	return strings.TrimSpace(jwk.X)
+	return jwk, nil
 }

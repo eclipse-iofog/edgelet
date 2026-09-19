@@ -164,3 +164,58 @@ func TestParseMicroservice_CatalogAndUnknownKeysIgnored(t *testing.T) {
 		t.Fatal("expected readOnlyRootFilesystem")
 	}
 }
+
+func TestParseMicroservice_VolumeScope(t *testing.T) {
+	ms, err := parseMicroservice(map[string]any{
+		"uuid":    "ms-vol",
+		"imageId": "alpine:3.19",
+		"volumeMappings": []any{
+			map[string]any{
+				"hostDestination":      "config",
+				"containerDestination": "/app/config",
+				"accessMode":           "rw",
+				"type":                 "volume",
+				"scope":                "shared",
+			},
+			map[string]any{
+				"hostDestination":      "data",
+				"containerDestination": "/data",
+				"accessMode":           "rw",
+				"type":                 "volume",
+				"scope":                "SHARED",
+			},
+			map[string]any{
+				"hostDestination":      "/var/lib/data",
+				"containerDestination": "/host",
+				"accessMode":           "rw",
+				"type":                 "bind",
+				"scope":                "shared",
+			},
+			map[string]any{
+				"hostDestination":      "foo-vol",
+				"containerDestination": "/foo",
+				"accessMode":           "rw",
+				"type":                 "volume",
+				"scope":                "foo",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(ms.VolumeMappings) != 4 {
+		t.Fatalf("len=%d", len(ms.VolumeMappings))
+	}
+	if ms.VolumeMappings[0].Scope != models.VolumeScopeShared {
+		t.Fatalf("shared scope=%q", ms.VolumeMappings[0].Scope)
+	}
+	if ms.VolumeMappings[1].Scope != models.VolumeScopePrivate {
+		t.Fatalf("SHARED coerced=%q", ms.VolumeMappings[1].Scope)
+	}
+	if ms.VolumeMappings[2].Type != models.VolumeMappingTypeBind || ms.VolumeMappings[2].Scope != models.VolumeScopePrivate {
+		t.Fatalf("BIND mapping=%+v", ms.VolumeMappings[2])
+	}
+	if ms.VolumeMappings[3].Scope != models.VolumeScopePrivate {
+		t.Fatalf("unknown scope=%q", ms.VolumeMappings[3].Scope)
+	}
+}
