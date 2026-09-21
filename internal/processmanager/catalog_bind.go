@@ -2,14 +2,22 @@ package processmanager
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgecatalog"
 	"github.com/eclipse-iofog/edgelet/internal/modelcatalog"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 )
+
+type catalogPrepareResult struct {
+	Decision     models.CatalogGateDecision
+	Message      string
+	MountChanged bool
+}
 
 func (pm *ProcessManager) catalogDiskDirectoryValue() string {
 	if pm != nil && strings.TrimSpace(pm.catalogDiskDirectory) != "" {
@@ -21,7 +29,7 @@ func (pm *ProcessManager) catalogDiskDirectoryValue() string {
 	return ""
 }
 
-func requiredModelSource(msUUID string) string {
+func requiredCatalogSource(msUUID string) string {
 	db := store.GetInstance()
 	if db == nil || db.Conn() == nil {
 		return models.ModelSourceManaged
@@ -33,7 +41,11 @@ func requiredModelSource(msUUID string) string {
 	return models.ModelSourceManaged
 }
 
-func (pm *ProcessManager) prepareCatalog(ms *models.Microservice, forStart bool) (*modelcatalog.PrepareResult, error) {
+func hasCatalogItems(ms *models.Microservice) bool {
+	return ms != nil && (ms.Models.HasItems() || ms.Knowledge.HasItems())
+}
+
+func (pm *ProcessManager) prepareCatalog(ms *models.Microservice, forStart bool) (*catalogPrepareResult, error) {
 	if ms == nil {
 		return nil, errors.New("microservice is nil")
 	}
@@ -41,14 +53,51 @@ func (pm *ProcessManager) prepareCatalog(ms *models.Microservice, forStart bool)
 	if pm.containerManager != nil && strings.TrimSpace(pm.containerManager.catalogDiskDirectory) != "" {
 		disk = strings.TrimSpace(pm.containerManager.catalogDiskDirectory)
 	}
-	return modelcatalog.Prepare(disk, store.GetInstance(), ms, requiredModelSource(ms.MicroserviceUUID), forStart)
+	return prepareWorkloadCatalogs(disk, store.GetInstance(), ms, requiredCatalogSource(ms.MicroserviceUUID), forStart)
+}
+
+func prepareWorkloadCatalogs(diskDirectory string, db *store.DB, ms *models.Microservice, requiredSource string, forStart bool) (*catalogPrepareResult, error) {
+	modelsRes, err := modelcatalog.Prepare(diskDirectory, db, ms, requiredSource, forStart)
+	if err != nil {
+		return nil, err
+	}
+	knowledgeRes, err := knowledgecatalog.Prepare(diskDirectory, db, ms, requiredSource, forStart)
+	if err != nil {
+		return nil, err
+	}
+	dec, msg := models.CombineCatalogStartGates(modelsRes.Decision, modelsRes.Message, knowledgeRes.Decision, knowledgeRes.Message)
+	return &catalogPrepareResult{
+		Decision:     dec,
+		Message:      msg,
+		MountChanged: modelsRes.MountChanged || knowledgeRes.MountChanged,
+	}, nil
+}
+
+func wrapCombinedCatalogDecision(res *catalogPrepareResult) error {
+	if res == nil {
+		return nil
+	}
+	switch res.Decision {
+	case models.CatalogGateWait:
+		if strings.TrimSpace(res.Message) == "" || res.Message == models.CatalogWaitingMessage || res.Message == models.KnowledgeCatalogWaitingMessage {
+			return modelcatalog.ErrWaiting
+		}
+		return fmt.Errorf("%w: %s", modelcatalog.ErrWaiting, res.Message)
+	case models.CatalogGateFail:
+		if strings.TrimSpace(res.Message) == "" {
+			return modelcatalog.ErrFailed
+		}
+		return fmt.Errorf("%w: %s", modelcatalog.ErrFailed, res.Message)
+	default:
+		return nil
+	}
 }
 
 func (pm *ProcessManager) applyCatalogStartGate(ms *models.Microservice) (proceed bool) {
 	if ms == nil {
 		return true
 	}
-	if !ms.Models.HasItems() {
+	if !hasCatalogItems(ms) {
 		pm.releaseCatalog(ms.MicroserviceUUID)
 		return true
 	}
@@ -101,8 +150,12 @@ func (pm *ProcessManager) releaseCatalog(msUUID string) {
 	if pm.containerManager != nil && strings.TrimSpace(pm.containerManager.catalogDiskDirectory) != "" {
 		disk = strings.TrimSpace(pm.containerManager.catalogDiskDirectory)
 	}
-	if err := modelcatalog.Release(disk, store.GetInstance(), msUUID); err != nil {
+	db := store.GetInstance()
+	if err := modelcatalog.Release(disk, db, msUUID); err != nil {
 		pm.logger.Warnf("catalog release for %s: %v", msUUID, err)
+	}
+	if err := knowledgecatalog.Release(disk, db, msUUID); err != nil {
+		pm.logger.Warnf("knowledge catalog release for %s: %v", msUUID, err)
 	}
 }
 
@@ -120,29 +173,32 @@ func (cm *ContainerManager) applyCatalogStartGate(ms *models.Microservice) error
 	if ms == nil {
 		return nil
 	}
-	if !ms.Models.HasItems() {
+	if !hasCatalogItems(ms) {
 		cm.releaseCatalog(ms.MicroserviceUUID)
 		return nil
 	}
-	res, err := modelcatalog.Prepare(cm.catalogDiskDirectoryValue(), store.GetInstance(), ms, requiredModelSource(ms.MicroserviceUUID), true)
+	res, err := prepareWorkloadCatalogs(cm.catalogDiskDirectoryValue(), store.GetInstance(), ms, requiredCatalogSource(ms.MicroserviceUUID), true)
 	if err != nil {
 		return err
 	}
-	return modelcatalog.WrapDecision(res)
+	return wrapCombinedCatalogDecision(res)
 }
 
 func (cm *ContainerManager) releaseCatalog(msUUID string) {
 	if strings.TrimSpace(msUUID) == "" {
 		return
 	}
-	_ = modelcatalog.Release(cm.catalogDiskDirectoryValue(), store.GetInstance(), msUUID)
+	disk := cm.catalogDiskDirectoryValue()
+	db := store.GetInstance()
+	_ = modelcatalog.Release(disk, db, msUUID)
+	_ = knowledgecatalog.Release(disk, db, msUUID)
 }
 
 func (pm *ProcessManager) gateLocalCatalog(ms *models.Microservice) error {
 	if ms == nil {
 		return nil
 	}
-	if !ms.Models.HasItems() {
+	if !hasCatalogItems(ms) {
 		pm.releaseCatalog(ms.MicroserviceUUID)
 		return nil
 	}
@@ -150,7 +206,7 @@ func (pm *ProcessManager) gateLocalCatalog(ms *models.Microservice) error {
 	if err != nil {
 		return err
 	}
-	return modelcatalog.WrapDecision(res)
+	return wrapCombinedCatalogDecision(res)
 }
 
 func (pm *ProcessManager) refreshLocalCatalogIfNeeded(item *models.LocalDeployedMicroservice, now int64) bool {
@@ -184,7 +240,7 @@ func normalizeCatalogTaskError(msUUID string, err error) error {
 	if errors.Is(err, modelcatalog.ErrWaiting) {
 		statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
 			s.SetMicroservicesState(msUUID, models.MicroserviceStateQueued)
-			s.SetMicroservicesStatusErrorMessage(msUUID, models.CatalogWaitingMessage)
+			s.SetMicroservicesStatusErrorMessage(msUUID, catalogWaitStatusText(err))
 		})
 		return nil
 	}
@@ -196,4 +252,22 @@ func normalizeCatalogTaskError(msUUID string, err error) error {
 		return nil
 	}
 	return err
+}
+
+func catalogWaitStatusText(err error) string {
+	if err == nil {
+		return models.CatalogWaitingMessage
+	}
+	text := strings.TrimSpace(err.Error())
+	prefix := modelcatalog.ErrWaiting.Error()
+	if text == "" || text == prefix {
+		return models.CatalogWaitingMessage
+	}
+	if trimmed := strings.TrimSpace(strings.TrimPrefix(text, prefix+":")); trimmed != "" && trimmed != text {
+		return trimmed
+	}
+	if trimmed := strings.TrimSpace(strings.TrimPrefix(text, prefix+"\n")); trimmed != "" && trimmed != text {
+		return trimmed
+	}
+	return text
 }

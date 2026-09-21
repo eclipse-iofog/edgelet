@@ -217,6 +217,8 @@ Format detection order:
 
 Tag and digest pulls of the same blob share storage in `oci-store/`. Model pull never uses the container-engine image pull path.
 
+How to **package and push** an artifact (ORAS, Docker model-spec, ModelPack, ModelKit): [oci-artifacts.md](oci-artifacts.md).
+
 ---
 
 ## On-disk layout
@@ -313,6 +315,7 @@ Generated CLI pages: [../cli/generated/](../cli/generated/) (`edgelet_model*.md`
 | Document | Topic |
 |----------|--------|
 | [manifest-reference.md](manifest-reference.md) | Registry + Model + Microservice catalog YAML |
+| [oci-artifacts.md](oci-artifacts.md) | Publish Model or Knowledge as an OCI / ORAS artifact |
 | [examples/model.yaml](examples/model.yaml) | HF GGUF + OCI tag/digest samples |
 | [examples/microservice.yaml](examples/microservice.yaml) | Catalog bind + container fields |
 | [persistence.md](persistence.md) | Schema v2 and `{diskDirectory}/models/` backup |

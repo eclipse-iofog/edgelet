@@ -243,7 +243,7 @@ func TestGetFogStatus_ReadyManagedModelIncludesUUIDNameState(t *testing.T) {
 	if _, ok := local["uuid"]; ok {
 		t.Fatalf("local modelStatus must omit uuid, got %#v", local)
 	}
-	if status["modelLastUpdate"] != int64(1700000000) {
+	if status["modelLastUpdate"] != int64(1700000000000) {
 		t.Fatalf("modelLastUpdate=%#v", status["modelLastUpdate"])
 	}
 }

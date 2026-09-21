@@ -301,6 +301,123 @@ func TestAdapterPull_ResumeInterruptedBlob(t *testing.T) {
 	}
 }
 
+func orasArtifactFixture(t *testing.T, layer []byte, filename string) *registryFixture {
+	t.Helper()
+	config := []byte(`{}`)
+	configDigest := digest.FromBytes(config)
+	layerDigest := digest.FromBytes(layer)
+	manifest := ocispec.Manifest{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeEmptyJSON,
+			Digest:    configDigest,
+			Size:      int64(len(config)),
+		},
+		Layers: []ocispec.Descriptor{{
+			MediaType: "application/octet-stream",
+			Digest:    layerDigest,
+			Size:      int64(len(layer)),
+			Annotations: map[string]string{
+				format.AnnotationTitle: filename,
+			},
+		}},
+	}
+	manifest.SchemaVersion = 2
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	manifestDigest := digest.FromBytes(raw)
+	return &registryFixture{
+		tag:      "latest",
+		manifest: raw,
+		manifestDesc: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeImageManifest,
+			Digest:    manifestDigest,
+			Size:      int64(len(raw)),
+		},
+		blobs: map[string][]byte{
+			string(configDigest): config,
+			string(layerDigest):  layer,
+		},
+		failAfter: map[string]int{},
+	}
+}
+
+func TestAdapterPull_KnowledgeORASLeavesModelsStoreUntouched(t *testing.T) {
+	layer := []byte("knowledge-corpus")
+	fixture := orasArtifactFixture(t, layer, "corpus.jsonl")
+	_, reg := startFixtureRegistry(t, fixture)
+
+	disk := t.TempDir()
+	knowledgeRoot := modelpull.KnowledgeRoot(disk)
+	modelsRoot := modelpull.Root(disk)
+	if err := os.MkdirAll(modelsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir models: %v", err)
+	}
+
+	result, err := (&Adapter{GenericORAS: true}).Pull(context.Background(), modelpull.Request{
+		Name:       "product-docs",
+		Repo:       "acme/docs",
+		Revision:   "",
+		Registry:   reg,
+		ModelsRoot: knowledgeRoot,
+		FormatHint: models.KnowledgeFormatJSONL,
+	})
+	if err != nil {
+		t.Fatalf("knowledge pull: %v", err)
+	}
+	if !result.RevisionFloating || result.ResolvedRevision != "latest" {
+		t.Fatalf("empty revision should resolve to latest and float, got %+v", result)
+	}
+	got, err := os.ReadFile(filepath.Join(knowledgeRoot, "product-docs", "content", "corpus.jsonl"))
+	if err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	if !bytes.Equal(got, layer) {
+		t.Fatal("materialized knowledge content mismatch")
+	}
+	if _, err := os.Stat(filepath.Join(knowledgeRoot, "oci-store", "layout.json")); err != nil {
+		t.Fatalf("knowledge oci-store missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(modelsRoot, "oci-store")); !os.IsNotExist(err) {
+		t.Fatal("knowledge pull must not create models/oci-store")
+	}
+	if result.OCIModelConfig != nil {
+		t.Fatal("knowledge pull must not record a model-spec config")
+	}
+}
+
+func TestAdapterPull_ModelSpecKnowledgeUsesORAS(t *testing.T) {
+	layer := []byte("GGUF-as-knowledge")
+	fixture := dockerModelFixture(t, layer)
+	_, reg := startFixtureRegistry(t, fixture)
+	root := t.TempDir()
+	result, err := (&Adapter{GenericORAS: true}).Pull(context.Background(), modelpull.Request{
+		Name:       "docs-from-model-spec",
+		Repo:       "ai/gemma3",
+		Revision:   "4b-q8_0",
+		Registry:   reg,
+		ModelsRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("oras fallback pull: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs-from-model-spec", "content", "model.gguf")); !os.IsNotExist(err) {
+		t.Fatal("knowledge pull must not use the docker model-spec unpacker (model.gguf)")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "docs-from-model-spec", "content", "model.bin"))
+	if err != nil {
+		t.Fatalf("expected ORAS single-layer name model.bin: %v", err)
+	}
+	if !bytes.Equal(got, layer) {
+		t.Fatal("ORAS-materialized content mismatch")
+	}
+	if result.OCIModelConfig != nil {
+		t.Fatal("knowledge ORAS pull must not attach docker model config")
+	}
+}
+
 func TestAdapterPull_RejectsNonOCIRegistry(t *testing.T) {
 	adapter := &Adapter{}
 	hf := models.NewRegistryBuilder().SetID(5).SetURL("https://huggingface.co").SetType(models.RegistryTypeHF).Build()

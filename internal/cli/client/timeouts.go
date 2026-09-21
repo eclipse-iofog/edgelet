@@ -49,7 +49,7 @@ func PollTimeoutFor(kind string) time.Duration {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "controlplane", "control-plane", "cp":
 		return defaultControlPlanePollTimeout
-	case "model-pull", "models-pull":
+	case "model-pull", "models-pull", "knowledge-pull":
 		return 6 * time.Hour
 	default:
 		return defaultLongOperationPollTimeout

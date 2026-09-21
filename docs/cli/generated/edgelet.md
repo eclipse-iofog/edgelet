@@ -37,6 +37,7 @@ edgelet [flags]
 * [edgelet deprovision](edgelet_deprovision.md)	 - Deprovision the agent
 * [edgelet image](edgelet_image.md)	 - Image operations
 * [edgelet init-config](edgelet_init-config.md)	 - Write default config if missing
+* [edgelet knowledge](edgelet_knowledge.md)	 - Knowledge operations
 * [edgelet model](edgelet_model.md)	 - Model operations
 * [edgelet ms](edgelet_ms.md)	 - Microservice operations
 * [edgelet provision](edgelet_provision.md)	 - Provision the agent

@@ -80,6 +80,17 @@ func mapRequestToPermission(r *http.Request) (rbacPermission, bool) {
 	case strings.HasPrefix(path, "/v1/models/"):
 		name := strings.TrimSpace(strings.TrimPrefix(path, "/v1/models/"))
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "models", Verb: verb, ResourceName: name}, true
+	case path == "/v1/knowledge":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "knowledge", Verb: verb}, true
+	case path == "/v1/knowledge:pull":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "knowledge/pull", Verb: verb}, true
+	case strings.HasPrefix(path, "/v1/knowledge:pull/"):
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "knowledge/pull/status", Verb: verb}, true
+	case path == "/v1/knowledge:prune":
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "knowledge/prune", Verb: verb}, true
+	case strings.HasPrefix(path, "/v1/knowledge/"):
+		name := strings.TrimSpace(strings.TrimPrefix(path, "/v1/knowledge/"))
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "knowledge", Verb: verb, ResourceName: name}, true
 	case path == "/v1/volumes:prune":
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "volumes/prune", Verb: verb}, true
 	case strings.HasPrefix(path, "/v1/volumes/shared/"):
@@ -120,6 +131,8 @@ func mapRequestToPermission(r *http.Request) (rbacPermission, bool) {
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "deploy/registries", Verb: verb}, true
 	case strings.HasPrefix(path, "/v1/deploy/models"):
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "deploy/models", Verb: verb}, true
+	case strings.HasPrefix(path, "/v1/deploy/knowledge"):
+		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "deploy/knowledge", Verb: verb}, true
 	case strings.HasPrefix(path, "/v1/deploy/runtimeclasses"):
 		return rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: "deploy/runtimeclasses", Verb: verb}, true
 	case strings.HasPrefix(path, "/v1/deploy/controlplane:apply/"):

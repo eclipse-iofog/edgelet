@@ -1,0 +1,34 @@
+# Both catalogs Ready: spec.models and spec.knowledge on one local microservice.
+# Requires tiny-gpt2 (model-hf-tiny.yaml) and tiny-docs (knowledge-hf-tiny.yaml).
+#
+#   edgelet deploy -f test/deployment-yamls/model-hf-tiny.yaml
+#   edgelet deploy -f test/deployment-yamls/knowledge-hf-tiny.yaml
+#   edgelet deploy -f test/deployment-yamls/microservice-knowledge-dual-catalog.yaml
+#   edgelet ms exec knowledge-dual-catalog-test -- test -f /models/tiny-gpt2/config.json
+#   edgelet ms exec knowledge-dual-catalog-test -- test -f /knowledge/tiny-docs/data/train.txt
+
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-dual-catalog-test
+  labels:
+    test: knowledge-dual-catalog
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: tiny-gpt2
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: tiny-docs
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50

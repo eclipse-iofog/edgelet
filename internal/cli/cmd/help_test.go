@@ -356,6 +356,43 @@ func TestHelp_ModelPullShowsSpecFlags(t *testing.T) {
 	}
 }
 
+func TestHelp_KnowledgePullShowsSpecFlags(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "knowledge", "pull", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"pull <name>", "--repo", "--revision", "--registry", "-r", "--files", "--format"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in knowledge pull help, got stdout=%q", want, stdout)
+		}
+	}
+}
+
+func TestHelp_KnowledgeShowsSubcommands(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "knowledge", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"pull", "ls", "inspect", "prune", "rm"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected %q in knowledge help, got stdout=%q", want, stdout)
+		}
+	}
+}
+
+func TestHelp_DeployMentionsKnowledgeKind(t *testing.T) {
+	client := &fakeClient{running: true}
+	stdout, _, code := runCLI(t, client, "deploy", "--help")
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q", code, stdout)
+	}
+	if !strings.Contains(stdout, "Knowledge") || !strings.Contains(stdout, "knowledge.yaml") {
+		t.Fatalf("expected Knowledge kind in deploy help, got stdout=%q", stdout)
+	}
+}
+
 func TestHelp_ModelShowsSubcommands(t *testing.T) {
 	client := &fakeClient{running: true}
 	stdout, _, code := runCLI(t, client, "model", "--help")

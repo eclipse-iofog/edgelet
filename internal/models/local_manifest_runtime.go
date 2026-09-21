@@ -28,6 +28,7 @@ func BuildMicroserviceFromLocalManifest(doc *LocalDeployManifest, deploymentID, 
 		ms.Args = append(ms.Args, (*doc.Spec.Container.Commands)...)
 	}
 	ms.Models = doc.Spec.Models.Clone()
+	ms.Knowledge = doc.Spec.Knowledge.Clone()
 	if len(doc.Spec.Container.Sysctls) > 0 {
 		ms.Sysctls = make(map[string]string, len(doc.Spec.Container.Sysctls))
 		for k, v := range doc.Spec.Container.Sysctls {
@@ -147,6 +148,9 @@ func LocalDeployNeedsRecreate(prev, next *Microservice) bool {
 	if CatalogMountNeedsRecreate(prev.Models, next.Models) {
 		return true
 	}
+	if KnowledgeCatalogMountNeedsRecreate(prev.Knowledge, next.Knowledge) {
+		return true
+	}
 	a, err := localDeployRecreateSnapshot(prev)
 	if err != nil {
 		return true
@@ -233,43 +237,45 @@ func annotationString(v any) string {
 }
 
 type localRecreateSnapshot struct {
-	ImageName              string            `json:"imageName"`
-	RegistryID             int               `json:"registryId"`
-	HostNetworkMode        bool              `json:"hostNetworkMode"`
-	IsPrivileged           bool              `json:"isPrivileged"`
-	ReadOnlyRootFilesystem bool              `json:"readOnlyRootFilesystem"`
-	Entrypoint             []string          `json:"entrypoint,omitempty"`
-	Commands               []string          `json:"commands,omitempty"`
-	Sysctls                map[string]string `json:"sysctls,omitempty"`
-	Ulimits                map[string]Ulimit `json:"ulimits,omitempty"`
-	Devices                []DeviceMapping   `json:"devices,omitempty"`
-	Tmpfs                  []TmpfsMount      `json:"tmpfs,omitempty"`
-	CapAdd                 []string          `json:"capAdd,omitempty"`
-	CapDrop                []string          `json:"capDrop,omitempty"`
-	CdiDevs                []string          `json:"cdiDevs,omitempty"`
-	ExtraHosts             []string          `json:"extraHosts,omitempty"`
-	Schedule               int               `json:"schedule,omitempty"`
-	RunAsUser              string            `json:"runAsUser,omitempty"`
-	RunAsGroup             string            `json:"runAsGroup,omitempty"`
-	WorkingDir             string            `json:"workingDir,omitempty"`
-	Runtime                string            `json:"runtime,omitempty"`
-	Platform               string            `json:"platform,omitempty"`
-	IpcMode                string            `json:"ipcMode,omitempty"`
-	PidMode                string            `json:"pidMode,omitempty"`
-	CPUSetCpus             string            `json:"cpuSetCpus,omitempty"`
-	Cpus                   *float64          `json:"cpus,omitempty"`
-	MemoryLimit            *int64            `json:"memoryLimit,omitempty"`
-	MemoryReservation      *int64            `json:"memoryReservation,omitempty"`
-	MemorySwap             *int64            `json:"memorySwap,omitempty"`
-	ShmSize                *int64            `json:"shmSize,omitempty"`
-	EnvVars                []*EnvVar         `json:"envVars,omitempty"`
-	VolumeMappings         []*VolumeMapping  `json:"volumeMappings,omitempty"`
-	PortMappings           []*PortMapping    `json:"portMappings,omitempty"`
-	Labels                 map[string]string `json:"labels,omitempty"`
-	Annotations            *string           `json:"annotations,omitempty"`
-	Healthcheck            *Healthcheck      `json:"healthcheck,omitempty"`
-	CatalogBindPath        string            `json:"catalogBindPath,omitempty"`
-	CatalogPermissions     string            `json:"catalogPermissions,omitempty"`
+	ImageName                string            `json:"imageName"`
+	RegistryID               int               `json:"registryId"`
+	HostNetworkMode          bool              `json:"hostNetworkMode"`
+	IsPrivileged             bool              `json:"isPrivileged"`
+	ReadOnlyRootFilesystem   bool              `json:"readOnlyRootFilesystem"`
+	Entrypoint               []string          `json:"entrypoint,omitempty"`
+	Commands                 []string          `json:"commands,omitempty"`
+	Sysctls                  map[string]string `json:"sysctls,omitempty"`
+	Ulimits                  map[string]Ulimit `json:"ulimits,omitempty"`
+	Devices                  []DeviceMapping   `json:"devices,omitempty"`
+	Tmpfs                    []TmpfsMount      `json:"tmpfs,omitempty"`
+	CapAdd                   []string          `json:"capAdd,omitempty"`
+	CapDrop                  []string          `json:"capDrop,omitempty"`
+	CdiDevs                  []string          `json:"cdiDevs,omitempty"`
+	ExtraHosts               []string          `json:"extraHosts,omitempty"`
+	Schedule                 int               `json:"schedule,omitempty"`
+	RunAsUser                string            `json:"runAsUser,omitempty"`
+	RunAsGroup               string            `json:"runAsGroup,omitempty"`
+	WorkingDir               string            `json:"workingDir,omitempty"`
+	Runtime                  string            `json:"runtime,omitempty"`
+	Platform                 string            `json:"platform,omitempty"`
+	IpcMode                  string            `json:"ipcMode,omitempty"`
+	PidMode                  string            `json:"pidMode,omitempty"`
+	CPUSetCpus               string            `json:"cpuSetCpus,omitempty"`
+	Cpus                     *float64          `json:"cpus,omitempty"`
+	MemoryLimit              *int64            `json:"memoryLimit,omitempty"`
+	MemoryReservation        *int64            `json:"memoryReservation,omitempty"`
+	MemorySwap               *int64            `json:"memorySwap,omitempty"`
+	ShmSize                  *int64            `json:"shmSize,omitempty"`
+	EnvVars                  []*EnvVar         `json:"envVars,omitempty"`
+	VolumeMappings           []*VolumeMapping  `json:"volumeMappings,omitempty"`
+	PortMappings             []*PortMapping    `json:"portMappings,omitempty"`
+	Labels                   map[string]string `json:"labels,omitempty"`
+	Annotations              *string           `json:"annotations,omitempty"`
+	Healthcheck              *Healthcheck      `json:"healthcheck,omitempty"`
+	CatalogBindPath          string            `json:"catalogBindPath,omitempty"`
+	CatalogPermissions       string            `json:"catalogPermissions,omitempty"`
+	KnowledgeCatalogBindPath string            `json:"knowledgeCatalogBindPath,omitempty"`
+	KnowledgeCatalogPerms    string            `json:"knowledgeCatalogPermissions,omitempty"`
 }
 
 func localDeployRecreateSnapshot(ms *Microservice) (string, error) {
@@ -322,6 +328,12 @@ func localDeployRecreateSnapshot(ms *Microservice) (string, error) {
 		cloned.NormalizeDefaults()
 		snap.CatalogBindPath = cloned.BindPath
 		snap.CatalogPermissions = cloned.Permissions
+	}
+	if ms.Knowledge.HasItems() {
+		cloned := ms.Knowledge.Clone()
+		cloned.NormalizeDefaults()
+		snap.KnowledgeCatalogBindPath = cloned.BindPath
+		snap.KnowledgeCatalogPerms = cloned.Permissions
 	}
 	raw, err := json.Marshal(snap)
 	if err != nil {

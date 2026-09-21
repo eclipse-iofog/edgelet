@@ -76,6 +76,9 @@ func applyMicroserviceContainerExtras(ms *models.Microservice, data map[string]a
 	if raw, ok := data["models"].(map[string]any); ok {
 		ms.Models = parseModelCatalog(raw)
 	}
+	if raw, ok := data["knowledge"].(map[string]any); ok {
+		ms.Knowledge = parseKnowledgeCatalog(raw)
+	}
 }
 
 func parseOptionalArgv(data map[string]any, key string) (*[]string, bool) {
@@ -119,6 +122,38 @@ func parseModelCatalog(raw map[string]any) *models.ModelCatalog {
 				continue
 			}
 			cat.Items = append(cat.Items, models.ModelCatalogItem{Name: name})
+		}
+	}
+	cat.NormalizeDefaults()
+	if !cat.HasItems() && cat.BindPath == "" {
+		return nil
+	}
+	return cat
+}
+
+func parseKnowledgeCatalog(raw map[string]any) *models.KnowledgeCatalog {
+	if raw == nil {
+		return nil
+	}
+	cat := &models.KnowledgeCatalog{}
+	if bindPath, ok := raw["bindPath"].(string); ok {
+		cat.BindPath = bindPath
+	}
+	if permissions, ok := raw["permissions"].(string); ok {
+		cat.Permissions = permissions
+	}
+	if items, ok := raw["items"].([]any); ok {
+		cat.Items = make([]models.KnowledgeCatalogItem, 0, len(items))
+		for _, item := range items {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, ok := itemMap["name"].(string)
+			if !ok {
+				continue
+			}
+			cat.Items = append(cat.Items, models.KnowledgeCatalogItem{Name: name})
 		}
 	}
 	cat.NormalizeDefaults()

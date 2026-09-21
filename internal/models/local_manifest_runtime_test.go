@@ -145,10 +145,18 @@ func TestBuildMicroserviceFromLocalManifest_CatalogAndConfigNotInjected(t *testi
 		Permissions: ModelCatalogPermRO,
 		Items:       []ModelCatalogItem{{Name: "test-model"}},
 	}
+	doc.Spec.Knowledge = &KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: KnowledgeCatalogPermRO,
+		Items:       []KnowledgeCatalogItem{{Name: "product-docs"}},
+	}
 	doc.Spec.Config = map[string]any{"myKey": "value"}
 	ms := BuildMicroserviceFromLocalManifest(doc, "dep-cat", "nginx:latest")
 	if !ms.Models.HasItems() || ms.Models.BindPath != "/models" || ms.Models.Items[0].Name != "test-model" {
 		t.Fatalf("catalog = %#v", ms.Models)
+	}
+	if !ms.Knowledge.HasItems() || ms.Knowledge.BindPath != "/knowledge" || ms.Knowledge.Items[0].Name != "product-docs" {
+		t.Fatalf("knowledge catalog = %#v", ms.Knowledge)
 	}
 	if ms.Config != nil {
 		t.Fatalf("spec.config must not be injected, got %v", ms.Config)
@@ -238,6 +246,45 @@ func TestLocalDeployNeedsRecreate_CatalogItemsOnly(t *testing.T) {
 	next.Models.BindPath = "/other"
 	if !LocalDeployNeedsRecreate(prev, next) {
 		t.Fatal("bindPath change must recreate")
+	}
+}
+
+func TestLocalDeployManifestValidateKnowledgeCatalogApply_ManagedName(t *testing.T) {
+	doc := validLocalDeployManifestForTest("bind-managed-knowledge")
+	doc.Spec.Knowledge = &KnowledgeCatalog{
+		BindPath: "/knowledge",
+		Items:    []KnowledgeCatalogItem{{Name: "fleet-docs"}},
+	}
+	err := doc.ValidateKnowledgeCatalogApply(knowledgeStatusLookup(map[string]KnowledgeStatusInfo{
+		"fleet-docs": {Source: KnowledgeSourceManaged, State: KnowledgeStateReady, Exists: true},
+	}))
+	var scope *ErrKnowledgeSourceScope
+	if !errors.As(err, &scope) || scope.Name != "fleet-docs" || scope.Want != KnowledgeSourceLocal {
+		t.Fatalf("expected local-only knowledge source error, got %v", err)
+	}
+}
+
+func TestLocalDeployNeedsRecreate_KnowledgeCatalogItemsOnly(t *testing.T) {
+	prevDoc := validLocalDeployManifestForTest("keep-knowledge")
+	prevDoc.Spec.Knowledge = &KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: KnowledgeCatalogPermRO,
+		Items:       []KnowledgeCatalogItem{{Name: "a"}},
+	}
+	nextDoc := validLocalDeployManifestForTest("keep-knowledge")
+	nextDoc.Spec.Knowledge = &KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: KnowledgeCatalogPermRO,
+		Items:       []KnowledgeCatalogItem{{Name: "a"}, {Name: "b"}},
+	}
+	prev := BuildMicroserviceFromLocalManifest(prevDoc, "dep-1", "nginx:latest")
+	next := BuildMicroserviceFromLocalManifest(nextDoc, "dep-1", "nginx:latest")
+	if LocalDeployNeedsRecreate(prev, next) {
+		t.Fatal("knowledge catalog item membership must not recreate")
+	}
+	next.Knowledge.BindPath = "/corpus"
+	if !LocalDeployNeedsRecreate(prev, next) {
+		t.Fatal("knowledge bindPath change must recreate")
 	}
 }
 

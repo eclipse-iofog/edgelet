@@ -67,6 +67,17 @@ func (f *fakeClient) Request(method, path string, _ any) (map[string]any, error)
 			"progress":    100,
 		}, nil
 	}
+	if method == "POST" && path == "/v1/knowledge:pull" {
+		return map[string]any{"status": "running", "operationId": "knowledge-pull-1", "name": "product-docs"}, nil
+	}
+	if method == "GET" && strings.HasPrefix(path, "/v1/knowledge:pull/") {
+		return map[string]any{
+			"status":      "succeeded",
+			"name":        "product-docs",
+			"operationId": "knowledge-pull-1",
+			"progress":    100,
+		}, nil
+	}
 	return map[string]any{}, nil
 }
 

@@ -773,6 +773,9 @@ func TestFacadePrune_AllModeReturnsPartialOnStepFailures(t *testing.T) {
 	if _, ok := result["modelsRemoved"]; !ok {
 		t.Fatalf("expected unused local model prune in all mode, got %#v", result)
 	}
+	if _, ok := result["knowledgeRemoved"]; ok {
+		t.Fatalf("system prune must not delete knowledge, got %#v", result)
+	}
 	if fmt.Sprintf("%v", result["volumesDeletedCount"]) != "0" {
 		t.Fatalf("expected no persistent VOLUME destroy, got %#v", result)
 	}

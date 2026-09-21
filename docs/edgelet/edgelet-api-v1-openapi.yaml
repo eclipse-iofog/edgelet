@@ -489,6 +489,127 @@ paths:
           $ref: "#/components/responses/InvalidArgument"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:
+    get:
+      tags: [Knowledge]
+      summary: List local knowledge
+      responses:
+        "200":
+          description: Knowledge list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge/{name}:
+    get:
+      tags: [Knowledge]
+      summary: Inspect a local knowledge
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Knowledge item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeItemResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Knowledge]
+      summary: Remove a local knowledge and on-disk artifacts
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:pull:
+    post:
+      tags: [Knowledge]
+      summary: Pull knowledge artifacts (async)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgePullRequest"
+      responses:
+        "202":
+          description: Pull accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePullOperationStatusResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:pull/{operationId}:
+    get:
+      tags: [Knowledge]
+      summary: Get knowledge pull operation status
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pull operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePullOperationStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:prune:
+    post:
+      tags: [Knowledge]
+      summary: Prune dangling knowledge
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum: [dangling]
+            default: dangling
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/volumes:
     get:
       tags: [Volumes]
@@ -1436,6 +1557,40 @@ paths:
     post:
       tags: [Deploy]
       summary: Validate local Model YAML
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Validation result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/knowledge:apply:
+    post:
+      tags: [Deploy]
+      summary: Apply local Knowledge YAML (persist, then start pulls)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Apply result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/knowledge:validate:
+    post:
+      tags: [Deploy]
+      summary: Validate local Knowledge YAML
       requestBody:
         required: true
         content:
@@ -2420,6 +2575,144 @@ components:
             endedAt:
               type: string
     ModelPruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [dangling]
+            removed:
+              type: array
+              items:
+                type: string
+            blobsRemoved:
+              type: integer
+            staleCleaned:
+              type: integer
+    KnowledgeListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/KnowledgeItem"
+            count:
+              type: integer
+    KnowledgeItemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/KnowledgeItem"
+    KnowledgeItem:
+      type: object
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
+          description: Provenance on this node. List and inspect both include source.
+        uuid:
+          type: string
+          description: Controller knowledge uuid when source is managed (inspect only).
+        bindRefCount:
+          type: integer
+          description: Microservices that currently bind this name (inspect only).
+        repo:
+          type: string
+        revision:
+          type: string
+        registryId:
+          type: integer
+        files:
+          type: array
+          items:
+            type: string
+        format:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Pulling, Ready, Failed]
+        generation:
+          type: integer
+          format: int64
+        revisionFloating:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+        lastError:
+          type: string
+        resolvedRevision:
+          type: string
+        digest:
+          type: string
+    KnowledgePullRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        repo:
+          type: string
+          description: Repository path without host. Required with registryId when upserting.
+        revision:
+          type: string
+        registryId:
+          type: integer
+          description: Local registry id. Required with repo when upserting.
+        files:
+          type: array
+          items:
+            type: string
+          description: HF file paths or globs. Ignored for OCI. Hub dataset snapshot when omitted.
+        format:
+          type: string
+          description: Hint only (markdown, pdf, jsonl, parquet, arrow, sqlite, faiss, chroma, lance, unknown).
+    KnowledgePullOperationStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            operationId:
+              type: string
+            status:
+              type: string
+              enum: [running, succeeded, failed]
+            progress:
+              type: integer
+            name:
+              type: string
+            bytesDownloaded:
+              type: integer
+              format: int64
+            bytesTotal:
+              type: integer
+              format: int64
+            registryId:
+              type: integer
+            error:
+              type: string
+            startedAt:
+              type: string
+            endedAt:
+              type: string
+    KnowledgePruneResponse:
       type: object
       properties:
         success:

@@ -1,6 +1,6 @@
 # Pruning Manager
 
-The pruning manager schedules **image and unused-local-model prune operations** for the active container engine. It protects images referenced by controller-managed and local-deployed microservices, plus images still in use by running containers, and delegates to `ContainerEngine.PruneImages()` for engine-neutral behavior.
+The pruning manager schedules **image, unused-local-model, and unused-local-Knowledge prune operations** for the active container engine. It protects images referenced by controller-managed and local-deployed microservices, plus images still in use by running containers, and delegates to `ContainerEngine.PruneImages()` for engine-neutral behavior.
 
 Scheduled prune does **not** delete persistent `VOLUME` data under `{diskDirectory}/volumes/data/` or `{diskDirectory}/volumes/shared/`. Reclaim those with `edgelet volume prune` — see [../volumes.md](../volumes.md).
 
@@ -53,10 +53,11 @@ When prune runs:
 1. Optional unmanaged-container prune hook (not desired-state workloads)
 2. Image prune via engine — **excluding** protected microservice images (controller and local) and images still referenced by running containers
 3. Dangling model prune (unused **local** model rows/trees plus unreferenced OCI blobs; managed fleet names are kept)
+4. Dangling Knowledge prune (unused **local** Knowledge rows/trees plus unreferenced `knowledge/oci-store/` blobs; managed fleet names are kept)
 
-Persistent `VOLUME` directories (`volumes/data/` and `volumes/shared/`) are **not** in this job. `edgelet system prune volumes` does not destroy them either; use `edgelet volume prune` / `POST /v1/volumes:prune`.
+Persistent `VOLUME` directories (`volumes/data/` and `volumes/shared/`) are **not** in this job. `edgelet system prune volumes` does not destroy them either; use `edgelet volume prune` / `POST /v1/volumes:prune`. `edgelet system prune` does **not** prune Knowledge.
 
-On-demand API prune follows similar engine delegation paths through `runtimeapi.Facade.Prune()`. Model prune: `POST /v1/models:prune` / `edgelet model prune` — see [../models.md](../models.md). Controller `getChanges.prune` runs dangling images **and** unused local models — not volumes.
+On-demand API prune follows similar engine delegation paths through `runtimeapi.Facade.Prune()`. Model prune: `POST /v1/models:prune` / `edgelet model prune` — see [../models.md](../models.md). Knowledge prune: `POST /v1/knowledge:prune` / `edgelet knowledge prune` — see [../knowledge.md](../knowledge.md). Controller `getChanges.prune` runs dangling images, unused local models, and unused local Knowledge — not volumes.
 
 ## Configuration
 
@@ -74,6 +75,7 @@ Legacy top-level `edgelet prune` removed — use `edgelet system prune` or `edge
 | `POST /v1/system/prune` | System prune modes (images / optional unmanaged containers; **not** persistent VOLUME data) |
 | `POST /v1/images:prune` | Image-focused prune |
 | `POST /v1/models:prune` | Dangling model artifacts |
+| `POST /v1/knowledge:prune` | Dangling Knowledge artifacts |
 | `POST /v1/volumes:prune` | Persistent VOLUME reclaim (dry-run default) — see [../volumes.md](../volumes.md) |
 
 ## Observability

@@ -40,6 +40,11 @@ func TestApplyWorkloadCreateConfig_SpecMatrix(t *testing.T) {
 		Permissions: "ro",
 		Items:       []models.ModelCatalogItem{{Name: "test-model"}},
 	}
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: "ro",
+		Items:       []models.KnowledgeCatalogItem{{Name: "product-docs"}},
+	}
 
 	cfg := &container.Config{Image: ms.ImageName}
 	hc := &container.HostConfig{}
@@ -89,13 +94,17 @@ func TestApplyWorkloadCreateConfig_SpecMatrix(t *testing.T) {
 	}
 
 	foundCatalog := false
+	foundKnowledge := false
 	for _, b := range hc.Binds {
 		if strings.Contains(b, "/volumes/microservices/ms-1/models") && strings.Contains(b, "/models") && strings.HasSuffix(b, ":ro") {
 			foundCatalog = true
 		}
+		if strings.Contains(b, "/volumes/microservices/ms-1/knowledge") && strings.Contains(b, "/knowledge") && strings.HasSuffix(b, ":ro") {
+			foundKnowledge = true
+		}
 	}
-	if !foundCatalog {
-		t.Fatalf("catalog bind missing: %v", hc.Binds)
+	if !foundCatalog || !foundKnowledge {
+		t.Fatalf("catalog binds missing: %v", hc.Binds)
 	}
 
 	ms.MemorySwap = &swapBytes

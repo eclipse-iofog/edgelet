@@ -4,6 +4,7 @@
 # Apply:  edgelet deploy -f model.yaml   (persists + downloads; CLI waits)
 # Pull:   edgelet model pull <metadata.name> [--repo … --registry …]
 # Prose:  docs/edgelet/models.md · docs/edgelet/manifest-reference.md
+#         docs/edgelet/oci-artifacts.md (how to push OCI / ORAS)
 #
 # Prerequisites:
 #   - OCI examples use built-in registry id 1 (docker.io).

@@ -24,34 +24,34 @@ edgelet system info -o json | jq -r '.diskDirectory'
 
 On open, Edgelet creates `diskDirectory` with mode **0700** if missing. SQLite runs with **WAL** journal mode (`_journal_mode=WAL`).
 
-**Schema version:** fresh installs apply embedded migrations `001_edgelet_schema_v1.sql`, `002_edgelet_schema_v2.sql`, then `003_edgelet_schema_v3.sql` and record version **3** in `schema_versions`. Nodes already on schema v1 or v2 upgrade **in place** on first start of a schema-v3 binary — no wipe. **Back up `edgelet.db` (and WAL sidecars) plus `volumes/data/` and `volumes/shared/` before that first start** — see [Backup runbook](#backup-runbook-r85) and [Schema v3](#schema-v3-in-place-from-v2). There is no in-place upgrade from **pre–schema-v1** databases (see [Wipe-only upgrade](#wipe-only-upgrade)).
+**Schema version:** fresh installs apply embedded migrations `001_edgelet_schema_v1.sql`, `002_edgelet_schema_v2.sql`, `003_edgelet_schema_v3.sql`, then `004_edgelet_schema_v4.sql` and record version **4** in `schema_versions`. Nodes already on schema v1–v3 upgrade **in place** on first start of a schema-v4 binary — no wipe. **Back up `edgelet.db` (and WAL sidecars) plus `volumes/data/`, `volumes/shared/`, `models/`, and `knowledge/` before that first start** — see [Backup runbook](#backup-runbook-r85) and [Schema v4](#schema-v4-in-place-from-v3). There is no in-place upgrade from **pre–schema-v1** databases (see [Wipe-only upgrade](#wipe-only-upgrade)).
 
 ---
 
 ## What the database holds
 
-Tables are grouped by **source prefix** (schema v3 extends v2, which extends v1):
+Tables are grouped by **source prefix** (schema v4 extends v3, which extends v2, which extends v1):
 
 | Prefix | Examples | Contents |
 |--------|----------|----------|
-| `controller_*` | `controller_microservices`, `controller_registries`, `controller_volume_mounts`, `controller_models`, `controller_runtime_classes` | Pot controller snapshot (MS list, registries, volume mounts, fleet models, fleet RuntimeClass) |
+| `controller_*` | `controller_microservices`, `controller_registries`, `controller_volume_mounts`, `controller_models`, `controller_knowledge`, `controller_runtime_classes` | Pot controller snapshot (MS list, registries, volume mounts, fleet models, fleet Knowledge, fleet RuntimeClass) |
 | `agent_*` | `agent_credentials`, `agent_edgeguard_signature` | Agent identity and EdgeGuard material |
-| `local_*` | `local_workloads`, `local_registries`, `local_models`, `local_runtime_classes`, `local_service_account_tokens`, … | EdgeletAPI deploy, local registries, local models, applied RuntimeClass, RBAC tokens |
+| `local_*` | `local_workloads`, `local_registries`, `local_models`, `local_knowledge`, `local_runtime_classes`, `local_service_account_tokens`, … | EdgeletAPI deploy, local registries, local models, local Knowledge, applied RuntimeClass, RBAC tokens |
 | `system_*` | `system_control_plane` | Singleton ControlPlane deployment row |
 | `runtime_*` | `runtime_container_refs` | CRI/Docker workload and sandbox IDs (`scope` = `controller` \| `local`) |
-| (unprefixed) | `model_refs`, `persistent_volumes` | Explicit keep-alive refs for model prune; persistent `VOLUME` ownership ledger (schema v3) |
+| (unprefixed) | `model_refs`, `knowledge_refs`, `persistent_volumes` | Explicit keep-alive refs for model and Knowledge prune; persistent `VOLUME` ownership ledger (schema v3) |
 
 Registry tables (`local_registries`, `controller_registries`) include **`type`** (`oci` \| `hf`), **`ca_b64`**, and **`insecure`**.
 
-Image layers and containerd state live **outside** `diskDirectory` (for example `/var/lib/edgelet-containerd/` on the embedded engine). Model artifacts live under **`{diskDirectory}/models/`**. Backing up `edgelet.db` does **not** back up pulled images, running container filesystems, or model files.
+Image layers and containerd state live **outside** `diskDirectory` (for example `/var/lib/edgelet-containerd/` on the embedded engine). Model artifacts live under **`{diskDirectory}/models/`**. Knowledge artifacts live under **`{diskDirectory}/knowledge/`**. Backing up `edgelet.db` does **not** back up pulled images, running container filesystems, model files, or Knowledge files.
 
-Stateful **`VOLUME`** mappings persist files under `{diskDirectory}/volumes/data/` (private, per microservice UUID) and `{diskDirectory}/volumes/shared/` (shared, node-global name) outside SQLite. Include **both** trees in backups for stateful workloads. See [volumes.md](volumes.md). Include `{diskDirectory}/models/` when you need to restore pulled models without re-downloading — see [models.md](models.md).
+Stateful **`VOLUME`** mappings persist files under `{diskDirectory}/volumes/data/` (private, per microservice UUID) and `{diskDirectory}/volumes/shared/` (shared, node-global name) outside SQLite. Include **both** trees in backups for stateful workloads. See [volumes.md](volumes.md). Include `{diskDirectory}/models/` when you need to restore pulled models without re-downloading — see [models.md](models.md). Include `{diskDirectory}/knowledge/` when you need to restore pulled Knowledge without re-downloading — see [knowledge.md](knowledge.md).
 
 ---
 
 ## Backup runbook (R85)
 
-Back up when you need to preserve controller/local desired state across reinstall, disk migration, or disaster recovery on the **same** Edgelet schema family (v1, v2, or v3). A v1 or v2 database is upgraded in place to v3 the next time a schema-v3 binary opens it.
+Back up when you need to preserve controller/local desired state across reinstall, disk migration, or disaster recovery on the **same** Edgelet schema family (v1, v2, v3, or v4). A v1–v3 database is upgraded in place to v4 the next time a schema-v4 binary opens it.
 
 ### Prerequisites
 
@@ -111,11 +111,14 @@ if [ -d "$DISK/volumes/shared" ]; then
 fi
 ```
 
-Optional — copy pulled model artifacts (can be large):
+Optional — copy pulled model and Knowledge artifacts (can be large):
 
 ```bash
 if [ -d "$DISK/models" ]; then
   sudo cp -a "$DISK/models" "$BACKUP_DIR/"
+fi
+if [ -d "$DISK/knowledge" ]; then
+  sudo cp -a "$DISK/knowledge" "$BACKUP_DIR/"
 fi
 ```
 
@@ -147,7 +150,7 @@ sudo journalctl -u edgelet -n 30 --no-pager
 
 ## Restore runbook (R85)
 
-Restore onto a node running a **schema v3** binary (or an older v1/v2 database, which will migrate to v3 on start). Restoring a pre–v1 backup onto a current binary is unsupported — use [wipe-only upgrade](#wipe-only-upgrade) and let the controller/EdgeletAPI repopulate state instead.
+Restore onto a node running a **schema v4** binary (or an older v1–v3 database, which will migrate to v4 on start). Restoring a pre–v1 backup onto a current binary is unsupported — use [wipe-only upgrade](#wipe-only-upgrade) and let the controller/EdgeletAPI repopulate state instead.
 
 ### Steps
 
@@ -174,6 +177,9 @@ sudo chmod 700 "$DISK"
 # Optional: restore model artifacts
 # sudo rm -rf "$DISK/models"
 # sudo cp -a /path/to/backup/models "$DISK/"
+# Optional: restore Knowledge artifacts
+# sudo rm -rf "$DISK/knowledge"
+# sudo cp -a /path/to/backup/knowledge "$DISK/"
 sudo systemctl start edgelet-containerd.service 2>/dev/null || true
 sudo systemctl start edgelet.service
 ```
@@ -230,11 +236,35 @@ sqlite3 /var/lib/edgelet/edgelet.db 'SELECT MAX(version) FROM schema_versions;'
 
 ---
 
+## Schema v4 (in-place from v3)
+
+Schema v4 adds Knowledge artifact tables and the microservice Knowledge catalog column. A schema-v4 binary applies migration `004_edgelet_schema_v4.sql` automatically. **No wipe** is required for v3 → v4 (or v1/v2 → v4).
+
+**Before the first schema-v4 binary opens a v1–v3 database:** stop `edgelet.service` (and `edgelet-containerd.service` when used) and copy `edgelet.db` plus any `-wal` / `-shm` sidecars **and** `{diskDirectory}/knowledge/` off-node (plus `models/` and volume trees if you already back those up). The upgrade is in-place and does not delete rows or on-disk Knowledge trees, but a backup is the only rollback if the host fails mid-migration.
+
+| Change | Detail |
+|--------|--------|
+| `local_knowledge` | Local `kind: Knowledge` rows and pull state, plus **`source`** (`local` \| `managed`, default `local`) and optional `format` hint |
+| `controller_knowledge` | Fleet snapshot. Primary key is **`uuid`**; **`name`** is unique. `getChanges` `knowledge` replace-all + pull |
+| `knowledge_refs` | Catalog bind refs so prune and `knowledge rm` do not delete in-use artifacts |
+| `controller_microservices.knowledge` | Catalog JSON (same shape as the `models` column: `bindPath`, `permissions`, `items[].name`) |
+
+Backup `{diskDirectory}/knowledge/` in addition to `edgelet.db` if you need pulled retrieval artifacts without a re-download. See [knowledge.md](knowledge.md).
+
+Confirm schema version after start (optional, on node with `sqlite3`):
+
+```bash
+sqlite3 /var/lib/edgelet/edgelet.db 'SELECT MAX(version) FROM schema_versions;'
+# expect: 4
+```
+
+---
+
 ## Wipe-only upgrade
 
 **Pre–schema-v1 databases only:** Edgelet does **not** migrate in-place from the old incremental schema (migrations 001–011 era) to v1. Operators on dev or lab nodes that already had an `edgelet.db` from pre–v1 builds must **delete** the database before the first schema-v1 (or later) binary run.
 
-v1 → v2 and v2 → v3 are **in-place** (see [Schema v2](#schema-v2-in-place-from-v1) and [Schema v3](#schema-v3-in-place-from-v2)). Do not wipe solely to pick up model/registry columns or the volume ledger.
+v1 → v2, v2 → v3, and v3 → v4 are **in-place** (see [Schema v2](#schema-v2-in-place-from-v1), [Schema v3](#schema-v3-in-place-from-v2), and [Schema v4](#schema-v4-in-place-from-v3)). Do not wipe solely to pick up model/registry columns, the volume ledger, or Knowledge tables.
 
 No published production fleets require a 012→013 migrator; fresh Lima VMs and wiped DBs are the integration-test baseline.
 
@@ -260,7 +290,7 @@ Confirm schema version after start (optional, on node with `sqlite3`):
 
 ```bash
 sqlite3 /var/lib/edgelet/edgelet.db 'SELECT MAX(version) FROM schema_versions;'
-# expect: 3  (schema-v3 binary after a wipe applies 001, 002, then 003)
+# expect: 4  (schema-v4 binary after a wipe applies 001, 002, 003, then 004)
 ```
 
 ---
@@ -330,7 +360,7 @@ Several v1 tables store structured data as **JSON text columns** instead of norm
 
 ## Regression gates (Lima IT)
 
-Integration tests assume a **fresh database**. Wipe the VM disk or delete `edgelet.db` (+ WAL/SHM) on the Lima guest before running the gates below. A current binary applies migrations through schema **v3**.
+Integration tests assume a **fresh database**. Wipe the VM disk or delete `edgelet.db` (+ WAL/SHM) on the Lima guest before running the gates below. A current binary applies migrations through schema **v4**.
 
 ### Prerequisites
 
@@ -375,3 +405,4 @@ go test ./internal/store/... ./internal/fieldagent/... ./internal/processmanager
 | [container-engine.md](container-engine.md) | `/var/lib/edgelet` vs `edgelet-containerd` data paths |
 | [volumes.md](volumes.md) | `volumes/data/` and `volumes/shared/` lifecycle and backup scope |
 | [models.md](models.md) | `{diskDirectory}/models/` layout, pull, prune |
+| [knowledge.md](knowledge.md) | `{diskDirectory}/knowledge/` layout, pull, prune |

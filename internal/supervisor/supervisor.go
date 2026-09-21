@@ -16,6 +16,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
 	"github.com/eclipse-iofog/edgelet/internal/gps"
 	"github.com/eclipse-iofog/edgelet/internal/healthcheck"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgemanager"
 	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
 	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -285,8 +286,19 @@ func (s *Supervisor) Start() error {
 			logging.LogError(moduleName, "Error pruning unused local models", err)
 		}
 	}
+	pruneUnusedLocalKnowledge := func() {
+		knowledgeRoot := modelpull.KnowledgeRoot(s.config.DiskDirectory)
+		km := knowledgemanager.New(store.GetInstance(), knowledgeRoot)
+		km.SetLiveConfig(s.config)
+		km.SetDiskPolicy(s.config.DiskDirectory, s.config.AvailableDiskThreshold, nil)
+		if _, err := km.PruneDangling(); err != nil {
+			logging.LogError(moduleName, "Error pruning unused local knowledge", err)
+		}
+	}
 	s.dockerPruningManager.SetPruneModelsCallback(pruneUnusedLocalModels)
+	s.dockerPruningManager.SetPruneKnowledgeCallback(pruneUnusedLocalKnowledge)
 	s.processManager.SetWatchdogLocalModelsCallback(pruneUnusedLocalModels)
+	s.processManager.SetWatchdogLocalKnowledgeCallback(pruneUnusedLocalKnowledge)
 	if err := s.dockerPruningManager.Start(); err != nil {
 		logging.LogError(moduleName, "Failed to start Pruning Manager", err)
 	}

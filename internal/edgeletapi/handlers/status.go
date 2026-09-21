@@ -10,6 +10,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/dnsresolver"
+	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
@@ -48,6 +49,10 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	augmentWithRuntimeStatus(statusMap)
 	statusMap["runtimeClasses"] = statusreporter.GetAppliedRuntimeClasses()
 	statusMap["availableCdiDevices"] = statusreporter.GetAvailableCDIDevices()
+	knowledgeStatus, activeKnowledge, knowledgeLastUpdate := fieldagent.GetInstance().FogKnowledgeStatus()
+	statusMap["knowledgeStatus"] = knowledgeStatus
+	statusMap["activeKnowledge"] = activeKnowledge
+	statusMap["knowledgeLastUpdate"] = knowledgeLastUpdate
 
 	// Convert to JSON
 	jsonData, err := json.Marshal(statusMap)

@@ -107,6 +107,19 @@ In-place migration `migrations/003_edgelet_schema_v3.sql` (v2 → v3). No wipe.
 
 Operator backup of `{diskDirectory}/volumes/data/` and `{diskDirectory}/volumes/shared/`: [../persistence.md](../persistence.md), [../volumes.md](../volumes.md).
 
+## Schema v4
+
+In-place migration `migrations/004_edgelet_schema_v4.sql` (v3 → v4). No wipe.
+
+| Table / column | Purpose |
+|----------------|---------|
+| `local_knowledge` | Local Knowledge deploy + pull state (`source` `local` \| `managed`) |
+| `controller_knowledge` | Controller Knowledge snapshot (`uuid` PK, unique `name`) |
+| `knowledge_refs` | Keep-alive refs for dangling prune |
+| `controller_microservices.knowledge` | Catalog JSON (`bindPath`, `permissions`, `items[].name`) |
+
+Operator backup of `{diskDirectory}/knowledge/`: [../persistence.md](../persistence.md), [../knowledge.md](../knowledge.md).
+
 ## Access patterns
 
 Store exposes methods on `*DB` split by domain file:
@@ -120,7 +133,10 @@ Store exposes methods on `*DB` split by domain file:
 | `local_deployed_microservices.go` | Local workload CRUD |
 | `local_registries.go` | Local registry CRUD |
 | `local_models.go` | Local model CRUD |
+| `local_knowledge.go` | Local Knowledge CRUD |
 | `controller_models.go` | Controller model rows |
+| `controller_knowledge.go` | Controller Knowledge rows |
+| `knowledge_refs.go` | Knowledge catalog bind refs |
 | `controller_runtime_classes.go` | Fleet RuntimeClass replace-all |
 | `local_runtime_classes.go` | Applied RuntimeClass CRUD |
 | `control_plane_deployments.go` | ControlPlane singleton |

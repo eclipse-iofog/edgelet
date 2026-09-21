@@ -5,6 +5,23 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.4]
+
+### Added
+
+- **Knowledge artifacts:** first-class `kind: Knowledge` — deploy, async pull (Hugging Face Hub datasets and generic OCI/ORAS), inspect, remove, and prune. CLI `edgelet knowledge`. EdgeletAPI `/v1/knowledge*` (mass noun). Artifacts live under `{diskDirectory}/knowledge/`, not the Model store or the container-engine image store. Operator guide: [docs/edgelet/knowledge.md](docs/edgelet/knowledge.md).
+- **Hugging Face datasets:** Knowledge + registry `type: hf` always uses the Hub dataset API (`/api/datasets/…`). Model HF pull still uses `/api/models/…`.
+- **Schema v4:** in-place SQLite upgrade for knowledge tables (`local_knowledge`, `controller_knowledge`, `knowledge_refs`) and the microservice `knowledge` catalog column. Backup `edgelet.db` plus `{diskDirectory}/knowledge/` before upgrading from schema v3.
+- **Microservice knowledge catalog:** `spec.knowledge.bindPath` plus `items[].name` mounts Ready knowledge files at `{bindPath}/{name}/`. Start waits until every `spec.models` item **and** every `spec.knowledge` item is Ready. A microservice may bind both catalogs. `knowledge rm` is refused while a microservice still binds the name.
+- **Fleet knowledge:** controller `getChanges` `knowledge` plus `GET knowledge` (uuid + name). Fog status `knowledgeStatus` lists local and managed knowledge with `source`; local items omit `uuid`. `activeKnowledge` is the managed fleet count.
+- **Catalog-only updates:** `getChanges` `microserviceKnowledge` reuses `GET microservices` (one GET when `microserviceList` is also true). Item add/remove with the same bind path stays in-place; a not-Ready add keeps the running projection until Ready.
+
+### Changed
+
+- **Fog catalog clocks:** `modelLastUpdate` is Unix milliseconds, the same unit as `knowledgeLastUpdate` and the other fog status timestamps (`lastStatusTime`, `volumeMountLastUpdate`). Model row times in SQLite stay Unix seconds; the posted value is scaled.
+- **Scheduled prune:** `pruningFrequency`, disk-threshold ticks, `edgelet knowledge prune`, and controller `getChanges.prune` also delete unused unbound local Knowledge (plus unused local models and dangling images on the prune flag). Unbound managed Knowledge stays. `edgelet system prune` still does not prune Knowledge.
+- **Watchdog:** when `watchdogEnabled` is on, Edgelet deletes all local Knowledge and refuses local `kind: Knowledge` apply. Managed Knowledge is unchanged.
+
 ## [v1.1.0-rc.3]
 
 ### Added

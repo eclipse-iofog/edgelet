@@ -2,7 +2,7 @@
 # Edgelet Microservice manifest — annotated reference (edgelet.iofog.org/v1)
 #
 # Apply:  edgelet deploy -f microservice.yaml
-# Prose:  docs/edgelet/manifest-reference.md · docs/edgelet/models.md
+# Prose:  docs/edgelet/manifest-reference.md · docs/edgelet/models.md · docs/edgelet/knowledge.md
 # Schema: internal/models/local_deploy_manifest.go
 #
 # Notes:
@@ -10,8 +10,8 @@
 #     accepted in YAML but not used for application identity today).
 #   - spec.config is parsed but not applied. All other fields in this file are
 #     applied (healthCheck and annotations included).
-#   - Catalog items must name Ready local models (source: local). Omit spec.models
-#     if the workload does not bind artifacts.
+#   - Catalog items must name Ready local models / knowledge (source: local).
+#     Omit spec.models or spec.knowledge if the workload does not bind artifacts.
 # =============================================================================
 
 apiVersion: edgelet.iofog.org/v1 # required — must be edgelet.iofog.org/v1
@@ -36,6 +36,13 @@ spec:
     items:
       - name: test-model         # Model metadata.name (DNS-1123); container path /models/test-model/
       - name: qwen3-8-27b        # one directory per name; never send a host content path
+
+  knowledge:                     # optional — bind Ready knowledge content/ into the container
+    bindPath: /knowledge         # required when items is non-empty — absolute container path
+    permissions: ro              # optional — ro (default) or rw; catalog-level only
+    items:
+      - name: product-docs       # Knowledge metadata.name (DNS-1123); container path /knowledge/product-docs/
+      - name: wiki-faiss         # must not collide with models.bindPath, volumes, or tmpfs
 
   container:
     hostNetworkMode: false       # optional — true = host network (no bridge DNS)

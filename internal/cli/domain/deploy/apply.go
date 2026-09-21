@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/cli/client"
+	"github.com/eclipse-iofog/edgelet/internal/cli/domain/knowledge"
 	"github.com/eclipse-iofog/edgelet/internal/cli/domain/model"
 	"github.com/eclipse-iofog/edgelet/internal/cli/output"
 	"github.com/eclipse-iofog/edgelet/internal/cli/run"
@@ -127,6 +128,28 @@ func Execute(ctx context.Context, api run.EdgeletAPIClient, uiProgress *ui.UI, r
 		}
 		for _, name := range modelNamesFromApply(data) {
 			if _, pullErr := model.Pull(ctx, api, uiProgress, model.PullRequest{Name: name}); pullErr != nil {
+				return nil, pullErr
+			}
+		}
+		return result, nil
+	case TargetKnowledge:
+		var spin *ui.Spinner
+		if uiProgress != nil {
+			spin = uiProgress.StartSpinner(applySpinnerMessage(target))
+		}
+		data, err := api.RequestMultipartFile("POST", target.applyPath(), "manifest", req.ManifestPath, fields)
+		if spin != nil {
+			spin.Stop()
+		}
+		if err != nil {
+			return nil, run.MapAPIError(err)
+		}
+		result := &Result{Data: data, Human: FormatApplyHuman(data)}
+		if req.DryRun {
+			return result, nil
+		}
+		for _, name := range knowledgeNamesFromApply(data) {
+			if _, pullErr := knowledge.Pull(ctx, api, uiProgress, knowledge.PullRequest{Name: name}); pullErr != nil {
 				return nil, pullErr
 			}
 		}
@@ -259,6 +282,8 @@ func applySpinnerMessage(target Target) string {
 		return "Applying registry manifest..."
 	case TargetModels:
 		return "Applying model manifest..."
+	case TargetKnowledge:
+		return "Applying knowledge manifest..."
 	default:
 		return "Applying manifest..."
 	}
@@ -364,6 +389,38 @@ func modelNamesFromApply(data map[string]any) []string {
 		names = append(names, name)
 	}
 	switch items := data["models"].(type) {
+	case []any:
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				appendName(output.MapValueAsString(m, "name"))
+			}
+		}
+	case []map[string]any:
+		for _, m := range items {
+			appendName(output.MapValueAsString(m, "name"))
+		}
+	}
+	if len(names) == 0 {
+		appendName(output.MapValueAsString(data, "name"))
+	}
+	return names
+}
+
+func knowledgeNamesFromApply(data map[string]any) []string {
+	if data == nil {
+		return nil
+	}
+	var names []string
+	seen := map[string]bool{}
+	appendName := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || name == "<unknown>" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	switch items := data["knowledge"].(type) {
 	case []any:
 		for _, item := range items {
 			if m, ok := item.(map[string]any); ok {

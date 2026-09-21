@@ -58,6 +58,9 @@ func TestStart_DoesNotRunImmediateFrequencyPrune(t *testing.T) {
 		pruneModelsHook: func() {
 			pruned.Store(true)
 		},
+		pruneKnowledgeHook: func() {
+			pruned.Store(true)
+		},
 	}
 
 	if err := m.Start(); err != nil {
@@ -72,21 +75,22 @@ func TestStart_DoesNotRunImmediateFrequencyPrune(t *testing.T) {
 }
 
 func TestRunScheduledPrune_OrderOmitsPersistentVolumes(t *testing.T) {
-	order := make([]string, 0, 3)
+	order := make([]string, 0, 4)
 	volumeCalls := 0
 	m := &Manager{
 		pruneContainersHook: func() { order = append(order, "containers") },
 		pruneVolumesHook:    func() { volumeCalls++ },
 		pruneImagesHook:     func() { order = append(order, "images") },
 		pruneModelsHook:     func() { order = append(order, "models") },
+		pruneKnowledgeHook:  func() { order = append(order, "knowledge") },
 	}
 
 	m.runScheduledPrune()
 	if volumeCalls != 0 {
 		t.Fatalf("persistent volume prune must not run on the scheduled job, got %d calls", volumeCalls)
 	}
-	if len(order) != 3 || order[0] != "containers" || order[1] != "images" || order[2] != "models" {
-		t.Fatalf("expected prune order containers->images->models, got %v", order)
+	if len(order) != 4 || order[0] != "containers" || order[1] != "images" || order[2] != "models" || order[3] != "knowledge" {
+		t.Fatalf("expected prune order containers->images->models->knowledge, got %v", order)
 	}
 }
 
@@ -97,6 +101,7 @@ func TestRunScheduledPrune_DoesNotCallEngineVolumePrune(t *testing.T) {
 		pruneContainersHook: func() {},
 		pruneImagesHook:     func() {},
 		pruneModelsHook:     func() {},
+		pruneKnowledgeHook:  func() {},
 	}
 	m.runScheduledPrune()
 	if recorder.calls.Load() != 0 {
@@ -140,7 +145,7 @@ func TestTriggerPruneOnThresholdBreach_OmitsPersistentVolumes(t *testing.T) {
 		rcm.AvailableDisk = 10
 	})
 
-	order := make([]string, 0, 3)
+	order := make([]string, 0, 4)
 	volumeCalls := 0
 	recorder := &volumePruneRecorder{disk: disk}
 	m := &Manager{
@@ -150,6 +155,7 @@ func TestTriggerPruneOnThresholdBreach_OmitsPersistentVolumes(t *testing.T) {
 		pruneVolumesHook:    func() { volumeCalls++ },
 		pruneImagesHook:     func() { order = append(order, "images") },
 		pruneModelsHook:     func() { order = append(order, "models") },
+		pruneKnowledgeHook:  func() { order = append(order, "knowledge") },
 	}
 
 	m.triggerPruneOnThresholdBreach()
@@ -159,8 +165,8 @@ func TestTriggerPruneOnThresholdBreach_OmitsPersistentVolumes(t *testing.T) {
 	if recorder.calls.Load() != 0 {
 		t.Fatalf("engine volume prune must not run on disk-threshold prune, got %d calls", recorder.calls.Load())
 	}
-	if len(order) != 3 || order[0] != "containers" || order[1] != "images" || order[2] != "models" {
-		t.Fatalf("expected threshold prune order containers->images->models, got %v", order)
+	if len(order) != 4 || order[0] != "containers" || order[1] != "images" || order[2] != "models" || order[3] != "knowledge" {
+		t.Fatalf("expected threshold prune order containers->images->models->knowledge, got %v", order)
 	}
 	assertPersistentVolumeMarkers(t, dataMarker, sharedMarker)
 }
@@ -184,6 +190,9 @@ func TestChangePruningFreqInterval_EnablingDoesNotRunImmediatePrune(t *testing.T
 			pruned.Store(true)
 		},
 		pruneModelsHook: func() {
+			pruned.Store(true)
+		},
+		pruneKnowledgeHook: func() {
 			pruned.Store(true)
 		},
 	}
@@ -274,16 +283,32 @@ func TestGetUnwantedImagesList_KeepsInUseSandboxImage(t *testing.T) {
 }
 
 func TestRunScheduledPrune_ImageAndModelHooksStillFire(t *testing.T) {
-	var imageCalls, modelCalls int
+	var imageCalls, modelCalls, knowledgeCalls int
 	m := &Manager{
 		pruneContainersHook: func() {},
 		pruneImagesHook:     func() { imageCalls++ },
 		pruneModelsHook:     func() { modelCalls++ },
+		pruneKnowledgeHook:  func() { knowledgeCalls++ },
 	}
 
 	m.runScheduledPrune()
-	if imageCalls != 1 || modelCalls != 1 {
-		t.Fatalf("expected image and model prune once, images=%d models=%d", imageCalls, modelCalls)
+	if imageCalls != 1 || modelCalls != 1 || knowledgeCalls != 1 {
+		t.Fatalf("expected image, model, and knowledge prune once, images=%d models=%d knowledge=%d", imageCalls, modelCalls, knowledgeCalls)
+	}
+}
+
+func TestRunScheduledPrune_KnowledgeHookFiresWithModels(t *testing.T) {
+	order := make([]string, 0, 2)
+	m := &Manager{
+		pruneContainersHook: func() {},
+		pruneImagesHook:     func() {},
+		pruneModelsHook:     func() { order = append(order, "models") },
+		pruneKnowledgeHook:  func() { order = append(order, "knowledge") },
+	}
+
+	m.runScheduledPrune()
+	if len(order) != 2 || order[0] != "models" || order[1] != "knowledge" {
+		t.Fatalf("expected dangling knowledge on the same tick as unused local models, got %v", order)
 	}
 }
 

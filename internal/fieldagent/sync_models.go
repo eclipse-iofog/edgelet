@@ -65,7 +65,7 @@ func (fa *FieldAgent) loadModels(fromFile bool) error {
 		return fmt.Errorf("unable to apply controller models: %w", err)
 	}
 	if !fromFile {
-		fa.setModelLastUpdate(time.Now().Unix())
+		fa.setModelLastUpdate(time.Now().UnixMilli())
 	}
 
 	logging.LogDebug(moduleName, fmt.Sprintf("Finished get models (count: %d)", len(items)))
@@ -124,6 +124,21 @@ func parseControllerModel(data map[string]any) (*models.ControllerModel, error) 
 		return nil, errors.New("model name is required")
 	}
 	return item, nil
+}
+
+// laterModelStatusUnixMs keeps the fog modelLastUpdate clock in Unix milliseconds.
+// Row clocks (LastReconcileAt, LastTransitionAt) are stored as Unix seconds.
+func laterModelStatusUnixMs(current int64, rowUnixSec ...int64) int64 {
+	for _, sec := range rowUnixSec {
+		if sec <= 0 {
+			continue
+		}
+		ms := sec * 1000
+		if ms > current {
+			current = ms
+		}
+	}
+	return current
 }
 
 func (fa *FieldAgent) fogModelStatus() (modelStatus string, activeModels int, modelLastUpdate int64) {
@@ -185,12 +200,7 @@ func (fa *FieldAgent) fogModelStatus() (modelStatus string, activeModels int, mo
 			item["revisionFloating"] = row.RevisionFloating
 			item["totalBytes"] = row.TotalBytes
 			item["lastError"] = row.LastError
-			if row.LastReconcileAt > lastUpdate {
-				lastUpdate = row.LastReconcileAt
-			}
-			if row.LastTransitionAt > lastUpdate {
-				lastUpdate = row.LastTransitionAt
-			}
+			lastUpdate = laterModelStatusUnixMs(lastUpdate, row.LastReconcileAt, row.LastTransitionAt)
 		}
 		payload = append(payload, item)
 	}
@@ -219,12 +229,7 @@ func (fa *FieldAgent) fogModelStatus() (modelStatus string, activeModels int, mo
 			"totalBytes":       row.TotalBytes,
 			"lastError":        row.LastError,
 		}
-		if row.LastReconcileAt > lastUpdate {
-			lastUpdate = row.LastReconcileAt
-		}
-		if row.LastTransitionAt > lastUpdate {
-			lastUpdate = row.LastTransitionAt
-		}
+		lastUpdate = laterModelStatusUnixMs(lastUpdate, row.LastReconcileAt, row.LastTransitionAt)
 		payload = append(payload, item)
 	}
 

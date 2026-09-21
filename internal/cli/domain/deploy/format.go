@@ -36,6 +36,11 @@ func FormatApplyHuman(result map[string]any) string {
 				return fmt.Sprintf("model manifest applied successfully (name=%s)", name)
 			}
 			return "model manifest applied successfully"
+		case "knowledge":
+			if name := output.MapValueAsString(result, "name"); name != "<unknown>" {
+				return fmt.Sprintf("knowledge manifest applied successfully (name=%s)", name)
+			}
+			return "knowledge manifest applied successfully"
 		case "microservice":
 			if id := output.MapValueAsString(result, "deploymentId"); id != "<unknown>" {
 				return fmt.Sprintf("microservice manifest applied successfully (deploymentId=%s)", id)

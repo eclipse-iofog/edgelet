@@ -38,3 +38,37 @@ func (m *Microservice) UnmarshalModelsJSON(raw string) error {
 	m.Models = cat
 	return nil
 }
+
+// MarshalKnowledgeJSON encodes the knowledge catalog bind for the knowledge column. Empty catalog becomes {}.
+func (m *Microservice) MarshalKnowledgeJSON() (string, error) {
+	if m == nil || m.Knowledge == nil {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(m.Knowledge)
+	if err != nil {
+		return "", err
+	}
+	if string(raw) == "null" {
+		return "{}", nil
+	}
+	return string(raw), nil
+}
+
+// UnmarshalKnowledgeJSON loads the knowledge catalog bind from the knowledge column.
+func (m *Microservice) UnmarshalKnowledgeJSON(raw string) error {
+	if m == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		m.Knowledge = nil
+		return nil
+	}
+	cat := &KnowledgeCatalog{}
+	if err := json.Unmarshal([]byte(trimmed), cat); err != nil {
+		return err
+	}
+	cat.NormalizeDefaults()
+	m.Knowledge = cat
+	return nil
+}

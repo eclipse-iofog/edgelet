@@ -168,6 +168,104 @@ func TestIsAuthorized_VolumeRoutesDenyAndAllow(t *testing.T) {
 	}
 }
 
+func TestIsAuthorized_KnowledgeRoutesDenyAndAllow(t *testing.T) {
+	denied := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"models"},
+							"verbs":     []any{"get"},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, resource := range []string{"knowledge", "knowledge/pull", "knowledge/prune", "deploy/knowledge"} {
+		verb := "create"
+		if resource == "knowledge" {
+			verb = "delete"
+		}
+		perm := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: resource, Verb: verb}
+		if isAuthorized(denied, perm) {
+			t.Fatalf("expected %s %s to be denied without a knowledge rule", resource, verb)
+		}
+	}
+
+	allowed := jwt.MapClaims{
+		"tokenUse": "serviceaccount",
+		"sub":      "system:serviceaccount:app:svc",
+		"edgelet.iofog.org": map[string]any{
+			"rbac": map[string]any{
+				"rulesByGroup": map[string]any{
+					"edgelet.iofog.org/v1": []any{
+						map[string]any{
+							"resources": []any{"knowledge", "knowledge/pull", "knowledge/prune", "deploy/knowledge"},
+							"verbs":     []any{"get", "create", "delete"},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, resource := range []string{"knowledge", "knowledge/pull", "knowledge/prune", "deploy/knowledge"} {
+		p := rbacPermission{APIGroups: localAPIAuthorizationGroups, Resource: resource, Verb: "get"}
+		if resource != "knowledge" {
+			p.Verb = "create"
+		}
+		if !isAuthorized(allowed, p) {
+			t.Fatalf("expected %s to be allowed", resource)
+		}
+	}
+}
+
+func TestAuthMiddlewareV1_KnowledgeDeniedWithoutKnowledgeRule(t *testing.T) {
+	origValidate := validateLocalJWTFn
+	defer func() { validateLocalJWTFn = origValidate }()
+	validateLocalJWTFn = func(string) (*auth.LocalJWTValidationResult, error) {
+		return &auth.LocalJWTValidationResult{Claims: jwt.MapClaims{
+			"tokenUse": "serviceaccount",
+			"sub":      "system:serviceaccount:app:ms",
+			"edgelet.iofog.org": map[string]any{
+				"rbac": map[string]any{
+					"rulesByGroup": map[string]any{
+						"edgelet.iofog.org/v1": []any{
+							map[string]any{
+								"resources": []any{"models"},
+								"verbs":     []any{"get"},
+							},
+						},
+					},
+				},
+			},
+		}}, nil
+	}
+	handler := authMiddlewareV1(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/v1/knowledge:pull"},
+		{method: http.MethodPost, path: "/v1/knowledge:prune"},
+		{method: http.MethodDelete, path: "/v1/knowledge/product-docs"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		rr := httptest.NewRecorder()
+		handler(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s %s: expected 403, got %d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestMapRequestToPermission_ModelRoutesWithoutTokenStillMap(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	perm, ok := mapRequestToPermission(req)
@@ -292,6 +390,14 @@ func TestMapRequestToPermission_SystemSwitchAndCert(t *testing.T) {
 		{method: http.MethodPost, path: "/v1/volumes:prune", resource: "volumes/prune", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/models:apply", resource: "deploy/models", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/models:validate", resource: "deploy/models", verb: "create"},
+		{method: http.MethodGet, path: "/v1/knowledge", resource: "knowledge", verb: "get"},
+		{method: http.MethodGet, path: "/v1/knowledge/product-docs", resource: "knowledge", verb: "get"},
+		{method: http.MethodDelete, path: "/v1/knowledge/product-docs", resource: "knowledge", verb: "delete"},
+		{method: http.MethodPost, path: "/v1/knowledge:pull", resource: "knowledge/pull", verb: "create"},
+		{method: http.MethodGet, path: "/v1/knowledge:pull/op-1", resource: "knowledge/pull/status", verb: "get"},
+		{method: http.MethodPost, path: "/v1/knowledge:prune", resource: "knowledge/prune", verb: "create"},
+		{method: http.MethodPost, path: "/v1/deploy/knowledge:apply", resource: "deploy/knowledge", verb: "create"},
+		{method: http.MethodPost, path: "/v1/deploy/knowledge:validate", resource: "deploy/knowledge", verb: "create"},
 		{method: http.MethodGet, path: "/v1/deploy/microservices:apply/op-123", resource: "deploy/microservices/apply/status", verb: "get"},
 		{method: http.MethodPost, path: "/v1/deploy/runtimeclasses:apply", resource: "deploy/runtimeclasses", verb: "create"},
 		{method: http.MethodPost, path: "/v1/deploy/runtimeclasses:validate", resource: "deploy/runtimeclasses", verb: "create"},

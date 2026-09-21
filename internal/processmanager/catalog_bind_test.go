@@ -244,6 +244,116 @@ func TestRefreshCatalogProjection_RunningWaitKeepsOldProjection(t *testing.T) {
 	}
 }
 
+func TestApplyCatalogStartGate_KnowledgeConjunction(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+
+	disk := t.TempDir()
+	modelContent := filepath.Join(disk, "models", "test-model", "content")
+	knowledgeContent := filepath.Join(disk, "knowledge", "product-docs", "content")
+	for _, dir := range []string{modelContent, knowledgeContent} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "payload.bin"), []byte("ok"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pm := &ProcessManager{
+		logger:               logging.NewModuleLogger("test-catalog-conjunction"),
+		catalogDiskDirectory: disk,
+	}
+	ms := models.NewMicroservice("ms-both", "nginx:latest")
+	ms.Models = &models.ModelCatalog{
+		BindPath: "/models",
+		Items:    []models.ModelCatalogItem{{Name: "test-model"}},
+	}
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath: "/knowledge",
+		Items:    []models.KnowledgeCatalogItem{{Name: "product-docs"}},
+	}
+
+	upsertCatalogModel(t, "test-model", models.ModelSourceManaged, models.ModelStateReady, modelContent, 1)
+	upsertCatalogKnowledge(t, "product-docs", models.KnowledgeSourceManaged, models.KnowledgeStatePulling, 1)
+	if pm.applyCatalogStartGate(ms) {
+		t.Fatal("models Ready + knowledge Pulling must not allow create")
+	}
+	st := statusreporter.GetInstance().GetProcessManagerStatus().GetMicroserviceStatus("ms-both")
+	if st.Status != models.MicroserviceStateQueued {
+		t.Fatalf("expected QUEUED, got %s", st.Status)
+	}
+	if st.ErrorMessage == nil || !strings.Contains(*st.ErrorMessage, "product-docs") || !strings.Contains(*st.ErrorMessage, models.KnowledgeStatePulling) {
+		t.Fatalf("expected knowledge wait text, got %v", st.ErrorMessage)
+	}
+
+	upsertCatalogKnowledge(t, "product-docs", models.KnowledgeSourceManaged, models.KnowledgeStateReady, 1)
+	if !pm.applyCatalogStartGate(ms) {
+		t.Fatal("both catalogs Ready must allow create")
+	}
+}
+
+func TestRefreshCatalogProjection_KnowledgeInPlaceVsBindPath(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	disk := t.TempDir()
+	contentA := filepath.Join(disk, "knowledge", "docs-a", "content")
+	contentB := filepath.Join(disk, "knowledge", "docs-b", "content")
+	for _, dir := range []string{contentA, contentB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "guide.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upsertCatalogKnowledge(t, "docs-a", models.KnowledgeSourceManaged, models.KnowledgeStateReady, 1)
+	upsertCatalogKnowledge(t, "docs-b", models.KnowledgeSourceManaged, models.KnowledgeStateReady, 1)
+
+	pm := &ProcessManager{
+		logger:               logging.NewModuleLogger("test-knowledge-refresh"),
+		catalogDiskDirectory: disk,
+	}
+	ms := models.NewMicroservice("ms-knowledge-refresh", "nginx:latest")
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath: "/knowledge",
+		Items:    []models.KnowledgeCatalogItem{{Name: "docs-a"}},
+	}
+	if !pm.applyCatalogStartGate(ms) {
+		t.Fatal("initial Ready knowledge catalog must allow create")
+	}
+
+	ms.Knowledge.Items = append(ms.Knowledge.Items, models.KnowledgeCatalogItem{Name: "docs-b"})
+	pm.refreshCatalogProjection(ms)
+	if ms.Rebuild {
+		t.Fatal("adding a knowledge catalog item must not recreate")
+	}
+
+	ms.Knowledge.BindPath = "/corpus"
+	pm.refreshCatalogProjection(ms)
+	if !ms.Rebuild {
+		t.Fatal("knowledge bindPath change must mark recreate")
+	}
+}
+
+func upsertCatalogKnowledge(t *testing.T, name, source, state string, generation int64) {
+	t.Helper()
+	row := &models.LocalKnowledge{
+		Name:       name,
+		Source:     source,
+		Repo:       "org/docs",
+		RegistryID: 1,
+		State:      state,
+		Generation: generation,
+	}
+	row.NormalizeDefaults()
+	row.Source = source
+	row.State = state
+	row.Generation = generation
+	if err := store.GetInstance().UpsertLocalKnowledge(row); err != nil {
+		t.Fatalf("upsert knowledge %s: %v", name, err)
+	}
+}
+
 func upsertCatalogModel(t *testing.T, name, source, state, content string, generation int64) {
 	t.Helper()
 	row := &models.LocalModel{

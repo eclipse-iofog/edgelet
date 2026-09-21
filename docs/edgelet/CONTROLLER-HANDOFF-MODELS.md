@@ -18,6 +18,8 @@ Operator YAML: [manifest-reference.md](manifest-reference.md) · [models.md](mod
 
 The agent already consumes every shape below. Controller CRUD and UI can implement against this page without reading internal specs.
 
+**Knowledge artifacts** (documents, datasets, vector indexes) are a separate kind and contract: [CONTROLLER-HANDOFF-KNOWLEDGE.md](CONTROLLER-HANDOFF-KNOWLEDGE.md). Do not reuse `GET models` or `spec.models` for those files.
+
 ---
 
 ## Identity and paths
@@ -462,7 +464,7 @@ No new `getChanges` flags. No new REST paths. `PUT status` top-level keys are un
 |-------|------|--------|
 | `modelStatus` | string | JSON **string** (not a raw array) of status items |
 | `activeModels` | integer | Count of **managed** fleet models (`controller_models` length) — **not** total status rows |
-| `modelLastUpdate` | integer | Unix seconds; `0` when the list is empty |
+| `modelLastUpdate` | integer | Unix milliseconds; `0` when the list is empty. Same clock as `knowledgeLastUpdate` |
 
 When the controller has no models (or no `models` flag), send `modelStatus: "[]"`, `activeModels: 0`, `modelLastUpdate: 0`.
 

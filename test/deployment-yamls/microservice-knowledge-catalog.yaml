@@ -1,0 +1,33 @@
+# Knowledge catalog bind for local Docker / Lima functional tests.
+# Bind names match test/deployment-yamls/knowledge-hf-tiny.yaml (tiny-docs).
+# Do not use docs/edgelet/examples/microservice.yaml here — those names are examples only.
+#
+# Apply after the Knowledge is Ready:
+#   edgelet deploy -f test/deployment-yamls/knowledge-hf-tiny.yaml
+#   edgelet deploy -f test/deployment-yamls/microservice-knowledge-catalog.yaml
+#   edgelet ms exec knowledge-catalog-test -- test -f /knowledge/tiny-docs/data/train.txt
+#
+# In-place second item: add `- name: tiny-corpus` under items (knowledge-hf-tiny-corpus.yaml Ready).
+# Recreate: change bindPath to /corpus.
+# knowledge rm tiny-docs is refused until this microservice is removed.
+
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-catalog-test
+  labels:
+    test: knowledge-catalog
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: tiny-docs
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50

@@ -230,6 +230,34 @@ func TestFormatEdgeletAPIHuman_ModelListSourceColumn(t *testing.T) {
 	}
 }
 
+func TestFormatEdgeletAPIHuman_KnowledgeListColumns(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/knowledge", map[string]any{
+		"items": []any{
+			map[string]any{
+				"name": "product-docs", "repo": "acme/product-manuals",
+				"revision": "main", "registryId": 5, "state": "Ready", "format": "jsonl",
+			},
+		},
+	})
+	for _, want := range []string{"NAME", "SOURCE", "REPO", "STATE", "product-docs", "Ready"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge list, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_KnowledgeInspectSourceAndUUID(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/knowledge/fleet-docs", map[string]any{
+		"name": "fleet-docs", "source": "managed", "uuid": "3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f",
+		"bindRefCount": 2, "state": "Ready", "repo": "org/fleet",
+	})
+	for _, want := range []string{"source: managed", "uuid: 3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f", "bindRefCount: 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge inspect, got: %s", want, out)
+		}
+	}
+}
+
 func TestFormatEdgeletAPIHuman_ModelInspectSourceAndUUID(t *testing.T) {
 	out := FormatEdgeletAPIHuman("/v1/models/fleet-model", map[string]any{
 		"name": "fleet-model", "source": "managed", "uuid": "3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f",
@@ -271,6 +299,23 @@ func TestFormatEdgeletAPIHuman_MSInspectSummaryCard(t *testing.T) {
 	for _, want := range []string{"uuid: ms-1", "models.bindPath: /models", "models.permissions: ro", "models.items: test-model", "test-model"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in summary inspect, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_MSInspectKnowledgeCatalog(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid": "ms-1", "name": "infer", "state": "queued",
+		"statusText": "waiting for knowledge download: product-docs (Pulling)",
+		"knowledge": map[string]any{
+			"bindPath":    "/knowledge",
+			"permissions": "ro",
+			"items":       []any{map[string]any{"name": "product-docs"}},
+		},
+	})
+	for _, want := range []string{"uuid: ms-1", "knowledge.bindPath: /knowledge", "knowledge.permissions: ro", "knowledge.items: product-docs", "product-docs"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge inspect, got: %s", want, out)
 		}
 	}
 }

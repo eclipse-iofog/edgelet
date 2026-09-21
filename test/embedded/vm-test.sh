@@ -2,7 +2,7 @@
 # test/embedded/vm-test.sh
 #
 # Runs the full embedded-containerd integration test suite inside the Lima VM.
-# Tests are grouped into 11 phases:
+# Tests are grouped into 12 phases:
 #
 #   Phase 1 — Extracted embedded binaries
 #   Phase 2 — containerd socket & health
@@ -15,6 +15,7 @@
 #   Phase 9 — Built-in registries + tiny HF and OCI model pulls
 #   Phase 10 — Catalog bind + expanded container fields (keeps Phase 9 models until cleanup)
 #   Phase 11 — Persistent VOLUME scope, retain across restart/prune, explicit reclaim
+#   Phase 12 — Tiny HF Knowledge pull + catalog bind (dataset API; models store untouched)
 #
 # Usage:
 #   ./test/embedded/vm-test.sh [--vm-name=iofog-test]
@@ -1813,6 +1814,333 @@ if [ -n \"\${orig}\" ]; then
   edgelet config --pruning-frequency \"\${orig}\" >/dev/null || true
 fi
 rm -rf /tmp/edgelet-it-bind /tmp/vol-it-a.yaml /tmp/vol-it-b.yaml /tmp/vol-it-ops.sh /tmp/vol-it-a.uuid /tmp/vol-it-b.uuid /tmp/vol-it-a.uuid.removed /tmp/vol-it-orig-pf"
+
+###############################################################################
+# Phase 12 — Tiny HF Knowledge pull + catalog bind
+###############################################################################
+log_step "Phase 12: Tiny Hugging Face Knowledge pull and catalog bind"
+
+assert_ok "create tiny Hugging Face knowledge manifest" \
+    R "cat >/tmp/tiny-docs.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: tiny-docs
+spec:
+  repo: hf-internal-testing/dataset_with_data_files
+  revision: c19550d35263090b1ec2bfefdbd737431fafec40
+  registry: 3
+  files:
+    - data/train.txt
+  format: unknown
+EOF"
+
+assert_contains "deploy tiny Hugging Face knowledge" "knowledge manifest applied successfully" \
+    R "edgelet deploy -f /tmp/tiny-docs.yaml"
+
+assert_contains "knowledge ls lists tiny-docs" "tiny-docs" \
+    R "edgelet knowledge ls"
+
+assert_contains "inspect tiny knowledge is Ready" "Ready" \
+    R "edgelet knowledge inspect tiny-docs"
+
+assert_ok "tiny Hugging Face knowledge content materialized on disk" \
+    R "test -f /var/lib/edgelet/knowledge/tiny-docs/content/data/train.txt"
+
+assert_ok "knowledge pull does not write the models store" \
+    R "set -e
+test -f /var/lib/edgelet/knowledge/tiny-docs/content/data/train.txt
+! test -e /var/lib/edgelet/models/tiny-docs
+! test -e /var/lib/edgelet/models/oci-store/tiny-docs"
+
+assert_ok "create second tiny Hugging Face knowledge manifest" \
+    R "cat >/tmp/tiny-corpus.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: tiny-corpus
+spec:
+  repo: hf-internal-testing/dataset_with_data_files
+  revision: c19550d35263090b1ec2bfefdbd737431fafec40
+  registry: 3
+  files:
+    - data/test.txt
+  format: unknown
+EOF"
+
+assert_contains "deploy second tiny Hugging Face knowledge" "knowledge manifest applied successfully" \
+    R "edgelet deploy -f /tmp/tiny-corpus.yaml"
+
+assert_ok "second knowledge content materialized on disk" \
+    R "test -f /var/lib/edgelet/knowledge/tiny-corpus/content/data/test.txt"
+
+assert_ok "knowledge ls source column lists local tiny-docs" \
+    R "set -e
+out=\$(edgelet knowledge ls)
+echo \"\${out}\" | grep tiny-docs | grep -q local"
+
+assert_ok "create knowledge-catalog microservice manifest" \
+    R "cat >/tmp/knowledge-catalog.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-catalog-test
+  labels:
+    test: knowledge-catalog
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: tiny-docs
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50
+EOF"
+
+assert_contains "deploy knowledge-catalog microservice" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/knowledge-catalog.yaml"
+
+assert_ok "knowledge-catalog microservice reaches running" \
+    R "set -e
+for i in \$(seq 1 90); do
+  inspect=\$(edgelet ms inspect edgelet.knowledge-catalog-test 2>/dev/null || true)
+  if echo \"\${inspect}\" | grep -Eq '^  \"state\": \"running\"' ; then
+    cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]')
+    if [ -n \"\${cid}\" ] && [ \"\${cid}\" != '-' ]; then
+      echo \"\${inspect}\" | sed -n 's/^  \"uuid\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]' >/tmp/knowledge-catalog.uuid
+      echo \"\${cid}\" >/tmp/knowledge-catalog.cid
+      exit 0
+    fi
+  fi
+  sleep 2
+done
+echo 'knowledge-catalog-test not running' >&2
+edgelet ms inspect edgelet.knowledge-catalog-test 2>/dev/null || true
+exit 1"
+
+assert_contains "ms inspect shows knowledge bindPath and item" "\"bindPath\": \"/knowledge\"" \
+    R "edgelet ms inspect edgelet.knowledge-catalog-test"
+
+assert_contains "ms inspect lists tiny-docs knowledge item" "tiny-docs" \
+    R "edgelet ms inspect edgelet.knowledge-catalog-test"
+
+assert_contains "ms inspect shows knowledge permissions" "\"permissions\": \"ro\"" \
+    R "edgelet ms inspect edgelet.knowledge-catalog-test"
+
+assert_ok "container sees knowledge catalog files" \
+    R "set -e
+uuid=\$(cat /tmp/knowledge-catalog.uuid)
+test -n \"\${uuid}\"
+edgelet ms exec \"\${uuid}\" -- test -f /knowledge/tiny-docs/data/train.txt"
+
+assert_ok "knowledge rm tiny-docs refused while microservice is bound" \
+    R "set -e
+out=\$(edgelet knowledge rm tiny-docs 2>&1 || true)
+echo \"\${out}\" | grep -q bound"
+
+assert_ok "create knowledge-catalog two-item manifest" \
+    R "awk '/- name: tiny-docs/{print; print \"      - name: tiny-corpus\"; next}1' /tmp/knowledge-catalog.yaml >/tmp/knowledge-catalog-two.yaml
+grep -q tiny-corpus /tmp/knowledge-catalog-two.yaml"
+
+assert_contains "redeploy knowledge catalog with second item" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/knowledge-catalog-two.yaml"
+
+assert_ok "adding a knowledge item does not recreate the container" \
+    R "set -e
+sleep 3
+inspect=\$(edgelet ms inspect edgelet.knowledge-catalog-test)
+cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]')
+old=\$(tr -d '[:space:]' </tmp/knowledge-catalog.cid)
+test -n \"\${cid}\"
+test \"\${cid}\" = \"\${old}\"
+uuid=\$(cat /tmp/knowledge-catalog.uuid)
+for i in \$(seq 1 20); do
+  if edgelet ms exec \"\${uuid}\" -- test -f /knowledge/tiny-corpus/data/test.txt; then
+    exit 0
+  fi
+  sleep 2
+done
+echo 'second knowledge item not visible in container' >&2
+exit 1"
+
+assert_ok "create knowledge-catalog bindPath-change manifest" \
+    R "sed 's|bindPath: /knowledge|bindPath: /corpus|' /tmp/knowledge-catalog.yaml >/tmp/knowledge-catalog-corpus.yaml
+grep -q 'bindPath: /corpus' /tmp/knowledge-catalog-corpus.yaml"
+
+assert_contains "redeploy knowledge catalog with bindPath change" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/knowledge-catalog-corpus.yaml"
+
+assert_ok_verbose "knowledge bindPath change recreates container and remounts catalog" \
+    R "set -e
+old=\$(tr -d '[:space:]' </tmp/knowledge-catalog.cid)
+uuid=\$(tr -d '[:space:]' </tmp/knowledge-catalog.uuid)
+for i in \$(seq 1 60); do
+  inspect=\$(edgelet ms inspect edgelet.knowledge-catalog-test 2>/dev/null || true)
+  if echo \"\${inspect}\" | grep -Eq '^  \"state\": \"running\"'; then
+    cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]')
+    if [ -n \"\${cid}\" ] && [ \"\${cid}\" != \"\${old}\" ] && [ -n \"\${uuid}\" ]; then
+      if echo \"\${inspect}\" | grep -q '\"bindPath\": \"/corpus\"' &&
+         edgelet ms exec \"\${uuid}\" -- test -f /corpus/tiny-docs/data/train.txt; then
+        echo \"\${cid}\" >/tmp/knowledge-catalog.cid
+        exit 0
+      fi
+    fi
+  fi
+  sleep 2
+done
+echo 'knowledge bindPath recreate did not produce a new running container' >&2
+echo \"old containerId=\${old}\" >&2
+edgelet ms inspect edgelet.knowledge-catalog-test 2>/dev/null || true
+exit 1"
+
+assert_ok "create unknown knowledge catalog item manifest" \
+    R "cat >/tmp/knowledge-unknown.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-unknown-test
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: missing-knowledge
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50
+EOF"
+
+assert_ok "local apply rejects unknown catalog knowledge name" \
+    R "set -e
+out=\$(edgelet deploy -f /tmp/knowledge-unknown.yaml 2>&1 || true)
+echo \"\${out}\" | grep -q missing-knowledge
+echo \"\${out}\" | grep -qi local"
+
+assert_ok "remove knowledge-catalog microservice" \
+    R "set -e
+uuid=\$(cat /tmp/knowledge-catalog.uuid)
+edgelet ms rm \"\${uuid}\""
+
+assert_ok "knowledge-catalog microservice is gone from ms ls after rm" \
+    R "set -e
+out=\$(edgelet ms ls)
+! echo \"\${out}\" | grep -q knowledge-catalog-test"
+
+assert_ok "create tiny Hugging Face model for dual catalog" \
+    R "cat >/tmp/tiny-gpt2-knowledge.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: tiny-gpt2
+spec:
+  repo: hf-internal-testing/tiny-random-gpt2
+  revision: 71034c5d8bde858ff824298bdedc65515b97d2b9
+  registry: 3
+  files:
+    - config.json
+  format: unknown
+EOF"
+
+assert_contains "deploy tiny Hugging Face model for dual catalog" "model manifest applied successfully" \
+    R "edgelet deploy -f /tmp/tiny-gpt2-knowledge.yaml"
+
+assert_ok "create dual-catalog microservice manifest" \
+    R "cat >/tmp/knowledge-dual-catalog.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-dual-catalog-test
+  labels:
+    test: knowledge-dual-catalog
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: tiny-gpt2
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: tiny-docs
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50
+EOF"
+
+assert_contains "deploy dual-catalog microservice" "microservice manifest applied successfully" \
+    R "edgelet deploy -f /tmp/knowledge-dual-catalog.yaml"
+
+assert_ok "dual-catalog microservice reaches running" \
+    R "set -e
+for i in \$(seq 1 90); do
+  inspect=\$(edgelet ms inspect edgelet.knowledge-dual-catalog-test 2>/dev/null || true)
+  if echo \"\${inspect}\" | grep -Eq '^  \"state\": \"running\"' ; then
+    cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]')
+    if [ -n \"\${cid}\" ] && [ \"\${cid}\" != '-' ]; then
+      echo \"\${inspect}\" | sed -n 's/^  \"uuid\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1 | tr -d '[:space:]' >/tmp/knowledge-dual.uuid
+      exit 0
+    fi
+  fi
+  sleep 2
+done
+echo 'knowledge-dual-catalog-test not running' >&2
+edgelet ms inspect edgelet.knowledge-dual-catalog-test 2>/dev/null || true
+exit 1"
+
+assert_ok "container sees both model and knowledge catalog files" \
+    R "set -e
+uuid=\$(cat /tmp/knowledge-dual.uuid)
+test -n \"\${uuid}\"
+edgelet ms exec \"\${uuid}\" -- test -f /models/tiny-gpt2/config.json
+edgelet ms exec \"\${uuid}\" -- test -f /knowledge/tiny-docs/data/train.txt"
+
+assert_ok "remove dual-catalog microservice" \
+    R "set -e
+uuid=\$(cat /tmp/knowledge-dual.uuid)
+edgelet ms rm \"\${uuid}\""
+
+assert_ok "system prune all does not delete Knowledge trees" \
+    R "set -e
+edgelet system prune all
+test -f /var/lib/edgelet/knowledge/tiny-docs/content/data/train.txt
+test -f /var/lib/edgelet/knowledge/tiny-corpus/content/data/test.txt"
+
+assert_ok "remove tiny Hugging Face knowledge after unbind" \
+    R "edgelet knowledge rm tiny-docs"
+
+assert_ok "remove second tiny Hugging Face knowledge after unbind" \
+    R "edgelet knowledge rm tiny-corpus"
+
+assert_ok "prune knowledge after remove" \
+    R "edgelet knowledge prune"
+
+assert_ok "knowledge trees are gone after prune" \
+    R "set -e
+! test -e /var/lib/edgelet/knowledge/tiny-docs
+! test -e /var/lib/edgelet/knowledge/tiny-corpus"
+
+assert_ok "remove tiny Hugging Face model after dual catalog" \
+    R "edgelet model rm tiny-gpt2"
+
+assert_ok "prune models after dual catalog" \
+    R "edgelet model prune"
 
 ###############################################################################
 # Summary

@@ -67,6 +67,8 @@ type ProcessManager struct {
 	execRegistry                 *ExecSessionRegistry
 	watchdogLocalModelsMu        sync.Mutex
 	watchdogLocalModelsFn        func()
+	watchdogLocalKnowledgeMu     sync.Mutex
+	watchdogLocalKnowledgeFn     func()
 }
 
 // LocalDeployProgressCallback reports local deployment runtime stage transitions.
@@ -549,6 +551,29 @@ func (pm *ProcessManager) cleanupLocalModelsForWatchdog() {
 	}
 }
 
+// SetWatchdogLocalKnowledgeCallback runs when watchdog is on so local Knowledge
+// rows and trees are removed (fleet-desired Knowledge is kept).
+func (pm *ProcessManager) SetWatchdogLocalKnowledgeCallback(fn func()) {
+	if pm == nil {
+		return
+	}
+	pm.watchdogLocalKnowledgeMu.Lock()
+	defer pm.watchdogLocalKnowledgeMu.Unlock()
+	pm.watchdogLocalKnowledgeFn = fn
+}
+
+func (pm *ProcessManager) cleanupLocalKnowledgeForWatchdog() {
+	if pm == nil || !LocalWorkloadsOutOfScope(config.GetInstance().WatchdogEnabled) {
+		return
+	}
+	pm.watchdogLocalKnowledgeMu.Lock()
+	fn := pm.watchdogLocalKnowledgeFn
+	pm.watchdogLocalKnowledgeMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // Update notifies the ProcessManager of changes
 // updates registries and notifies monitor thread
 func (pm *ProcessManager) Update() {
@@ -620,6 +645,7 @@ func (pm *ProcessManager) containersMonitor() {
 		pm.reconcileLocalDeployments()
 		pm.deleteRemainingMicroservices()
 		pm.cleanupLocalModelsForWatchdog()
+		pm.cleanupLocalKnowledgeForWatchdog()
 		pm.pruneStaleProcessManagerStatuses()
 		pm.updateRunningMicroservicesCount()
 		pm.updateCurrentMicroservices()
@@ -1352,7 +1378,7 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			// If status is FAILED and Rebuild not requested, skip — do not re-add
 			if pmStatus := statusreporter.GetInstance().GetProcessManagerStatus(); pmStatus != nil {
 				if st := pmStatus.LookupMicroserviceStatus(ms.MicroserviceUUID); st != nil &&
-					st.Status == models.MicroserviceStateFailed && !ms.Rebuild && !ms.Models.HasItems() {
+					st.Status == models.MicroserviceStateFailed && !ms.Rebuild && !hasCatalogItems(ms) {
 					pm.logger.Debugf("Skipping failed microservice %s (rebuild not requested)", ms.MicroserviceUUID)
 					continue
 				}

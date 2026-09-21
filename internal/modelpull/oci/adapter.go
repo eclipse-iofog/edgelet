@@ -25,12 +25,15 @@ type Adapter struct {
 	HTTPClient *http.Client
 	// Source, when set, skips opening a remote repository (tests).
 	Source ArtifactSource
+	// GenericORAS skips model-spec, ModelPack, and ModelKit detectors and unpacks as ORAS.
+	// Knowledge pulls always set this so they never write a model-format layout.
+	GenericORAS bool
 }
 
 // Pull fetches the artifact, writes the shared store, and materializes content/.
 // spec.files is ignored for OCI artifacts; the full artifact is always extracted.
 func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.Result, error) {
-	if err := validateRequest(req); err != nil {
+	if err := a.validateRequest(req); err != nil {
 		return nil, err
 	}
 	resolved := modelpull.ResolveOCIRevision(req.Repo, req.Revision)
@@ -55,7 +58,10 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 		return nil, err
 	}
 
-	kind := format.Detect(ociManifest)
+	kind := format.KindORAS
+	if a == nil || !a.GenericORAS {
+		kind = format.Detect(ociManifest)
+	}
 
 	blobDescs := make([]ocispec.Descriptor, 0, 1+len(ociManifest.Layers))
 	blobDescs = append(blobDescs, ociManifest.Config)
@@ -132,7 +138,7 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 	}
 
 	var configJSON json.RawMessage
-	if ociManifest.Config.Digest != "" {
+	if (a == nil || !a.GenericORAS) && ociManifest.Config.Digest != "" {
 		if raw, readErr := store.ReadBlob(string(ociManifest.Config.Digest)); readErr == nil {
 			configJSON = json.RawMessage(raw)
 		}
@@ -184,14 +190,21 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 	}, nil
 }
 
-func validateRequest(req modelpull.Request) error {
+func (a *Adapter) validateRequest(req modelpull.Request) error {
+	noun := "model"
+	if a != nil && a.GenericORAS {
+		noun = "knowledge"
+	}
 	if strings.TrimSpace(req.Name) == "" {
-		return errors.New("model name is required")
+		return fmt.Errorf("%s name is required", noun)
 	}
 	if strings.TrimSpace(req.Repo) == "" {
-		return errors.New("model repo is required")
+		return fmt.Errorf("%s repo is required", noun)
 	}
 	if strings.TrimSpace(req.ModelsRoot) == "" {
+		if noun == "knowledge" {
+			return errors.New("knowledge root is required")
+		}
 		return errors.New("models root is required")
 	}
 	if req.Registry == nil {

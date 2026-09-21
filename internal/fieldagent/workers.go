@@ -403,6 +403,11 @@ func (fa *FieldAgent) getFogStatus() map[string]any {
 	status["activeModels"] = activeModels
 	status["modelLastUpdate"] = modelLastUpdate
 
+	knowledgeStatus, activeKnowledge, knowledgeLastUpdate := fa.fogKnowledgeStatus()
+	status["knowledgeStatus"] = knowledgeStatus
+	status["activeKnowledge"] = activeKnowledge
+	status["knowledgeLastUpdate"] = knowledgeLastUpdate
+
 	if phase := runtimestate.GetState().AgentPhase(); phase != "" {
 		status["runtimeAgentPhase"] = phase
 	}

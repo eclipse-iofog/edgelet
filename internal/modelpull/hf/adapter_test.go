@@ -27,6 +27,13 @@ type hubFixture struct {
 	failAfter map[string]int
 	mu        sync.Mutex
 	sawAuth   string
+	apiPaths  []string
+	// resolvePaths records every /resolve/ request so tests can assert
+	// dataset downloads use /datasets/{repo}/resolve/ and models do not.
+	resolvePaths []string
+	// requireDatasetResolve rejects model-style file URLs (as the Hub does
+	// for a dataset repo that has no matching model path).
+	requireDatasetResolve bool
 }
 
 func newHubFixture(repo string, files map[string][]byte) *hubFixture {
@@ -47,11 +54,22 @@ func (f *hubFixture) handler() http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/models/") {
+		if strings.HasPrefix(r.URL.Path, "/api/models/") || strings.HasPrefix(r.URL.Path, "/api/datasets/") {
+			f.mu.Lock()
+			f.apiPaths = append(f.apiPaths, r.URL.Path)
+			f.mu.Unlock()
 			f.serveInfo(w, r)
 			return
 		}
 		if idx := strings.Index(r.URL.Path, "/resolve/"); idx >= 0 {
+			f.mu.Lock()
+			f.resolvePaths = append(f.resolvePaths, r.URL.Path)
+			requireDataset := f.requireDatasetResolve
+			f.mu.Unlock()
+			if requireDataset && !strings.HasPrefix(r.URL.Path, "/datasets/") {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			f.serveFile(w, r)
 			return
 		}
@@ -402,6 +420,185 @@ func TestAdapterPull_ResumeInterruptedFile(t *testing.T) {
 		t.Fatalf("resume pull: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "resume", "content", "model.gguf"))
+	if err != nil {
+		t.Fatalf("read resumed content: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("resumed content mismatch (len=%d)", len(got))
+	}
+	if result.TotalBytes != int64(len(payload)) {
+		t.Fatalf("total bytes: got %d", result.TotalBytes)
+	}
+}
+
+func TestAdapterPull_DatasetUsesDatasetsAPI(t *testing.T) {
+	fixture := newHubFixture("acme/product-manuals", map[string][]byte{
+		"data/guide.jsonl":  []byte(`{"q":"hi"}`),
+		"index/faiss.index": []byte("idx"),
+		"README.md":         []byte("docs"),
+		"data/extra.jsonl":  []byte(`{"q":"bye"}`),
+		"skip/notes.txt":    []byte("nope"),
+	})
+	fixture.requireDatasetResolve = true
+	_, reg := startHub(t, fixture)
+	root := t.TempDir()
+	result, err := (&Adapter{RepoClass: RepoClassDataset}).Pull(context.Background(), modelpull.Request{
+		Name:       "product-docs",
+		Repo:       fixture.repo,
+		Revision:   fixtureCommit,
+		Registry:   reg,
+		Files:      []string{"data/**/*.jsonl", "index/faiss.index"},
+		ModelsRoot: root,
+		FormatHint: models.KnowledgeFormatJSONL,
+	})
+	if err != nil {
+		t.Fatalf("dataset pull: %v", err)
+	}
+	if result.Format != models.KnowledgeFormatJSONL {
+		t.Fatalf("format: got %q", result.Format)
+	}
+	for _, name := range []string{"data/guide.jsonl", "data/extra.jsonl", "index/faiss.index"} {
+		if _, err := os.Stat(filepath.Join(root, "product-docs", "content", name)); err != nil {
+			t.Fatalf("missing %s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "product-docs", "content", "README.md")); !os.IsNotExist(err) {
+		t.Fatal("glob must not pull README.md")
+	}
+	if _, err := os.Stat(filepath.Join(root, "product-docs", "content", "skip/notes.txt")); !os.IsNotExist(err) {
+		t.Fatal("glob must not pull unmatched paths")
+	}
+	fixture.mu.Lock()
+	paths := append([]string(nil), fixture.apiPaths...)
+	resolvePaths := append([]string(nil), fixture.resolvePaths...)
+	fixture.mu.Unlock()
+	if len(paths) == 0 {
+		t.Fatal("expected hub dataset API request")
+	}
+	for _, p := range paths {
+		if !strings.Contains(p, "/api/datasets/") {
+			t.Fatalf("knowledge pull must use /api/datasets/, got %q", p)
+		}
+		if strings.Contains(p, "/api/models/") {
+			t.Fatalf("knowledge pull must not use /api/models/, got %q", p)
+		}
+	}
+	if len(resolvePaths) == 0 {
+		t.Fatal("expected hub dataset file download")
+	}
+	for _, p := range resolvePaths {
+		if !strings.Contains(p, "/datasets/") || !strings.Contains(p, "/resolve/") {
+			t.Fatalf("knowledge file download must use /datasets/{repo}/resolve/, got %q", p)
+		}
+	}
+}
+
+func TestAdapterPull_ModelUsesModelsAPI(t *testing.T) {
+	fixture := newHubFixture("org/weights", map[string][]byte{"model.gguf": []byte("g")})
+	_, reg := startHub(t, fixture)
+	_, err := (&Adapter{}).Pull(context.Background(), modelpull.Request{
+		Name:       "llama-2-7b-q2k",
+		Repo:       fixture.repo,
+		Registry:   reg,
+		Files:      []string{"model.gguf"},
+		ModelsRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("model pull: %v", err)
+	}
+	fixture.mu.Lock()
+	paths := append([]string(nil), fixture.apiPaths...)
+	resolvePaths := append([]string(nil), fixture.resolvePaths...)
+	fixture.mu.Unlock()
+	if len(paths) == 0 {
+		t.Fatal("expected hub model API request")
+	}
+	for _, p := range paths {
+		if !strings.Contains(p, "/api/models/") {
+			t.Fatalf("model pull must use /api/models/, got %q", p)
+		}
+		if strings.Contains(p, "/api/datasets/") {
+			t.Fatalf("model pull must not use /api/datasets/, got %q", p)
+		}
+	}
+	if len(resolvePaths) == 0 {
+		t.Fatal("expected hub model file download")
+	}
+	for _, p := range resolvePaths {
+		if strings.Contains(p, "/datasets/") {
+			t.Fatalf("model file download must not use /datasets/, got %q", p)
+		}
+		if !strings.Contains(p, "/resolve/") {
+			t.Fatalf("model file download must use /{repo}/resolve/, got %q", p)
+		}
+	}
+}
+
+func TestAdapterPull_DatasetSnapshotEmptyFiles(t *testing.T) {
+	fixture := newHubFixture("acme/corpus", map[string][]byte{
+		"data/a.jsonl": []byte("a"),
+		"data/b.jsonl": []byte("b"),
+		"README.md":    []byte("all-of-it"),
+	})
+	fixture.requireDatasetResolve = true
+	_, reg := startHub(t, fixture)
+	root := t.TempDir()
+	result, err := (&Adapter{RepoClass: RepoClassDataset}).Pull(context.Background(), modelpull.Request{
+		Name:       "corpus",
+		Repo:       fixture.repo,
+		Revision:   "",
+		Registry:   reg,
+		Files:      []string{},
+		ModelsRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("dataset snapshot: %v", err)
+	}
+	if !result.RevisionFloating || result.RevisionKind != modelpull.RevisionKindBranch {
+		t.Fatalf("empty revision should float on main, got %+v", result)
+	}
+	if result.Format != models.KnowledgeFormatUnknown {
+		t.Fatalf("empty format hint should be unknown, got %q", result.Format)
+	}
+	for _, name := range []string{"data/a.jsonl", "data/b.jsonl", "README.md"} {
+		if _, err := os.Stat(filepath.Join(root, "corpus", "content", name)); err != nil {
+			t.Fatalf("snapshot missing %s: %v", name, err)
+		}
+	}
+}
+
+func TestAdapterPull_DatasetResumeInterruptedFile(t *testing.T) {
+	payload := bytes.Repeat([]byte("K"), 32*1024)
+	fixture := newHubFixture("acme/resume-docs", map[string][]byte{"data/guide.jsonl": payload})
+	fixture.requireDatasetResolve = true
+	fixture.failAfter["data/guide.jsonl"] = 4096
+	_, reg := startHub(t, fixture)
+	root := t.TempDir()
+	req := modelpull.Request{
+		Name:       "resume-docs",
+		Repo:       fixture.repo,
+		Registry:   reg,
+		Files:      []string{"data/guide.jsonl"},
+		ModelsRoot: root,
+	}
+	adapter := &Adapter{RepoClass: RepoClassDataset}
+	_, err := adapter.Pull(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected first pull to fail on interrupted download")
+	}
+	partial := filepath.Join(root, "resume-docs", "content.tmp", "data/guide.jsonl"+modelpull.IncompleteExt)
+	if fi, statErr := os.Stat(partial); statErr != nil || fi.Size() == 0 {
+		t.Fatalf("expected partial download to be retained, err=%v", statErr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "resume-docs", "manifest.json")); !os.IsNotExist(err) {
+		t.Fatal("manifest.json must not be written for a failed pull")
+	}
+
+	result, err := adapter.Pull(context.Background(), req)
+	if err != nil {
+		t.Fatalf("resume pull: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "resume-docs", "content", "data/guide.jsonl"))
 	if err != nil {
 		t.Fatalf("read resumed content: %v", err)
 	}

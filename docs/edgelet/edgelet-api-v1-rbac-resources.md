@@ -100,6 +100,32 @@ Evaluator alias policy is canonical + alias tolerant:
   - Resource: `models/prune`
   - Verb: `create`
 
+- Endpoint: `GET /v1/knowledge`
+  - Resource: `knowledge`
+  - Verb: `get`
+
+- Endpoint: `GET /v1/knowledge/{name}`
+  - Resource: `knowledge`
+  - Verb: `get`
+  - ResourceName: `{name}`
+
+- Endpoint: `DELETE /v1/knowledge/{name}`
+  - Resource: `knowledge`
+  - Verb: `delete`
+  - ResourceName: `{name}`
+
+- Endpoint: `POST /v1/knowledge:pull`
+  - Resource: `knowledge/pull`
+  - Verb: `create`
+
+- Endpoint: `GET /v1/knowledge:pull/{operationId}`
+  - Resource: `knowledge/pull/status`
+  - Verb: `get`
+
+- Endpoint: `POST /v1/knowledge:prune`
+  - Resource: `knowledge/prune`
+  - Verb: `create`
+
 - Endpoint: `GET /v1/volumes`
   - Resource: `volumes`
   - Verb: `get`
@@ -273,6 +299,14 @@ Evaluator alias policy is canonical + alias tolerant:
 
 - Endpoint: `POST /v1/deploy/models:validate`
   - Resource: `deploy/models`
+  - Verb: `create`
+
+- Endpoint: `POST /v1/deploy/knowledge:apply`
+  - Resource: `deploy/knowledge`
+  - Verb: `create`
+
+- Endpoint: `POST /v1/deploy/knowledge:validate`
+  - Resource: `deploy/knowledge`
   - Verb: `create`
 
 - Endpoint: `POST /v1/deploy/runtimeclasses:apply`

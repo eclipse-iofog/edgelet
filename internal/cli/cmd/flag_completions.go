@@ -43,3 +43,15 @@ func registerModelFormatCompletion(cmd *cobra.Command) {
 		return []string{"gguf", "safetensors", "onnx", "pytorch", "tensorrt", "unknown"}, cobra.ShellCompDirectiveNoFileComp
 	})
 }
+
+func registerKnowledgePruneModeCompletion(cmd *cobra.Command) {
+	_ = cmd.RegisterFlagCompletionFunc("mode", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"dangling"}, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+func registerKnowledgeFormatCompletion(cmd *cobra.Command) {
+	_ = cmd.RegisterFlagCompletionFunc("format", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"markdown", "pdf", "jsonl", "parquet", "arrow", "sqlite", "faiss", "chroma", "lance", "unknown"}, cobra.ShellCompDirectiveNoFileComp
+	})
+}

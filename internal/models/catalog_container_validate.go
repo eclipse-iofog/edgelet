@@ -66,6 +66,101 @@ func ValidateModelCatalog(c *ModelCatalog, volumeDests, tmpfsPaths []string) err
 	return nil
 }
 
+// ValidateKnowledgeCatalog checks knowledge catalog shape, permissions, duplicates, and path collisions.
+// Occupied paths include volumes, tmpfs, and model catalog bindPath / {bindPath}/{name}.
+// Omitted catalog or empty items do not require bindPath. Permissions default to ro when items are present.
+func ValidateKnowledgeCatalog(c *KnowledgeCatalog, volumeDests, tmpfsPaths, modelPaths []string) error {
+	if c == nil || !c.HasItems() {
+		return nil
+	}
+	c.NormalizeDefaults()
+	if c.BindPath == "" {
+		return errors.New("spec.knowledge.bindPath is required when items are set")
+	}
+	if !path.IsAbs(c.BindPath) {
+		return errors.New("spec.knowledge.bindPath must be an absolute container path")
+	}
+	switch c.Permissions {
+	case KnowledgeCatalogPermRO, KnowledgeCatalogPermRW:
+	default:
+		return errors.New("spec.knowledge.permissions must be ro or rw")
+	}
+
+	seen := make(map[string]struct{}, len(c.Items))
+	occupied := make(map[string]string)
+	for _, dest := range volumeDests {
+		key := cleanContainerPath(dest)
+		if key != "" {
+			occupied[key] = "volume"
+		}
+	}
+	for _, dest := range tmpfsPaths {
+		key := cleanContainerPath(dest)
+		if key != "" {
+			occupied[key] = "tmpfs"
+		}
+	}
+	for _, dest := range modelPaths {
+		key := cleanContainerPath(dest)
+		if key != "" {
+			occupied[key] = "models catalog"
+		}
+	}
+
+	bind := cleanContainerPath(c.BindPath)
+	if kind, ok := occupied[bind]; ok {
+		return fmt.Errorf("spec.knowledge.bindPath %q collides with a %s container path", c.BindPath, kind)
+	}
+
+	for i, item := range c.Items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return fmt.Errorf("spec.knowledge.items[%d].name is required", i)
+		}
+		if len(name) > 63 || !localDeployNamePattern.MatchString(name) {
+			return fmt.Errorf("spec.knowledge.items[%d].name must match DNS-1123 label format", i)
+		}
+		if _, dup := seen[name]; dup {
+			return fmt.Errorf("spec.knowledge.items[%d].name %q is duplicated", i, name)
+		}
+		seen[name] = struct{}{}
+		itemPath := path.Join(bind, name)
+		if kind, ok := occupied[itemPath]; ok {
+			return fmt.Errorf("catalog path %q collides with a %s container path", itemPath, kind)
+		}
+	}
+	return nil
+}
+
+// collectModelCatalogPaths returns bindPath and {bindPath}/{name} for a models catalog.
+func collectModelCatalogPaths(c *ModelCatalog) []string {
+	if c == nil || !c.HasItems() {
+		return nil
+	}
+	c.NormalizeDefaults()
+	bind := cleanContainerPath(c.BindPath)
+	out := make([]string, 0, 1+len(c.Items))
+	if bind != "" {
+		out = append(out, bind)
+	}
+	for _, item := range c.Items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" || bind == "" {
+			continue
+		}
+		out = append(out, path.Join(bind, name))
+	}
+	return out
+}
+
+// ValidateWorkloadCatalogs validates models and knowledge catalogs, including collisions between them.
+func ValidateWorkloadCatalogs(models *ModelCatalog, knowledge *KnowledgeCatalog, volumeDests, tmpfsPaths []string) error {
+	if err := ValidateModelCatalog(models, volumeDests, tmpfsPaths); err != nil {
+		return err
+	}
+	return ValidateKnowledgeCatalog(knowledge, volumeDests, tmpfsPaths, collectModelCatalogPaths(models))
+}
+
 // ValidateCatalogModelSources checks that every named item exists with the required source.
 func ValidateCatalogModelSources(c *ModelCatalog, requiredSource string, lookup ModelSourceLookup) error {
 	if c == nil || !c.HasItems() {

@@ -84,6 +84,11 @@ func TestContainerConfigFromMicroservice_SpecMatrix(t *testing.T) {
 		Permissions: "ro",
 		Items:       []models.ModelCatalogItem{{Name: "test-model"}},
 	}
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: "ro",
+		Items:       []models.KnowledgeCatalogItem{{Name: "product-docs"}},
+	}
 
 	cfg, err := ContainerConfigFromMicroservice(ms, "host", nil, "0.log", "", "", "sandbox-1", "node-1")
 	if err != nil {
@@ -122,10 +127,13 @@ func TestContainerConfigFromMicroservice_SpecMatrix(t *testing.T) {
 		t.Fatalf("devices = %+v", cfg.Devices)
 	}
 
-	var catalogRO, tmpfs, shmMount bool
+	var catalogRO, knowledgeRO, tmpfs, shmMount bool
 	for _, m := range cfg.Mounts {
 		if m.ContainerPath == "/models" && m.Readonly {
 			catalogRO = true
+		}
+		if m.ContainerPath == "/knowledge" && m.Readonly {
+			knowledgeRO = true
 		}
 		if m.ContainerPath == "/tmp" {
 			tmpfs = true
@@ -134,8 +142,8 @@ func TestContainerConfigFromMicroservice_SpecMatrix(t *testing.T) {
 			shmMount = true
 		}
 	}
-	if !catalogRO || !tmpfs || !shmMount {
-		t.Fatalf("mounts catalogRO=%v tmpfs=%v shm=%v mounts=%v", catalogRO, tmpfs, shmMount, cfg.Mounts)
+	if !catalogRO || !knowledgeRO || !tmpfs || !shmMount {
+		t.Fatalf("mounts catalogRO=%v knowledgeRO=%v tmpfs=%v shm=%v mounts=%v", catalogRO, knowledgeRO, tmpfs, shmMount, cfg.Mounts)
 	}
 
 	pod := PodSandboxConfigFromMicroservice(ms, "host", "/logs", "node-1")

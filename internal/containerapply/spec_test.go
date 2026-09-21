@@ -1,6 +1,7 @@
 package containerapply
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -116,6 +117,45 @@ func TestCatalogBindROVsRW(t *testing.T) {
 	_, _, ro, ok = CatalogBind(ms, "/var/lib/edgelet")
 	if !ok || ro {
 		t.Fatal("rw bind must not be read-only")
+	}
+}
+
+func TestKnowledgeCatalogBindROVsRW(t *testing.T) {
+	ms := models.NewMicroservice("ms-1", "alpine:3.19")
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: "ro",
+		Items:       []models.KnowledgeCatalogItem{{Name: "product-docs"}},
+	}
+	host, dest, ro, ok := KnowledgeCatalogBind(ms, "/var/lib/edgelet")
+	if !ok || !ro || dest != "/knowledge" || !strings.Contains(host, "/volumes/microservices/ms-1/knowledge") {
+		t.Fatalf("ro bind: host=%q dest=%q ro=%v ok=%v", host, dest, ro, ok)
+	}
+	ms.Knowledge.Permissions = "rw"
+	_, _, ro, ok = KnowledgeCatalogBind(ms, "/var/lib/edgelet")
+	if !ok || ro {
+		t.Fatal("rw knowledge bind must not be read-only")
+	}
+}
+
+func TestFingerprintIgnoresKnowledgeCatalogItems(t *testing.T) {
+	ms := models.NewMicroservice("ms-1", "alpine:3.19")
+	ms.Knowledge = &models.KnowledgeCatalog{
+		BindPath:    "/knowledge",
+		Permissions: "ro",
+		Items:       []models.KnowledgeCatalogItem{{Name: "a"}},
+	}
+	a := FromMicroservice(ms)
+	ms.Knowledge.Items = append(ms.Knowledge.Items, models.KnowledgeCatalogItem{Name: "b"})
+	b := FromMicroservice(ms)
+	aj, _ := Marshal(a)
+	bj, _ := Marshal(b)
+	if aj != bj {
+		t.Fatalf("knowledge item membership must not change fingerprint:\n%s\n%s", aj, bj)
+	}
+	ms.Knowledge.BindPath = "/corpus"
+	if MatchesLabel(aj, ms) {
+		t.Fatal("knowledge bindPath change must not match")
 	}
 }
 

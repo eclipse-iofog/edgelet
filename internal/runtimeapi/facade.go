@@ -19,6 +19,8 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgecatalog"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgemanager"
 	"github.com/eclipse-iofog/edgelet/internal/modelcatalog"
 	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -198,6 +200,9 @@ type Facade struct {
 
 	modelsMu sync.Mutex
 	models   *modelmanager.Manager
+
+	knowledgeMu sync.Mutex
+	knowledge   *knowledgemanager.Manager
 }
 
 // DeployProgressCallback reports deploy stage transitions from runtime flow.
@@ -737,7 +742,8 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		}
 		attachDurabilityInspect(item, lookupReporterMicroserviceStatus(f.sr, uuid), local.LastError, local.RestartCount)
 		f.attachPodID(item, local.ContainerID, "")
-		attachCatalogInspect(item, catalogFromLocalManifestYAML(local.ManifestYAML), models.ModelSourceLocal, modelcatalog.LookupFromStore(f.db), local.LastError)
+		modelsCat, knowledgeCat := catalogsFromLocalManifestYAML(local.ManifestYAML)
+		attachWorkloadCatalogInspect(item, modelsCat, knowledgeCat, models.ModelSourceLocal, modelcatalog.LookupFromStore(f.db), knowledgecatalog.LookupFromStore(f.db), local.LastError)
 		return item, nil
 	}
 	pmStatus := f.sr.GetProcessManagerStatus()
@@ -752,11 +758,13 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 	application := ""
 	image := ""
 	var catalog *models.ModelCatalog
+	var knowledge *models.KnowledgeCatalog
 	if ms := f.fa.FindLatestMicroserviceByUUID(uuid); ms != nil {
 		name = ms.MicroserviceName
 		application = ms.ApplicationName
 		image = ms.ImageName
 		catalog = ms.Models
+		knowledge = ms.Knowledge
 	}
 	storedStatus := ""
 	if status.ErrorMessage != nil {
@@ -782,7 +790,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 	}
 	attachDurabilityInspect(item, status, "", 0)
 	f.attachPodID(item, status.ContainerID, status.PodID)
-	attachCatalogInspect(item, catalog, models.ModelSourceManaged, modelcatalog.LookupFromStore(f.db), storedStatus)
+	attachWorkloadCatalogInspect(item, catalog, knowledge, models.ModelSourceManaged, modelcatalog.LookupFromStore(f.db), knowledgecatalog.LookupFromStore(f.db), storedStatus)
 	return item, nil
 }
 
@@ -1442,6 +1450,12 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			return "", nil, err
 		}
 	}
+	if f.db != nil && f.db.Conn() != nil && doc.Spec.Knowledge.HasItems() {
+		if err := doc.ValidateKnowledgeCatalogApply(knowledgecatalog.LookupFromStore(f.db)); err != nil {
+			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy knowledge catalog validation failed: %v", err))
+			return "", nil, err
+		}
+	}
 	var existing *models.LocalDeployedMicroservice
 	deploymentID := uuid.NewString()
 	if f.db.Conn() != nil {
@@ -1556,6 +1570,9 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			disk, _ := f.liveDiskPolicy()
 			if _, prepErr := modelcatalog.Prepare(disk, f.db, localMS, models.ModelSourceLocal, false); prepErr != nil {
 				logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy catalog refresh failed deploymentId=%s err=%v", deploymentID, prepErr))
+			}
+			if _, prepErr := knowledgecatalog.Prepare(disk, f.db, localMS, models.KnowledgeSourceLocal, false); prepErr != nil {
+				logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy knowledge catalog refresh failed deploymentId=%s err=%v", deploymentID, prepErr))
 			}
 		}
 		emitDeployProgress(progress, DeployStageDone, "deployment completed")

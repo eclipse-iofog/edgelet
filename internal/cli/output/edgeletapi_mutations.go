@@ -29,13 +29,17 @@ func formatMutationRoute(routePath string, result map[string]any) string {
 		return formatImageRemoveResult(result)
 	case "/v1/models:prune":
 		return formatModelPruneResult(result)
+	case "/v1/knowledge:prune":
+		return formatKnowledgePruneResult(result)
 	case "/v1/volumes:prune":
 		return formatVolumePruneResult(result)
 	case "/v1/models:pull":
 		return formatModelPullResult(result)
-	case "/v1/deploy/microservices:validate", "/v1/deploy/registries:validate", "/v1/deploy/models:validate", "/v1/deploy/runtimeclasses:validate", "/v1/deploy/controlplane:validate":
+	case "/v1/knowledge:pull":
+		return formatKnowledgePullResult(result)
+	case "/v1/deploy/microservices:validate", "/v1/deploy/registries:validate", "/v1/deploy/models:validate", "/v1/deploy/knowledge:validate", "/v1/deploy/runtimeclasses:validate", "/v1/deploy/controlplane:validate":
 		return formatDeployValidateResult(result)
-	case "/v1/deploy/microservices:apply", "/v1/deploy/registries:apply", "/v1/deploy/models:apply", "/v1/deploy/runtimeclasses:apply", "/v1/deploy/controlplane:apply":
+	case "/v1/deploy/microservices:apply", "/v1/deploy/registries:apply", "/v1/deploy/models:apply", "/v1/deploy/knowledge:apply", "/v1/deploy/runtimeclasses:apply", "/v1/deploy/controlplane:apply":
 		return formatDeployApplyResult(result)
 	case "/v1/system/controlplane/restart":
 		return formatControlPlaneRestartResult(result)
@@ -54,6 +58,11 @@ func formatMutationRoute(routePath string, result map[string]any) string {
 		if strings.HasPrefix(routePath, "/v1/models/") {
 			if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
 				return formatModelRemoveResult(result)
+			}
+		}
+		if strings.HasPrefix(routePath, "/v1/knowledge/") {
+			if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+				return formatKnowledgeRemoveResult(result)
 			}
 		}
 		if strings.HasPrefix(routePath, "/v1/volumes/shared/") {
@@ -274,6 +283,38 @@ func formatModelRemoveResult(result map[string]any) string {
 	return "model removed successfully"
 }
 
+func formatKnowledgePullResult(result map[string]any) string {
+	if name := MapValueAsString(result, "name"); name != "<unknown>" {
+		return fmt.Sprintf("knowledge pulled successfully: %s", name)
+	}
+	return "knowledge pulled successfully"
+}
+
+func formatKnowledgePruneResult(result map[string]any) string {
+	removed := result["removed"]
+	count := 0
+	switch v := removed.(type) {
+	case []any:
+		count = len(v)
+	case []string:
+		count = len(v)
+	}
+	if count == 0 {
+		if n := MapValueAsString(result, "removedCount"); n != "<unknown>" {
+			return fmt.Sprintf("pruned dangling knowledge: removed=%s", n)
+		}
+		return "pruned dangling knowledge: removed=0"
+	}
+	return fmt.Sprintf("pruned dangling knowledge: removed=%d", count)
+}
+
+func formatKnowledgeRemoveResult(result map[string]any) string {
+	if name := MapValueAsString(result, "name"); name != "<unknown>" {
+		return fmt.Sprintf("knowledge removed successfully (name=%s)", name)
+	}
+	return "knowledge removed successfully"
+}
+
 func formatVolumeRemoveResult(result map[string]any, shared bool) string {
 	if shared {
 		if name := MapValueAsString(result, "name"); name != "<unknown>" {
@@ -433,6 +474,11 @@ func formatDeployApplyResult(result map[string]any) string {
 				return fmt.Sprintf("model manifest applied successfully (name=%s)", name)
 			}
 			return "model manifest applied successfully"
+		case "knowledge":
+			if name := MapValueAsString(result, "name"); name != "<unknown>" {
+				return fmt.Sprintf("knowledge manifest applied successfully (name=%s)", name)
+			}
+			return "knowledge manifest applied successfully"
 		case "microservice":
 			if id := MapValueAsString(result, "deploymentId"); id != "<unknown>" {
 				return fmt.Sprintf("microservice manifest applied successfully (deploymentId=%s)", id)

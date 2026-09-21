@@ -1,0 +1,20 @@
+# Tiny public Hub dataset for local / Lima functional tests.
+# Do not use docs/edgelet/examples/knowledge.yaml here — those repos are examples only.
+#
+# Built-in registry id 3 is https://huggingface.co (hf).
+# Hugging Face Knowledge always uses the Hub dataset API (not /api/models/).
+# Apply:  edgelet deploy -f test/deployment-yamls/knowledge-hf-tiny.yaml
+# Pull:   edgelet knowledge pull tiny-docs
+# Bind:   edgelet deploy -f test/deployment-yamls/microservice-knowledge-catalog.yaml
+
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: tiny-docs
+spec:
+  repo: hf-internal-testing/dataset_with_data_files
+  revision: c19550d35263090b1ec2bfefdbd737431fafec40
+  registry: 3
+  files:
+    - data/train.txt
+  format: unknown

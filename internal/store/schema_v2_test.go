@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -126,8 +125,8 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 3 {
-		t.Fatalf("expected schema version 3 after upgrade, got %d", maxVersion)
+	if maxVersion != 4 {
+		t.Fatalf("expected schema version 4 after upgrade, got %d", maxVersion)
 	}
 
 	got, err := db.GetLocalRegistry(5)
@@ -195,32 +194,7 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 	if !tableExists(t, db, "persistent_volumes") {
 		t.Fatal("expected persistent_volumes after schema v3")
 	}
-}
-
-func TestSchemaVersionIs3(t *testing.T) {
-	entries, err := migrationFiles.ReadDir("migrations")
-	if err != nil {
-		t.Fatalf("read migrations: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		version, err := parseMigrationVersion(entry.Name())
-		if err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-		if version > 3 {
-			t.Fatalf("schema version must stay at 3; found %s", entry.Name())
-		}
-	}
-
-	db := openFreshStoreDB(t)
-	var maxVersion int
-	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
-		t.Fatalf("schema version: %v", err)
-	}
-	if maxVersion != 3 {
-		t.Fatalf("expected schema version 3, got %d", maxVersion)
+	if !tableExists(t, db, "local_knowledge") || !tableExists(t, db, "controller_knowledge") {
+		t.Fatal("expected knowledge tables after schema v4")
 	}
 }

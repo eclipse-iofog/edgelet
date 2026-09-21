@@ -426,6 +426,13 @@ func buildCRIMounts(ms *models.Microservice, hostsFilePath string, resolvFilePat
 			Readonly:      readOnly,
 		})
 	}
+	if host, dest, readOnly, ok := containerapply.KnowledgeCatalogBind(ms, diskDir); ok {
+		mounts = append(mounts, &runtimeapi.Mount{
+			ContainerPath: dest,
+			HostPath:      host,
+			Readonly:      readOnly,
+		})
+	}
 
 	for _, t := range ms.Tmpfs {
 		p := strings.TrimSpace(t.ContainerPath)

@@ -22,6 +22,11 @@ func Root(diskDirectory string) string {
 	return filepath.Join(diskDirectory, "models")
 }
 
+// KnowledgeRoot returns {diskDirectory}/knowledge.
+func KnowledgeRoot(diskDirectory string) string {
+	return filepath.Join(diskDirectory, "knowledge")
+}
+
 // OCIStoreDir returns {modelsRoot}/oci-store.
 func OCIStoreDir(modelsRoot string) string {
 	return filepath.Join(modelsRoot, OCIStoreDirName)

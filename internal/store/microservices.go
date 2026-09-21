@@ -82,7 +82,7 @@ func (d *DB) LoadControllerMicroservices() ([]*models.Microservice, error) {
 		annotations, pid_mode, ipc_mode, cpu_set_cpus, memory_limit,
 		port_mappings, volume_mappings, env_vars, args,
 		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck,
-		models, sysctls, ulimits, devices, tmpfs,
+		models, knowledge, sysctls, ulimits, devices, tmpfs,
 		entrypoint, commands, run_as_group, read_only_root_filesystem,
 		cpus, memory_reservation, memory_swap, shm_size, working_dir
 	FROM controller_microservices ORDER BY uuid`)
@@ -134,6 +134,10 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 	if err != nil {
 		return fmt.Errorf("marshal models: %w", err)
 	}
+	knowledgeJSON, err := ms.MarshalKnowledgeJSON()
+	if err != nil {
+		return fmt.Errorf("marshal knowledge: %w", err)
+	}
 	sysctlsJSON, err := marshalJSONDefault(ms.Sysctls, "{}")
 	if err != nil {
 		return fmt.Errorf("marshal sysctls: %w", err)
@@ -161,12 +165,12 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		annotations, pid_mode, ipc_mode, cpu_set_cpus, memory_limit,
 		port_mappings, volume_mappings, env_vars, args,
 		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck,
-		models, sysctls, ulimits, devices, tmpfs,
+		models, knowledge, sysctls, ulimits, devices, tmpfs,
 		entrypoint, commands, run_as_group, read_only_root_filesystem,
 		cpus, memory_reservation, memory_swap, shm_size, working_dir,
 		updated_at
 	) VALUES (
-		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 	)`,
 		ms.MicroserviceUUID, ms.ImageName, ms.ContainerID, ms.RegistryID,
 		boolToInt(ms.Rebuild), boolToInt(ms.HostNetworkMode), boolToInt(ms.IsPrivileged), ms.LogSize,
@@ -178,7 +182,7 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		string(portMappingsJSON), string(volumeMappingsJSON), string(envVarsJSON), string(argsJSON),
 		string(cdiDevsJSON), string(capAddJSON), string(capDropJSON), string(extraHostsJSON),
 		healthcheckJSON,
-		modelsJSON, sysctlsJSON, ulimitsJSON, devicesJSON, tmpfsJSON,
+		modelsJSON, knowledgeJSON, sysctlsJSON, ulimitsJSON, devicesJSON, tmpfsJSON,
 		encodeOptionalArgv(ms.Entrypoint), encodeOptionalArgv(ms.Commands), ms.RunAsGroup,
 		boolToInt(ms.ReadOnlyRootFilesystem),
 		ms.Cpus, ms.MemoryReservation, ms.MemorySwap, ms.ShmSize, ms.WorkingDir,
@@ -191,17 +195,17 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 	ms := &models.Microservice{}
 
 	var (
-		rebuild, hostNetworkMode, isPrivileged, isRouter  int
-		isNats, deleteFlag, deleteWithCleanup             int
-		isStuckInRestart, isUpdating                      int
-		portMappingsJSON, volumeMappingsJSON, envVarsJSON string
-		argsJSON, cdiDevsJSON, capAddJSON, capDropJSON    string
-		extraHostsJSON                                    string
-		healthcheckJSON                                   *string
-		modelsJSON, sysctlsJSON, ulimitsJSON              string
-		devicesJSON, tmpfsJSON                            string
-		entrypointJSON, commandsJSON                      *string
-		readOnlyRoot                                      int
+		rebuild, hostNetworkMode, isPrivileged, isRouter    int
+		isNats, deleteFlag, deleteWithCleanup               int
+		isStuckInRestart, isUpdating                        int
+		portMappingsJSON, volumeMappingsJSON, envVarsJSON   string
+		argsJSON, cdiDevsJSON, capAddJSON, capDropJSON      string
+		extraHostsJSON                                      string
+		healthcheckJSON                                     *string
+		modelsJSON, knowledgeJSON, sysctlsJSON, ulimitsJSON string
+		devicesJSON, tmpfsJSON                              string
+		entrypointJSON, commandsJSON                        *string
+		readOnlyRoot                                        int
 	)
 
 	err := rows.Scan(
@@ -214,7 +218,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		&ms.Annotations, &ms.PidMode, &ms.IpcMode, &ms.CPUSetCpus, &ms.MemoryLimit,
 		&portMappingsJSON, &volumeMappingsJSON, &envVarsJSON, &argsJSON,
 		&cdiDevsJSON, &capAddJSON, &capDropJSON, &extraHostsJSON, &healthcheckJSON,
-		&modelsJSON, &sysctlsJSON, &ulimitsJSON, &devicesJSON, &tmpfsJSON,
+		&modelsJSON, &knowledgeJSON, &sysctlsJSON, &ulimitsJSON, &devicesJSON, &tmpfsJSON,
 		&entrypointJSON, &commandsJSON, &ms.RunAsGroup, &readOnlyRoot,
 		&ms.Cpus, &ms.MemoryReservation, &ms.MemorySwap, &ms.ShmSize, &ms.WorkingDir,
 	)
@@ -249,6 +253,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		_ = json.Unmarshal([]byte(*healthcheckJSON), ms.Healthcheck)
 	}
 	_ = ms.UnmarshalModelsJSON(modelsJSON)
+	_ = ms.UnmarshalKnowledgeJSON(knowledgeJSON)
 	_ = json.Unmarshal([]byte(sysctlsJSON), &ms.Sysctls)
 	_ = json.Unmarshal([]byte(ulimitsJSON), &ms.Ulimits)
 	_ = json.Unmarshal([]byte(devicesJSON), &ms.Devices)

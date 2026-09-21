@@ -73,8 +73,9 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 		}
 
-		// Process prune change (images + unused local models only; persistent
-		// VOLUME data is reclaimed only by explicit volume commands).
+		// Process prune change (images + unused local models + unused local
+		// Knowledge). Persistent VOLUME data is reclaimed only by explicit
+		// volume commands.
 		if prune, ok := changes["prune"].(bool); ok && prune && !initialization {
 			logging.LogDebug(moduleName, "Processing prune change")
 			if err := fa.pruneDanglingImages(); err != nil {
@@ -83,6 +84,10 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 			if err := fa.pruneUnusedLocalModels(); err != nil {
 				logging.LogError(moduleName, "Unable to prune unused local models", err)
+				resetChanges = false
+			}
+			if err := fa.pruneUnusedLocalKnowledge(); err != nil {
+				logging.LogError(moduleName, "Unable to prune unused local knowledge", err)
 				resetChanges = false
 			}
 			_ = fa.pruneVolumesFn
@@ -114,6 +119,19 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 		}
 
+		// Process knowledge change
+		if knowledgeFlag, ok := changes["knowledge"].(bool); ok && (knowledgeFlag || initialization) {
+			if initialization && fa.shouldSkipInitReload() {
+				logging.LogDebug(moduleName, "skipping init knowledge reload; reconnect reconcile already completed")
+			} else {
+				logging.LogDebug(moduleName, "Processing knowledge change")
+				if err := fa.loadKnowledge(false); err != nil {
+					logging.LogError(moduleName, "Unable to update knowledge", err)
+					resetChanges = false
+				}
+			}
+		}
+
 		// Process runtimeClasses change
 		if runtimeClassesFlag, ok := changes["runtimeClasses"].(bool); ok && (runtimeClassesFlag || initialization) {
 			if initialization && fa.shouldSkipInitReload() {
@@ -140,17 +158,21 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 		if !ok {
 			microserviceModels = false
 		}
+		microserviceKnowledge, ok := changes["microserviceKnowledge"].(bool)
+		if !ok {
+			microserviceKnowledge = false
+		}
 		execSessions, ok := changes["execSessions"].(bool)
 		if !ok {
 			execSessions = false
 		}
 
-		if microserviceConfig || microserviceList || microserviceModels || initialization {
+		if microserviceConfig || microserviceList || microserviceModels || microserviceKnowledge || initialization {
 			if initialization && fa.shouldSkipInitReload() {
 				logging.LogDebug(moduleName, "skipping init microservices reload; reconnect reconcile already completed")
 			} else {
-				logging.LogDebug(moduleName, fmt.Sprintf("Processing microservice related changes - microserviceConfig: %v, microserviceList: %v, microserviceModels: %v",
-					microserviceConfig, microserviceList, microserviceModels))
+				logging.LogDebug(moduleName, fmt.Sprintf("Processing microservice related changes - microserviceConfig: %v, microserviceList: %v, microserviceModels: %v, microserviceKnowledge: %v",
+					microserviceConfig, microserviceList, microserviceModels, microserviceKnowledge))
 
 				// One GET microservices for list and/or catalog-only flags.
 				microservices, err := fa.loadMicroservices(false)

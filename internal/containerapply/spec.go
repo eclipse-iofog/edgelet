@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/eclipse-iofog/edgelet/internal/knowledgecatalog"
 	"github.com/eclipse-iofog/edgelet/internal/modelcatalog"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
@@ -40,24 +41,26 @@ var rlimitTypes = map[string]string{
 }
 
 // Fingerprint is the recreate-relevant apply snapshot. Catalog item membership
-// is omitted so add/remove of models stays in-place when bindPath and permissions
-// are unchanged.
+// is omitted so add/remove of models or knowledge stays in-place when bindPath
+// and permissions are unchanged.
 type Fingerprint struct {
-	BindPath          string                   `json:"bindPath,omitempty"`
-	Permissions       string                   `json:"permissions,omitempty"`
-	Entrypoint        []string                 `json:"entrypoint,omitempty"`
-	Commands          []string                 `json:"commands,omitempty"`
-	WorkingDir        string                   `json:"workingDir,omitempty"`
-	RunAsGroup        string                   `json:"runAsGroup,omitempty"`
-	ReadOnlyRoot      bool                     `json:"readOnlyRoot,omitempty"`
-	Tmpfs             []models.TmpfsMount      `json:"tmpfs,omitempty"`
-	ShmSize           *int64                   `json:"shmSize,omitempty"`
-	Cpus              *float64                 `json:"cpus,omitempty"`
-	MemoryReservation *int64                   `json:"memoryReservation,omitempty"`
-	MemorySwap        *int64                   `json:"memorySwap,omitempty"`
-	Sysctls           map[string]string        `json:"sysctls,omitempty"`
-	Ulimits           map[string]models.Ulimit `json:"ulimits,omitempty"`
-	Devices           []models.DeviceMapping   `json:"devices,omitempty"`
+	BindPath             string                   `json:"bindPath,omitempty"`
+	Permissions          string                   `json:"permissions,omitempty"`
+	KnowledgeBindPath    string                   `json:"knowledgeBindPath,omitempty"`
+	KnowledgePermissions string                   `json:"knowledgePermissions,omitempty"`
+	Entrypoint           []string                 `json:"entrypoint,omitempty"`
+	Commands             []string                 `json:"commands,omitempty"`
+	WorkingDir           string                   `json:"workingDir,omitempty"`
+	RunAsGroup           string                   `json:"runAsGroup,omitempty"`
+	ReadOnlyRoot         bool                     `json:"readOnlyRoot,omitempty"`
+	Tmpfs                []models.TmpfsMount      `json:"tmpfs,omitempty"`
+	ShmSize              *int64                   `json:"shmSize,omitempty"`
+	Cpus                 *float64                 `json:"cpus,omitempty"`
+	MemoryReservation    *int64                   `json:"memoryReservation,omitempty"`
+	MemorySwap           *int64                   `json:"memorySwap,omitempty"`
+	Sysctls              map[string]string        `json:"sysctls,omitempty"`
+	Ulimits              map[string]models.Ulimit `json:"ulimits,omitempty"`
+	Devices              []models.DeviceMapping   `json:"devices,omitempty"`
 }
 
 // FromMicroservice builds the apply fingerprint for a microservice.
@@ -83,6 +86,13 @@ func FromMicroservice(ms *models.Microservice) Fingerprint {
 			fp.Permissions = models.ModelCatalogPermRO
 		}
 	}
+	if ms.Knowledge.HasItems() {
+		fp.KnowledgeBindPath = strings.TrimSpace(ms.Knowledge.BindPath)
+		fp.KnowledgePermissions = strings.ToLower(strings.TrimSpace(ms.Knowledge.Permissions))
+		if fp.KnowledgePermissions == "" {
+			fp.KnowledgePermissions = models.KnowledgeCatalogPermRO
+		}
+	}
 	if !models.UsesImageDefault(ms.Entrypoint) {
 		fp.Entrypoint = append([]string{}, (*ms.Entrypoint)...)
 	}
@@ -102,6 +112,8 @@ func FromMicroservice(ms *models.Microservice) Fingerprint {
 func (f Fingerprint) Empty() bool {
 	return f.BindPath == "" &&
 		f.Permissions == "" &&
+		f.KnowledgeBindPath == "" &&
+		f.KnowledgePermissions == "" &&
 		len(f.Entrypoint) == 0 &&
 		len(f.Commands) == 0 &&
 		f.WorkingDir == "" &&
@@ -168,6 +180,21 @@ func CatalogBind(ms *models.Microservice, diskDir string) (host, container strin
 	host = modelcatalog.HostDir(diskDir, ms.MicroserviceUUID)
 	perms := strings.ToLower(strings.TrimSpace(ms.Models.Permissions))
 	readOnly = perms != models.ModelCatalogPermRW
+	return host, container, readOnly, true
+}
+
+// KnowledgeCatalogBind is the single parent knowledge catalog mount (host projection → bindPath).
+func KnowledgeCatalogBind(ms *models.Microservice, diskDir string) (host, container string, readOnly bool, ok bool) {
+	if ms == nil || !ms.Knowledge.HasItems() {
+		return "", "", false, false
+	}
+	container = strings.TrimSpace(ms.Knowledge.BindPath)
+	if container == "" {
+		return "", "", false, false
+	}
+	host = knowledgecatalog.HostDir(diskDir, ms.MicroserviceUUID)
+	perms := strings.ToLower(strings.TrimSpace(ms.Knowledge.Permissions))
+	readOnly = perms != models.KnowledgeCatalogPermRW
 	return host, container, readOnly, true
 }
 

@@ -19,6 +19,7 @@ type applyFakeAPI struct {
 	statusCalls    []map[string]any
 	statusIndex    int
 	modelPulls     int
+	knowledgePulls int
 }
 
 func (f *applyFakeAPI) Request(method, path string, _ any) (map[string]any, error) {
@@ -31,6 +32,18 @@ func (f *applyFakeAPI) Request(method, path string, _ any) (map[string]any, erro
 			"status":      "succeeded",
 			"operationId": "model-pull-1",
 			"name":        "llama-2-7b-q2k",
+			"progress":    100,
+		}, nil
+	}
+	if method == "POST" && path == "/v1/knowledge:pull" {
+		f.knowledgePulls++
+		return map[string]any{"status": "running", "operationId": "knowledge-pull-1", "name": "product-docs"}, nil
+	}
+	if method == "GET" && strings.HasPrefix(path, "/v1/knowledge:pull/") {
+		return map[string]any{
+			"status":      "succeeded",
+			"operationId": "knowledge-pull-1",
+			"name":        "product-docs",
 			"progress":    100,
 		}, nil
 	}
@@ -57,6 +70,17 @@ func (f *applyFakeAPI) RequestMultipartFile(method, path, _, filePath string, fi
 			"kind":     "Model",
 			"name":     "test-model",
 			"model":    map[string]any{"name": "test-model"},
+		}, nil
+	}
+	if strings.Contains(path, "/knowledge") {
+		if fields["dryRun"] == "true" {
+			return map[string]any{"accepted": true, "dryRun": true, "kind": "Knowledge", "name": "product-docs"}, nil
+		}
+		return map[string]any{
+			"accepted":  true,
+			"kind":      "Knowledge",
+			"name":      "product-docs",
+			"knowledge": []any{map[string]any{"name": "product-docs"}},
 		}, nil
 	}
 	if fields["dryRun"] == "true" {
@@ -201,6 +225,63 @@ func TestExecute_ModelDryRunDoesNotPull(t *testing.T) {
 	}
 	if api.modelPulls != 0 {
 		t.Fatalf("expected no model pull on dry-run, got %d", api.modelPulls)
+	}
+}
+
+func TestExecute_KnowledgeApplyWaitsForPull(t *testing.T) {
+	manifest := writeManifest(t, "kind: Knowledge\napiVersion: edgelet.iofog.org/v1\nmetadata:\n  name: product-docs\n")
+	api := &applyFakeAPI{
+		startResult: map[string]any{
+			"accepted": true,
+			"kind":     "Knowledge",
+			"name":     "product-docs",
+		},
+	}
+	result, err := Execute(context.Background(), api, nil, Request{ManifestPath: manifest})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if api.multipartPath != "/v1/deploy/knowledge:apply" {
+		t.Fatalf("expected knowledge apply path, got %q", api.multipartPath)
+	}
+	if !strings.Contains(result.Human, "knowledge manifest applied successfully") {
+		t.Fatalf("unexpected human output: %s", result.Human)
+	}
+	if api.knowledgePulls != 1 {
+		t.Fatalf("expected 1 knowledge pull after apply, got %d", api.knowledgePulls)
+	}
+}
+
+func TestExecute_KnowledgeDryRunDoesNotPull(t *testing.T) {
+	manifest := writeManifest(t, "kind: Knowledge\napiVersion: edgelet.iofog.org/v1\nmetadata:\n  name: product-docs\n")
+	api := &applyFakeAPI{
+		startResult: map[string]any{
+			"accepted": true,
+			"dryRun":   true,
+			"kind":     "Knowledge",
+			"name":     "product-docs",
+		},
+	}
+	_, err := Execute(context.Background(), api, nil, Request{ManifestPath: manifest, DryRun: true})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if api.statusIndex != 0 {
+		t.Fatalf("expected no apply polling, status calls=%d", api.statusIndex)
+	}
+	if api.knowledgePulls != 0 {
+		t.Fatalf("expected no knowledge pull on dry-run, got %d", api.knowledgePulls)
+	}
+}
+
+func TestDetectTargetFromManifest_Knowledge(t *testing.T) {
+	path := writeManifest(t, "kind: Knowledge\napiVersion: edgelet.iofog.org/v1\n")
+	target, err := DetectTargetFromManifest(path)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if target != TargetKnowledge {
+		t.Fatalf("expected knowledge target, got %q", target)
 	}
 }
 

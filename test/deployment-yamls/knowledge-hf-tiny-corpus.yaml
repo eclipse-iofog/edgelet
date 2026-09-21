@@ -1,0 +1,17 @@
+# Second tiny Hub dataset file from the same repo as knowledge-hf-tiny.yaml.
+# Used as an in-place catalog add (same bindPath, extra items[].name).
+#
+# Apply after tiny-docs is Ready:
+#   edgelet deploy -f test/deployment-yamls/knowledge-hf-tiny-corpus.yaml
+
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: tiny-corpus
+spec:
+  repo: hf-internal-testing/dataset_with_data_files
+  revision: c19550d35263090b1ec2bfefdbd737431fafec40
+  registry: 3
+  files:
+    - data/test.txt
+  format: unknown

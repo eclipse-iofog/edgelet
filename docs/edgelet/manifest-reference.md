@@ -16,6 +16,7 @@ Validation runs in the daemon before apply. Shapes are defined in `internal/mode
 | Microservice | [examples/microservice.yaml](examples/microservice.yaml) | [Microservice](#microservice) |
 | Registry | [examples/registry.yaml](examples/registry.yaml) | [Registry](#registry) |
 | Model | [examples/model.yaml](examples/model.yaml) | [Model](#model) |
+| Knowledge | [examples/knowledge.yaml](examples/knowledge.yaml) | [Knowledge](#knowledge) |
 | RuntimeClass | [examples/runtimeclass.yaml](examples/runtimeclass.yaml), [examples/runtimeclass-edgelet-wasmtime.yaml](examples/runtimeclass-edgelet-wasmtime.yaml) | [RuntimeClass](#runtimeclass) |
 | ControlPlane | [examples/controlplane.yaml](examples/controlplane.yaml) | [ControlPlane](#controlplane) |
 
@@ -26,7 +27,7 @@ Validation runs in the daemon before apply. Shapes are defined in `internal/mode
 | Field | Value |
 |-------|--------|
 | `apiVersion` | **`edgelet.iofog.org/v1`** (required) |
-| `kind` | `Microservice`, `Registry`, `Model`, `RuntimeClass`, or `ControlPlane` |
+| `kind` | `Microservice`, `Registry`, `Model`, `Knowledge`, `RuntimeClass`, or `ControlPlane` |
 
 Legacy `apiVersion: v3` and Java-era kinds are rejected.
 
@@ -36,7 +37,7 @@ Legacy `apiVersion: v3` and Java-era kinds are rejected.
 
 Local or operator-managed workload deployed through Edgelet (not Pot controller snapshot).
 
-**Annotated reference:** [examples/microservice.yaml](examples/microservice.yaml) lists every YAML key with inline comments. Catalog bind lifecycle: [models.md](models.md#bind-into-a-microservice). Engine coverage: [container-engine.md](container-engine.md).
+**Annotated reference:** [examples/microservice.yaml](examples/microservice.yaml) lists every YAML key with inline comments. Catalog bind lifecycle: [models.md](models.md#bind-into-a-microservice), [knowledge.md](knowledge.md#bind-into-a-microservice). Engine coverage: [container-engine.md](container-engine.md).
 
 ### Schema vs implemented
 
@@ -61,6 +62,7 @@ spec:
   image: <image-ref>          # required
   registry: <id>              # optional registry row ID
   models: { ... }             # optional catalog bind — see below
+  knowledge: { ... }          # optional catalog bind — see below
   container: { ... }          # see below
   schedule: <int>             # optional ordering hint
   config: {}                  # optional opaque config map (not applied)
@@ -80,7 +82,23 @@ In the container, each item appears at **`{bindPath}/{name}/`** and lists that m
 
 `bindPath` and each `{bindPath}/{name}` must not collide with a volume `containerDestination` or `tmpfs.containerPath`.
 
-Local deploy binds **local** models only. The container starts only when every named item is **Ready**; unknown or Failed names are a validate error; Pending/Pulling persist the workload as **QUEUED** with wait text. Add/remove/re-pull of items updates the projection **in place** (no recreate). Changing `bindPath` or catalog `permissions` **does** recreate. `edgelet model rm` is refused while any microservice still names that model.
+Local deploy binds **local** models only. The container starts only when every named model **and** knowledge item is **Ready**; unknown or Failed names are a validate error; Pending/Pulling persist the workload as **QUEUED** with wait text. Add/remove/re-pull of items updates the projection **in place** (no recreate). Changing `bindPath` or catalog `permissions` **does** recreate. `edgelet model rm` is refused while any microservice still names that model.
+
+### `spec.knowledge` (catalog bind)
+
+Omit `spec.knowledge` (or use an empty `items` list) when the workload does not bind retrieval artifacts. When `items` is non-empty:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `bindPath` | string | **Required.** Absolute **container** path. The catalog is one bind of a per-microservice projection at this path. |
+| `permissions` | string | `ro` (default) or `rw`. Catalog-level only — no per-item mode. |
+| `items[].name` | string | DNS-1123 Knowledge `metadata.name`. Duplicate names are a validate error. Never send a host content path. |
+
+In the container, each item appears at **`{bindPath}/{name}/`** and lists that Knowledge item’s Ready **`content/`** files. Example: `bindPath: /knowledge` + `name: product-docs` → `/knowledge/product-docs/`.
+
+`bindPath` and each `{bindPath}/{name}` must not collide with a volume `containerDestination`, `tmpfs.containerPath`, or `spec.models.bindPath` / `{models.bindPath}/{modelName}`.
+
+Local deploy binds **local** Knowledge only. The start gate waits for every named model **and** knowledge item. Add/remove/re-pull of items updates the projection **in place** (no recreate). Changing `bindPath` or catalog `permissions` **does** recreate. `edgelet knowledge rm` is refused while any microservice still names that Knowledge. Operator guide: [knowledge.md](knowledge.md#bind-into-a-microservice).
 
 ### `spec.container` (common fields)
 
@@ -138,7 +156,7 @@ edgelet ms ls --source local
 edgelet ms inspect <uuid-or-name>
 ```
 
-`edgelet ms inspect` prints the full inspect JSON by default (`models` catalog plus `raw.engineInspect`). `--summary` is the short card. Wait/fail `statusText` is on the object when a bound model is still downloading or Failed. Crash fields: `errorMessage` (current; clears after 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery), `restartCount` (omitted when 0). Docker/Podman text is `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
+`edgelet ms inspect` prints the full inspect JSON by default (`models` and `knowledge` catalogs plus `raw.engineInspect`). `--summary` is the short card. Wait/fail `statusText` is on the object when a bound model or Knowledge is still downloading or Failed. Crash fields: `errorMessage` (current; clears after 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery), `restartCount` (omitted when 0). Docker/Podman text is `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
 
 DNS: [dns.md](dns.md) · Metadata: [workload-metadata.md](workload-metadata.md)
 
@@ -146,7 +164,7 @@ DNS: [dns.md](dns.md) · Metadata: [workload-metadata.md](workload-metadata.md)
 
 ## Registry
 
-Credentials for **container image** and **model artifact** pulls, stored in local SQLite.
+Credentials for **container image**, **model**, and **Knowledge** artifact pulls, stored in local SQLite.
 
 **Annotated reference:** [examples/registry.yaml](examples/registry.yaml).
 
@@ -189,7 +207,7 @@ Registry apply is **synchronous**. `edgelet registry ls` / `inspect` show **`typ
 
 ## Model
 
-AI model artifact desired state. Pulls store files under `{diskDirectory}/models/` — not through the container engine. Operator guide: [models.md](models.md).
+AI model artifact desired state. Pulls store files under `{diskDirectory}/models/` — not through the container engine. Operator guide: [models.md](models.md). Packaging an OCI artifact: [oci-artifacts.md](oci-artifacts.md).
 
 **Annotated reference:** [examples/model.yaml](examples/model.yaml).
 
@@ -225,6 +243,48 @@ Deploy apply persists the desired row and starts artifact download. The CLI wait
 edgelet deploy -f examples/model.yaml
 edgelet model ls
 edgelet model inspect llama-2-7b-q2k
+```
+
+---
+
+## Knowledge
+
+Curated retrieval artifact desired state (documents, chunks, datasets, prebuilt vector indexes). Pulls store files under `{diskDirectory}/knowledge/` — not through the container engine, and not in `{diskDirectory}/models/`. Operator guide: [knowledge.md](knowledge.md). Packaging an OCI artifact: [oci-artifacts.md](oci-artifacts.md).
+
+**Annotated reference:** [examples/knowledge.yaml](examples/knowledge.yaml).
+
+```yaml
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: product-docs          # required — DNS-1123 label; on-disk directory name
+  labels: {}                  # optional
+spec:
+  repo: org/name              # required — Hub dataset id or OCI path, no scheme or host
+  revision: <pin>             # optional — see revision table
+  registry: 3                 # required — registry row id (type selects the adapter)
+  files:                      # HF only; ignored for oci
+    - data/**/*.jsonl
+  format: jsonl               # optional — markdown, pdf, jsonl, parquet, arrow, sqlite, faiss, chroma, lance, unknown
+```
+
+| Field | Notes |
+|-------|--------|
+| `metadata.name` | Lowercase DNS-1123 label (no `/`). Upsert key. Separate namespace from Model names. |
+| `spec.repo` | Hub **dataset** id or OCI repository path **without** registry host. |
+| `spec.revision` | OCI empty → `latest`; `sha256:` + 64 hex → digest; else tag. HF empty → `main`; 40-char hex → commit. Floating refs (`latest`, `main`, branches, tags) set `revisionFloating: true` and log a warning. |
+| `spec.registry` | Required. Must exist; `hf` vs `oci` must match the source. Hugging Face Knowledge always uses the Hub **dataset** API. |
+| `spec.files` | **HF only.** Empty list → Hub dataset snapshot at the pinned revision (full tree). Globs: `*`, `**`, `?`. Empty `files` on a huge dataset is allowed (operator choice); disk pre-check still applies. **Ignored for OCI** (full artifact). |
+| `spec.format` | Optional hint only; does not change pull behavior. Omit allowed. Closed allowlist including `unknown`. |
+
+Deploy apply persists the desired row and starts artifact download. The CLI waits until each Knowledge is **Ready** or **Failed**. `--dry-run` validates only. `edgelet knowledge pull <name>` retries an existing row; with `--repo` and `--registry` it upserts the same row then pulls. Spec generation bumps also re-pull on reconcile.
+
+### Apply
+
+```bash
+edgelet deploy -f examples/knowledge.yaml
+edgelet knowledge ls
+edgelet knowledge inspect product-docs
 ```
 
 ---
@@ -348,6 +408,7 @@ FQDNs derive from `metadata.namespace` + `metadata.name` — see [dns.md](dns.md
 | List local MS | `edgelet ms ls --source local` |
 | List registries | `edgelet registry ls` |
 | List models | `edgelet model ls` |
+| List knowledge | `edgelet knowledge ls` |
 | List runtime classes | `edgelet runtimeclass ls` |
 | Control plane status | `edgelet controlplane get` |
 | Validate only | EdgeletAPI `POST /v1/deploy/microservices:validate` (and `:validate` for other kinds) |
@@ -357,8 +418,10 @@ FQDNs derive from `metadata.namespace` + `metadata.name` — see [dns.md](dns.md
 ## Related docs
 
 - [models.md](models.md) — model pull, catalog bind, prune, on-disk layout
+- [knowledge.md](knowledge.md) — Knowledge pull, catalog bind, prune, on-disk layout
 - [installation.md](installation.md) — install and provisioning
 - [deployment.md](deployment.md) — production topology
 - [control-plane.md](control-plane.md) — operator guide
 - [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) — controller JSON and validation
+- [CONTROLLER-HANDOFF-KNOWLEDGE.md](CONTROLLER-HANDOFF-KNOWLEDGE.md) — Knowledge controller JSON and validation
 - [edgelet-api-v1-openapi.yaml](edgelet-api-v1-openapi.yaml) — HTTP contract

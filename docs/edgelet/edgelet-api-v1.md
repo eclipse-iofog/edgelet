@@ -13,7 +13,9 @@ The **EdgeletAPI** is the on-device operator API exposed by the Edgelet daemon. 
 | [../cli/README.md](../cli/README.md) | CLI command reference |
 | [../cli/output-schemas.md](../cli/output-schemas.md) | JSON/YAML output shapes for `-o json` |
 | [models.md](models.md) | Model artifact lifecycle |
+| [knowledge.md](knowledge.md) | Knowledge artifact lifecycle |
 | [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller JSON contract (status, RuntimeClass, catalog, prune) |
+| [CONTROLLER-HANDOFF-KNOWLEDGE.md](CONTROLLER-HANDOFF-KNOWLEDGE.md) | Controller Knowledge JSON (`GET knowledge`, catalog, status, prune) |
 | [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md) | Controller `volumeMappings[].scope` (`private` \| `shared`) |
 | [volumes.md](volumes.md) | Persistent VOLUME retain/reclaim |
 
@@ -211,7 +213,7 @@ Notable behaviors:
 Runtime view and lifecycle for workloads (managed, local, and control-plane sources):
 
 - `GET /v1/ms` — list microservices; **`source` query only**: `managed`, `local`, `controlplane`, or `all` (default). Pagination filters (`cursor`, `limit`, `application`, `name`, `state`) are not implemented.
-- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`). Includes catalog `models` (`bindPath`, `permissions`, `items[].name`) when bound, `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`), `statusText` when the start gate is waiting for download or a bound model Failed, and crash fields when set: `errorMessage` (current; kept until 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery; omitted when empty), `restartCount` (omitted when 0). Docker/Podman crash text looks like `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
+- `GET /v1/ms/{id}` — inspect (UUID or `namespace.name`). Includes catalog `models` and `knowledge` (`bindPath`, `permissions`, `items[].name`) when bound, `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`), `statusText` when the start gate is waiting for download or a bound model or Knowledge Failed, and crash fields when set: `errorMessage` (current; kept until 30s continuous RUNNING), `lastError` / `lastErrorAt` (last crash; not cleared on recovery; omitted when empty), `restartCount` (omitted when 0). Docker/Podman crash text looks like `exitCode=N oomKilled=…`; the embedded engine keeps `CRI reason=…`.
 - Lifecycle: `start`, `stop`, `restart`, `kill`
 - Logs: `GET .../logs` (HTTP); `GET .../logs:stream` (WebSocket follow)
 - Exec: session create/get/delete; `GET .../exec/sessions/{sessionId}:attach` (interactive WebSocket). See [exec-sessions.md](exec-sessions.md) for multi-session behavior, the 15s start wait, and `EXEC_START_TIMEOUT`.
@@ -225,6 +227,7 @@ Manifest-driven local persistence and apply:
 | Microservice | `POST .../microservices:apply` | `...:validate` | `GET/DELETE .../microservices/{id}` |
 | Registry | `POST .../registries:apply` | `...:validate` | `GET/DELETE .../registries/{id}` (ids 1–3 are built-in and cannot be edited or removed) |
 | Model | `POST .../models:apply` | `...:validate` | runtime view via `/v1/models` |
+| Knowledge | `POST .../knowledge:apply` | `...:validate` | runtime view via `/v1/knowledge` |
 | RuntimeClass | `POST .../runtimeclasses:apply` | `...:validate` | `GET/DELETE .../runtimeclasses/{name}` |
 | ControlPlane | `POST .../controlplane:apply` (async) | `...:validate` | status via `/v1/system/controlplane` |
 
@@ -242,7 +245,7 @@ Apply uses `multipart/form-data`:
 
 Poll: `GET /v1/deploy/{kind}:apply/{operationId}` (and RuntimeClass delete status route).
 
-Registry apply is synchronous. Model apply persists desired state and starts artifact pulls (`pulls` in the response). ControlPlane apply is asynchronous by default (long container pull/start).
+Registry apply is synchronous. Model and Knowledge apply persist desired state and start artifact pulls (`pulls` in the response). ControlPlane apply is asynchronous by default (long container pull/start).
 
 ### `/v1/auth/*`
 
@@ -270,6 +273,21 @@ Model artifact operations (not container images). Operator guide: [models.md](mo
 | `DELETE /v1/models/{name}` | Remove row and on-disk artifacts |
 
 Local Model apply is refused while `watchdogEnabled` is on.
+
+### `/v1/knowledge*`
+
+Knowledge artifact operations (not container images, not Models). Mass noun — **`/v1/knowledges` is not registered**. Operator guide: [knowledge.md](knowledge.md).
+
+| Route | Purpose |
+|-------|---------|
+| `GET /v1/knowledge` | List deployed Knowledge (`source` is `local` or `managed`) |
+| `GET /v1/knowledge/{name}` | Inspect (`source`; managed rows also include `uuid` and `bindRefCount`) |
+| `POST /v1/knowledge:pull` | Start async pull — HTTP 202. Body `{"name"}` retries an existing row; optional `repo`, `revision`, `registryId`, `files`, `format` upsert then pull |
+| `GET /v1/knowledge:pull/{operationId}` | Pull progress / terminal status |
+| `POST /v1/knowledge:prune` | Dangling prune (`?mode=dangling`) — unused local Knowledge (managed names kept) |
+| `DELETE /v1/knowledge/{name}` | Remove row and on-disk artifacts |
+
+Local Knowledge apply is refused while `watchdogEnabled` is on.
 
 ### `/v1/volumes*`
 

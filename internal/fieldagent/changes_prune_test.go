@@ -8,7 +8,7 @@ import (
 )
 
 func TestProcessChanges_PruneFlagInvokesImageAndModelPrune(t *testing.T) {
-	var imageCalls, modelCalls atomic.Int32
+	var imageCalls, modelCalls, knowledgeCalls atomic.Int32
 	fa := &FieldAgent{
 		config: config.GetInstance(),
 		state:  NewState(),
@@ -18,19 +18,23 @@ func TestProcessChanges_PruneFlagInvokesImageAndModelPrune(t *testing.T) {
 		},
 		pruneModelsFn: func() error {
 			modelCalls.Add(1)
+			return nil
+		},
+		pruneKnowledgeFn: func() error {
+			knowledgeCalls.Add(1)
 			return nil
 		},
 	}
 	fa.state.SetInitialization(false)
 
 	_ = fa.processChanges(map[string]any{"prune": true})
-	if imageCalls.Load() != 1 || modelCalls.Load() != 1 {
-		t.Fatalf("expected image and model prune once, images=%d models=%d", imageCalls.Load(), modelCalls.Load())
+	if imageCalls.Load() != 1 || modelCalls.Load() != 1 || knowledgeCalls.Load() != 1 {
+		t.Fatalf("expected image, model, and knowledge prune once, images=%d models=%d knowledge=%d", imageCalls.Load(), modelCalls.Load(), knowledgeCalls.Load())
 	}
 }
 
 func TestProcessChanges_PruneFlagDoesNotPruneVolumes(t *testing.T) {
-	var imageCalls, modelCalls, volumeCalls atomic.Int32
+	var imageCalls, modelCalls, knowledgeCalls, volumeCalls atomic.Int32
 	fa := &FieldAgent{
 		config: config.GetInstance(),
 		state:  NewState(),
@@ -40,6 +44,10 @@ func TestProcessChanges_PruneFlagDoesNotPruneVolumes(t *testing.T) {
 		},
 		pruneModelsFn: func() error {
 			modelCalls.Add(1)
+			return nil
+		},
+		pruneKnowledgeFn: func() error {
+			knowledgeCalls.Add(1)
 			return nil
 		},
 		pruneVolumesFn: func() error {
@@ -50,8 +58,8 @@ func TestProcessChanges_PruneFlagDoesNotPruneVolumes(t *testing.T) {
 	fa.state.SetInitialization(false)
 
 	_ = fa.processChanges(map[string]any{"prune": true})
-	if imageCalls.Load() != 1 || modelCalls.Load() != 1 {
-		t.Fatalf("expected image and model prune once, images=%d models=%d", imageCalls.Load(), modelCalls.Load())
+	if imageCalls.Load() != 1 || modelCalls.Load() != 1 || knowledgeCalls.Load() != 1 {
+		t.Fatalf("expected image, model, and knowledge prune once, images=%d models=%d knowledge=%d", imageCalls.Load(), modelCalls.Load(), knowledgeCalls.Load())
 	}
 	if volumeCalls.Load() != 0 {
 		t.Fatalf("controller prune flag must not prune persistent volumes, got %d calls", volumeCalls.Load())
@@ -59,7 +67,7 @@ func TestProcessChanges_PruneFlagDoesNotPruneVolumes(t *testing.T) {
 }
 
 func TestProcessChanges_PruneFlagSkippedDuringInitialization(t *testing.T) {
-	var imageCalls, modelCalls atomic.Int32
+	var imageCalls, modelCalls, knowledgeCalls atomic.Int32
 	fa := &FieldAgent{
 		config: config.GetInstance(),
 		state:  NewState(),
@@ -71,11 +79,15 @@ func TestProcessChanges_PruneFlagSkippedDuringInitialization(t *testing.T) {
 			modelCalls.Add(1)
 			return nil
 		},
+		pruneKnowledgeFn: func() error {
+			knowledgeCalls.Add(1)
+			return nil
+		},
 	}
 	fa.state.SetInitialization(true)
 
 	_ = fa.processChanges(map[string]any{"prune": true})
-	if imageCalls.Load() != 0 || modelCalls.Load() != 0 {
-		t.Fatalf("expected prune skipped during initialization, images=%d models=%d", imageCalls.Load(), modelCalls.Load())
+	if imageCalls.Load() != 0 || modelCalls.Load() != 0 || knowledgeCalls.Load() != 0 {
+		t.Fatalf("expected prune skipped during initialization, images=%d models=%d knowledge=%d", imageCalls.Load(), modelCalls.Load(), knowledgeCalls.Load())
 	}
 }

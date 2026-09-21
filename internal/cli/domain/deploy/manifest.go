@@ -18,6 +18,7 @@ const (
 	TargetMicroservices  Target = "microservices"
 	TargetRegistries     Target = "registries"
 	TargetModels         Target = "models"
+	TargetKnowledge      Target = "knowledge"
 	TargetRuntimeClasses Target = "runtimeclasses"
 	TargetControlPlane   Target = "controlplane"
 )
@@ -38,6 +39,8 @@ func DetectTargetFromManifest(path string) (Target, error) {
 		return TargetRegistries, nil
 	case strings.EqualFold(kind, "Model"):
 		return TargetModels, nil
+	case strings.EqualFold(kind, "Knowledge"):
+		return TargetKnowledge, nil
 	case strings.EqualFold(kind, "RuntimeClass"):
 		return TargetRuntimeClasses, nil
 	case strings.EqualFold(kind, "ControlPlane"):

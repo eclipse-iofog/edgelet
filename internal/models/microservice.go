@@ -61,6 +61,7 @@ type Microservice struct {
 	Tmpfs                  []TmpfsMount      `json:"tmpfs,omitempty" yaml:"tmpfs,omitempty"`
 	WorkingDir             *string           `json:"workingDir,omitempty" yaml:"workingDir,omitempty"`
 	Models                 *ModelCatalog     `json:"models,omitempty" yaml:"models,omitempty"`
+	Knowledge              *KnowledgeCatalog `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
 	ServiceAccount         *ServiceAccount   `json:"serviceAccount,omitempty" yaml:"serviceAccount,omitempty"`
 
 	// Internal state fields
@@ -202,7 +203,7 @@ func (m *Microservice) Validate() error {
 	if m.ImageName == "" {
 		return &ValidationError{Field: "imageName", Message: "imageName is required"}
 	}
-	if err := ValidateModelCatalog(m.Models, collectVolumeDestsFromMappings(m.VolumeMappings), collectTmpfsPaths(m.Tmpfs)); err != nil {
+	if err := ValidateWorkloadCatalogs(m.Models, m.Knowledge, collectVolumeDestsFromMappings(m.VolumeMappings), collectTmpfsPaths(m.Tmpfs)); err != nil {
 		return err
 	}
 	return validateMicroserviceContainerFields(m)
@@ -222,4 +223,12 @@ func (m *Microservice) ValidateCatalogApply(requiredSource string, lookup ModelS
 		return err
 	}
 	return ValidateCatalogApply(m.Models, requiredSource, lookup)
+}
+
+// ValidateKnowledgeCatalogApply runs Validate then rejects unknown or Failed Knowledge names.
+func (m *Microservice) ValidateKnowledgeCatalogApply(requiredSource string, lookup KnowledgeStatusLookup) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	return ValidateKnowledgeCatalogApply(m.Knowledge, requiredSource, lookup)
 }

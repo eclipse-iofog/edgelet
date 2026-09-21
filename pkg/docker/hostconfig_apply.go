@@ -42,6 +42,13 @@ func applyWorkloadCreateConfig(config *container.Config, hostConfig *container.H
 		}
 		hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s:%s", host, dest, mode))
 	}
+	if host, dest, readOnly, ok := containerapply.KnowledgeCatalogBind(ms, diskDir); ok {
+		mode := "rw"
+		if readOnly {
+			mode = "ro"
+		}
+		hostConfig.Binds = append(hostConfig.Binds, fmt.Sprintf("%s:%s:%s", host, dest, mode))
+	}
 
 	if len(ms.Tmpfs) > 0 {
 		if hostConfig.Tmpfs == nil {

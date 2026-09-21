@@ -134,6 +134,7 @@ Output: **`build/edgelet-linux-<arch>`** — unified linux thin binary (CLI + em
 | 9 | Built-in registries (ids 1–3 immutable); tiny HF pull (`hf-internal-testing/tiny-random-gpt2`); tiny OCI pull (`ai/smollm2` 135m, ~101 MiB) |
 | 10 | Catalog bind (`{bindPath}/{name}/`); unknown-name apply reject; `model rm` refuse while bound; in-place add item; bindPath recreate; container fields (cpus, memory, shm, tmpfs, sysctls, ulimits, devices, runAsGroup, read-only root) |
 | 11 | Persistent `VOLUME` retain: private vs shared vs BIND; restart + `pruningFrequency` + `system prune`; `ms rm` keep; in-use `volume rm` abort; explicit reclaim |
+| 12 | Knowledge HF dataset pull (`hf-internal-testing/dataset_with_data_files`); catalog bind (`{bindPath}/{name}/`); `knowledge rm` refuse while bound; in-place add; bindPath recreate; unknown-name reject; both catalogs Ready; `system prune` leaves Knowledge trees |
 
 ## RuntimeClass dual-shim coverage (Lima arm64)
 

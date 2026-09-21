@@ -94,6 +94,8 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 		return formatImageList(result)
 	case "/v1/models":
 		return formatModelList(result)
+	case "/v1/knowledge":
+		return formatKnowledgeList(result)
 	case "/v1/volumes":
 		return formatVolumeList(result)
 	case "/v1/deploy/registries":
@@ -113,6 +115,9 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 		}
 		if strings.HasPrefix(routePath, "/v1/models/") {
 			return formatModelInspect(result)
+		}
+		if strings.HasPrefix(routePath, "/v1/knowledge/") {
+			return formatKnowledgeInspect(result)
 		}
 		if strings.HasPrefix(routePath, "/v1/volumes/shared/") || strings.HasPrefix(routePath, "/v1/volumes/") {
 			return formatVolumeInspect(result)
@@ -165,13 +170,17 @@ func formatMSInspect(result map[string]any) string {
 			seen[key] = true
 		}
 	}
-	if catalog := formatCatalogInspect(result["models"]); catalog != "" {
+	if catalog := formatNamedCatalogInspect("models", result["models"]); catalog != "" {
 		_, _ = fmt.Fprint(&b, catalog)
 		seen["models"] = true
 	}
+	if catalog := formatNamedCatalogInspect("knowledge", result["knowledge"]); catalog != "" {
+		_, _ = fmt.Fprint(&b, catalog)
+		seen["knowledge"] = true
+	}
 	remaining := make([]string, 0, len(result))
 	for key := range result {
-		if seen[key] || key == "models" || key == "manifestYAML" {
+		if seen[key] || key == "models" || key == "knowledge" || key == "manifestYAML" {
 			continue
 		}
 		remaining = append(remaining, key)
@@ -185,20 +194,24 @@ func formatMSInspect(result map[string]any) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func formatCatalogInspect(raw any) string {
+func formatNamedCatalogInspect(kind string, raw any) string {
 	catalog, ok := raw.(map[string]any)
 	if !ok || len(catalog) == 0 {
 		return ""
 	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "models"
+	}
 	var b strings.Builder
 	if bind := MapValueAsRawString(catalog, "bindPath"); strings.TrimSpace(bind) != "" {
-		_, _ = fmt.Fprintf(&b, "models.bindPath: %s\n", bind)
+		_, _ = fmt.Fprintf(&b, "%s.bindPath: %s\n", kind, bind)
 	}
 	if perms := MapValueAsRawString(catalog, "permissions"); strings.TrimSpace(perms) != "" {
-		_, _ = fmt.Fprintf(&b, "models.permissions: %s\n", perms)
+		_, _ = fmt.Fprintf(&b, "%s.permissions: %s\n", kind, perms)
 	}
 	if names := catalogItemNames(catalog["items"]); names != "" {
-		_, _ = fmt.Fprintf(&b, "models.items: %s\n", names)
+		_, _ = fmt.Fprintf(&b, "%s.items: %s\n", kind, names)
 	}
 	return b.String()
 }
@@ -528,6 +541,85 @@ var modelInspectOrder = []string{
 	"totalBytes",
 	"contentPath",
 	"lastError",
+}
+
+func formatKnowledgeList(result map[string]any) string {
+	rawItems, ok := result["items"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return "No knowledge found."
+	}
+	rows := [][]string{
+		{"NAME", "SOURCE", "REPO", "REVISION", "REGISTRY", "STATE", "FORMAT"},
+	}
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			MapValueAsString(item, "name"),
+			ValueOrDefault(MapValueAsString(item, "source"), "-"),
+			MapValueAsString(item, "repo"),
+			ValueOrDefault(MapValueAsString(item, "revision"), "-"),
+			MapValueAsString(item, "registryId"),
+			ValueOrDefault(MapValueAsString(item, "state"), "-"),
+			ValueOrDefault(MapValueAsString(item, "format"), "-"),
+		})
+	}
+	return formatAlignedTable(rows)
+}
+
+var knowledgeInspectOrder = []string{
+	"name",
+	"source",
+	"uuid",
+	"bindRefCount",
+	"repo",
+	"revision",
+	"registryId",
+	"format",
+	"state",
+	"files",
+	"generation",
+	"resolvedRevision",
+	"digest",
+	"revisionFloating",
+	"totalBytes",
+	"lastError",
+}
+
+func formatKnowledgeInspect(result map[string]any) string {
+	if len(result) == 0 {
+		return ""
+	}
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	var b strings.Builder
+	seen := make(map[string]bool, len(result))
+	for _, key := range knowledgeInspectOrder {
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		if formatted, ok := formatInspectScalar(value); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+			seen[key] = true
+		}
+	}
+	remaining := make([]string, 0, len(result))
+	for key := range result {
+		if !seen[key] {
+			remaining = append(remaining, key)
+		}
+	}
+	slices.Sort(remaining)
+	for _, key := range remaining {
+		if formatted, ok := formatInspectScalar(result[key]); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func formatModelInspect(result map[string]any) string {

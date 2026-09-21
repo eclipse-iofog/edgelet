@@ -19,22 +19,25 @@ import (
 type Adapter struct {
 	// HTTPClient, when set, is used instead of the registry-derived client (tests).
 	HTTPClient *http.Client
+	// RepoClass selects /api/models/ (default) or /api/datasets/. Knowledge always uses dataset.
+	RepoClass RepoClass
 }
 
 // Pull fetches Hub files, writes them under content/, and records manifest.json.
 // Hugging Face pulls never write oci-store/.
 func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.Result, error) {
-	if err := validateRequest(req); err != nil {
+	if err := a.validateRequest(req); err != nil {
 		return nil, err
 	}
 	resolved := modelpull.ResolveHFRevision(req.Revision)
 
-	client, err := newHubClient(req.Registry, a.httpClient())
+	class := a.repoClass()
+	client, err := newHubClient(req.Registry, a.httpClient(), class)
 	if err != nil {
 		return nil, err
 	}
 
-	info, err := client.ModelInfo(ctx, req.Repo, resolved.Revision)
+	info, err := client.RevisionInfo(ctx, req.Repo, resolved.Revision)
 	if err != nil {
 		return nil, err
 	}
@@ -53,11 +56,14 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 		sizeByPath[name] = f.Size
 	}
 
-	selected, err := resolvePullFiles(ctx, client, req.Repo, resolved.Revision, repoFiles, req.Files)
+	selected, err := resolvePullFiles(ctx, client, req.Repo, resolved.Revision, repoFiles, req.Files, class)
 	if err != nil {
 		return nil, err
 	}
 	if len(selected) == 0 {
+		if class == RepoClassDataset {
+			return nil, fmt.Errorf("no files in dataset %s at revision %s", req.Repo, resolved.Revision)
+		}
 		return nil, fmt.Errorf("no model files selected from %s at revision %s; set spec.files to the paths to pull", req.Repo, resolved.Revision)
 	}
 
@@ -110,6 +116,9 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 	}
 
 	formatHint := inferPulledFormat(req.FormatHint, selected)
+	if class == RepoClassDataset {
+		formatHint = inferKnowledgeFormat(req.FormatHint)
+	}
 	manifestPath := modelpull.ManifestPath(req.ModelsRoot, req.Name)
 	onDisk := modelpull.OnDiskManifest{
 		MetadataName:      req.Name,
@@ -141,14 +150,25 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 	}, nil
 }
 
-func resolvePullFiles(ctx context.Context, client *hubClient, repo, revision string, repoFiles, requested []string) ([]string, error) {
+func resolvePullFiles(ctx context.Context, client *hubClient, repo, revision string, repoFiles, requested []string, class RepoClass) ([]string, error) {
 	if !hasRequestedFiles(requested) {
+		if class == RepoClassDataset {
+			return uniqueSorted(repoFiles), nil
+		}
 		if err := GuardMultiGGUF(repoFiles); err != nil {
 			return nil, err
 		}
 		return expandSnapshot(ctx, client, repo, revision, repoFiles)
 	}
 	return ExpandFiles(requested, repoFiles)
+}
+
+func inferKnowledgeFormat(hint string) string {
+	hint = strings.ToLower(strings.TrimSpace(hint))
+	if hint != "" {
+		return hint
+	}
+	return models.KnowledgeFormatUnknown
 }
 
 func expandSnapshot(ctx context.Context, client *hubClient, repo, revision string, repoFiles []string) ([]string, error) {
@@ -214,14 +234,28 @@ func (a *Adapter) httpClient() *http.Client {
 	return a.HTTPClient
 }
 
-func validateRequest(req modelpull.Request) error {
+func (a *Adapter) repoClass() RepoClass {
+	if a == nil {
+		return RepoClassModel
+	}
+	return NormalizeRepoClass(a.RepoClass)
+}
+
+func (a *Adapter) validateRequest(req modelpull.Request) error {
+	noun := "model"
+	if a.repoClass() == RepoClassDataset {
+		noun = "knowledge"
+	}
 	if strings.TrimSpace(req.Name) == "" {
-		return errors.New("model name is required")
+		return fmt.Errorf("%s name is required", noun)
 	}
 	if strings.TrimSpace(req.Repo) == "" {
-		return errors.New("model repo is required")
+		return fmt.Errorf("%s repo is required", noun)
 	}
 	if strings.TrimSpace(req.ModelsRoot) == "" {
+		if noun == "knowledge" {
+			return errors.New("knowledge root is required")
+		}
 		return errors.New("models root is required")
 	}
 	if req.Registry == nil {

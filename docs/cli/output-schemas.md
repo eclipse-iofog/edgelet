@@ -77,8 +77,9 @@ Default human output is the full inspect JSON (`raw.engineInspect` included). `-
 | `lastError` | string | Last crash text. Not cleared on recovery. Omitted when empty |
 | `lastErrorAt` | integer | Unix milliseconds for `lastError`. Omitted when 0 |
 | `restartCount` | integer | Real restart events since last operator rebuild. Omitted when 0 |
-| `statusText` | string | Wait/fail text when a bound model is still downloading or Failed |
+| `statusText` | string | Wait/fail text when a bound model or Knowledge is still downloading or Failed |
 | `models` | object | Catalog bind (`bindPath`, `permissions`, `items[].name`) when bound |
+| `knowledge` | object | Catalog bind (`bindPath`, `permissions`, `items[].name`) when bound |
 | `raw.engineInspect` | object | Engine inspect payload (full inspect only) |
 
 Docker/Podman crash text looks like `exitCode=N oomKilled=…` (plus `error=…` when the engine error is set). The embedded engine keeps `CRI reason=…`. Last crash text for controller-managed workloads is in-memory; an agent restart may drop it until the next failure.

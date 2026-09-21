@@ -19,9 +19,10 @@ type LocalDeployManifest struct {
 		Labels    map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
 	} `yaml:"metadata" json:"metadata"`
 	Spec struct {
-		Image     string        `yaml:"image" json:"image"`
-		Registry  *int          `yaml:"registry,omitempty" json:"registry,omitempty"`
-		Models    *ModelCatalog `yaml:"models,omitempty" json:"models,omitempty"`
+		Image     string            `yaml:"image" json:"image"`
+		Registry  *int              `yaml:"registry,omitempty" json:"registry,omitempty"`
+		Models    *ModelCatalog     `yaml:"models,omitempty" json:"models,omitempty"`
+		Knowledge *KnowledgeCatalog `yaml:"knowledge,omitempty" json:"knowledge,omitempty"`
 		Container struct {
 			Annotations            map[string]any    `yaml:"annotations,omitempty" json:"annotations,omitempty"`
 			HostNetworkMode        bool              `yaml:"hostNetworkMode" json:"hostNetworkMode"`
@@ -148,7 +149,7 @@ func (m *LocalDeployManifest) Validate() error {
 			volumeDests = append(volumeDests, dest)
 		}
 	}
-	if err := ValidateModelCatalog(m.Spec.Models, volumeDests, collectTmpfsPaths(m.Spec.Container.Tmpfs)); err != nil {
+	if err := ValidateWorkloadCatalogs(m.Spec.Models, m.Spec.Knowledge, volumeDests, collectTmpfsPaths(m.Spec.Container.Tmpfs)); err != nil {
 		return err
 	}
 	return validateManifestContainerFields(m)
@@ -168,6 +169,14 @@ func (m *LocalDeployManifest) ValidateCatalogApply(lookup ModelStatusLookup) err
 		return err
 	}
 	return ValidateCatalogApply(m.Spec.Models, ModelSourceLocal, lookup)
+}
+
+// ValidateKnowledgeCatalogApply runs Validate then rejects unknown or Failed local Knowledge names.
+func (m *LocalDeployManifest) ValidateKnowledgeCatalogApply(lookup KnowledgeStatusLookup) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
+	return ValidateKnowledgeCatalogApply(m.Spec.Knowledge, KnowledgeSourceLocal, lookup)
 }
 
 func isValidHostPath(path string) bool {

@@ -8,19 +8,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func catalogFromLocalManifestYAML(raw string) *models.ModelCatalog {
+func catalogsFromLocalManifestYAML(raw string) (*models.ModelCatalog, *models.KnowledgeCatalog) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	doc := &models.LocalDeployManifest{}
 	if err := yaml.Unmarshal([]byte(raw), doc); err != nil {
-		return nil
+		return nil, nil
 	}
 	if doc.Spec.Models != nil {
 		doc.Spec.Models.NormalizeDefaults()
 	}
-	return doc.Spec.Models
+	if doc.Spec.Knowledge != nil {
+		doc.Spec.Knowledge.NormalizeDefaults()
+	}
+	return doc.Spec.Models, doc.Spec.Knowledge
 }
 
 func catalogAPIMap(c *models.ModelCatalog) map[string]any {
@@ -47,7 +50,39 @@ func catalogAPIMap(c *models.ModelCatalog) map[string]any {
 	}
 }
 
-func attachCatalogInspect(item map[string]any, catalog *models.ModelCatalog, requiredSource string, lookup models.ModelStatusLookup, storedStatus string) {
+func knowledgeCatalogAPIMap(c *models.KnowledgeCatalog) map[string]any {
+	if c == nil || !c.HasItems() {
+		return nil
+	}
+	clone := c.Clone()
+	clone.NormalizeDefaults()
+	items := make([]map[string]any, 0, len(clone.Items))
+	for _, item := range clone.Items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		items = append(items, map[string]any{"name": name})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"bindPath":    clone.BindPath,
+		"permissions": clone.Permissions,
+		"items":       items,
+	}
+}
+
+func attachWorkloadCatalogInspect(
+	item map[string]any,
+	catalog *models.ModelCatalog,
+	knowledge *models.KnowledgeCatalog,
+	requiredSource string,
+	modelLookup models.ModelStatusLookup,
+	knowledgeLookup models.KnowledgeStatusLookup,
+	storedStatus string,
+) {
 	if item == nil {
 		return
 	}
@@ -55,12 +90,28 @@ func attachCatalogInspect(item map[string]any, catalog *models.ModelCatalog, req
 	if api := catalogAPIMap(catalog); api != nil {
 		item["models"] = api
 	}
-	if catalog != nil && catalog.HasItems() && lookup != nil {
-		dec, msg, err := models.EvaluateCatalogStartGate(catalog, requiredSource, lookup)
-		if err == nil && strings.TrimSpace(msg) != "" && (dec == models.CatalogGateWait || dec == models.CatalogGateFail) {
-			item["statusText"] = msg
-			return
+	if api := knowledgeCatalogAPIMap(knowledge); api != nil {
+		item["knowledge"] = api
+	}
+
+	modelDec, modelMsg := models.CatalogGateAllow, ""
+	if catalog != nil && catalog.HasItems() && modelLookup != nil {
+		dec, msg, err := models.EvaluateCatalogStartGate(catalog, requiredSource, modelLookup)
+		if err == nil {
+			modelDec, modelMsg = dec, msg
 		}
+	}
+	knowledgeDec, knowledgeMsg := models.CatalogGateAllow, ""
+	if knowledge != nil && knowledge.HasItems() && knowledgeLookup != nil {
+		dec, msg, err := models.EvaluateKnowledgeCatalogStartGate(knowledge, requiredSource, knowledgeLookup)
+		if err == nil {
+			knowledgeDec, knowledgeMsg = dec, msg
+		}
+	}
+	dec, msg := models.CombineCatalogStartGates(modelDec, modelMsg, knowledgeDec, knowledgeMsg)
+	if strings.TrimSpace(msg) != "" && (dec == models.CatalogGateWait || dec == models.CatalogGateFail) {
+		item["statusText"] = msg
+		return
 	}
 	if storedStatus != "" {
 		item["statusText"] = storedStatus

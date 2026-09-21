@@ -13,6 +13,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgemanager"
 	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
 	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -53,7 +54,9 @@ type FieldAgent struct {
 	onConfigsUpdate       func(changedUUIDs []string) error
 	processManager        *processmanager.ProcessManager
 	modelMgr              *modelmanager.Manager
+	knowledgeMgr          *knowledgemanager.Manager
 	modelLastUpdate       int64
+	knowledgeLastUpdate   int64
 
 	// Microservice management (for MicroserviceManagerInterface)
 	latestMicroservices  []*models.Microservice
@@ -101,9 +104,10 @@ type FieldAgent struct {
 	processChangesFn func(changes map[string]any) bool
 
 	// test hooks: replace on-demand prune steps for the getChanges prune flag.
-	pruneImagesFn  func() error
-	pruneModelsFn  func() error
-	pruneVolumesFn func() error
+	pruneImagesFn    func() error
+	pruneModelsFn    func() error
+	pruneKnowledgeFn func() error
+	pruneVolumesFn   func() error
 
 	// test hook: replaces controllerReconcile in unit tests.
 	controllerReconcileHook func() error
@@ -351,6 +355,28 @@ func (fa *FieldAgent) modelManager() *modelmanager.Manager {
 	return fa.modelMgr
 }
 
+// SetKnowledgeManager sets the Knowledge manager used for fleet-desired Knowledge ingest.
+func (fa *FieldAgent) SetKnowledgeManager(m *knowledgemanager.Manager) {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	fa.knowledgeMgr = m
+}
+
+func (fa *FieldAgent) knowledgeManager() *knowledgemanager.Manager {
+	fa.mu.Lock()
+	defer fa.mu.Unlock()
+	if fa.knowledgeMgr != nil {
+		return fa.knowledgeMgr
+	}
+	disk := ""
+	if fa.config != nil {
+		disk = fa.config.DiskDirectory
+	}
+	fa.knowledgeMgr = knowledgemanager.New(store.GetInstance(), modelpull.KnowledgeRoot(disk))
+	fa.knowledgeMgr.SetLiveConfig(fa.config)
+	return fa.knowledgeMgr
+}
+
 func (fa *FieldAgent) pruneDanglingImages() error {
 	if fa != nil && fa.pruneImagesFn != nil {
 		return fa.pruneImagesFn()
@@ -373,6 +399,17 @@ func (fa *FieldAgent) pruneUnusedLocalModels() error {
 	return err
 }
 
+func (fa *FieldAgent) pruneUnusedLocalKnowledge() error {
+	if fa != nil && fa.pruneKnowledgeFn != nil {
+		return fa.pruneKnowledgeFn()
+	}
+	if fa == nil {
+		return errors.New("field agent is not initialized")
+	}
+	_, err := fa.knowledgeManager().PruneDangling()
+	return err
+}
+
 func (fa *FieldAgent) setModelLastUpdate(ts int64) {
 	fa.mu.Lock()
 	fa.modelLastUpdate = ts
@@ -383,6 +420,27 @@ func (fa *FieldAgent) getModelLastUpdate() int64 {
 	fa.mu.RLock()
 	defer fa.mu.RUnlock()
 	return fa.modelLastUpdate
+}
+
+func (fa *FieldAgent) setKnowledgeLastUpdate(ts int64) {
+	fa.mu.Lock()
+	fa.knowledgeLastUpdate = ts
+	fa.mu.Unlock()
+}
+
+func (fa *FieldAgent) getKnowledgeLastUpdate() int64 {
+	fa.mu.RLock()
+	defer fa.mu.RUnlock()
+	return fa.knowledgeLastUpdate
+}
+
+// FogKnowledgeStatus returns additive fog and local knowledge status keys.
+// knowledgeStatus is a JSON string; activeKnowledge is the managed count only.
+func (fa *FieldAgent) FogKnowledgeStatus() (knowledgeStatus string, activeKnowledge int, knowledgeLastUpdate int64) {
+	if fa == nil {
+		return "[]", 0, 0
+	}
+	return fa.fogKnowledgeStatus()
 }
 
 // SetControllerStatus updates the agent controller connection status.
@@ -1026,7 +1084,11 @@ func (fa *FieldAgent) clearSQLiteCacheTablesOnDeprovision(preserveLocal bool) {
 	if err := db.ClearControllerRuntimeClasses(); err != nil {
 		logging.LogWarn(moduleName, fmt.Sprintf("Error clearing controller_runtime_classes table: %v", err))
 	}
+	if err := db.ClearControllerKnowledge(); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Error clearing controller_knowledge table: %v", err))
+	}
 	fa.setModelLastUpdate(0)
+	fa.setKnowledgeLastUpdate(0)
 	if !preserveLocal {
 		if err := db.ClearLocalWorkloads(); err != nil {
 			logging.LogWarn(moduleName, fmt.Sprintf("Error clearing local_workloads table: %v", err))

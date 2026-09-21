@@ -234,3 +234,35 @@ func TestCleanupLocalModelsForWatchdog_SkippedWhenDisabled(t *testing.T) {
 		t.Fatal("expected no local model cleanup when watchdog is disabled")
 	}
 }
+
+func TestCleanupLocalKnowledgeForWatchdog_InvokesCallbackWhenEnabled(t *testing.T) {
+	called := false
+	pm := &ProcessManager{}
+	pm.SetWatchdogLocalKnowledgeCallback(func() { called = true })
+
+	cfg := config.GetInstance()
+	orig := cfg.WatchdogEnabled
+	cfg.WatchdogEnabled = true
+	t.Cleanup(func() { cfg.WatchdogEnabled = orig })
+
+	pm.cleanupLocalKnowledgeForWatchdog()
+	if !called {
+		t.Fatal("expected local knowledge cleanup when watchdog is enabled")
+	}
+}
+
+func TestCleanupLocalKnowledgeForWatchdog_SkippedWhenDisabled(t *testing.T) {
+	called := false
+	pm := &ProcessManager{}
+	pm.SetWatchdogLocalKnowledgeCallback(func() { called = true })
+
+	cfg := config.GetInstance()
+	orig := cfg.WatchdogEnabled
+	cfg.WatchdogEnabled = false
+	t.Cleanup(func() { cfg.WatchdogEnabled = orig })
+
+	pm.cleanupLocalKnowledgeForWatchdog()
+	if called {
+		t.Fatal("expected no local knowledge cleanup when watchdog is disabled")
+	}
+}

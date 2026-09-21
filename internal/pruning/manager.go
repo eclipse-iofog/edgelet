@@ -45,6 +45,7 @@ type Manager struct {
 	pruneVolumesHook    func()
 	pruneImagesHook     func()
 	pruneModelsHook     func()
+	pruneKnowledgeHook  func()
 }
 
 var (
@@ -88,6 +89,13 @@ func (m *Manager) SetPruneModelsCallback(fn func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pruneModelsHook = fn
+}
+
+// SetPruneKnowledgeCallback runs on the same scheduled tick as unused local models.
+func (m *Manager) SetPruneKnowledgeCallback(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneKnowledgeHook = fn
 }
 
 // Start starts the Edgelet Pruning Manager
@@ -222,13 +230,15 @@ func (m *Manager) triggerPruneOnFrequency() {
 	logging.LogInfo(moduleName, "Pruning of unwanted images finished")
 }
 
-// runScheduledPrune reclaims unused images, unused local models, and
-// unmanaged stopped containers. Persistent VOLUME data under volumes/data
-// and volumes/shared is not deleted here; operators reclaim it explicitly.
+// runScheduledPrune reclaims unused images, unused local models, unused
+// local Knowledge, and unmanaged stopped containers. Persistent VOLUME data
+// under volumes/data and volumes/shared is not deleted here; operators
+// reclaim it explicitly.
 func (m *Manager) runScheduledPrune() {
 	m.pruneContainers()
 	m.pruneImagesRunner()
 	m.pruneModels()
+	m.pruneKnowledge()
 }
 
 func (m *Manager) pruneContainers() {
@@ -260,6 +270,12 @@ func (m *Manager) pruneImagesRunner() {
 func (m *Manager) pruneModels() {
 	if m.pruneModelsHook != nil {
 		m.pruneModelsHook()
+	}
+}
+
+func (m *Manager) pruneKnowledge() {
+	if m.pruneKnowledgeHook != nil {
+		m.pruneKnowledgeHook()
 	}
 }
 

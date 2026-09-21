@@ -148,10 +148,10 @@ func TestSchemaV1_SchemaVersionOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schema_versions row: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("expected latest schema version 3, got %d", version)
+	if version != 4 {
+		t.Fatalf("expected latest schema version 4, got %d", version)
 	}
-	if description != "003_edgelet_schema_v3.sql" {
+	if description != "004_edgelet_schema_v4.sql" {
 		t.Fatalf("unexpected migration description: %q", description)
 	}
 
@@ -167,8 +167,8 @@ func TestSchemaV1_SchemaVersionOne(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("max schema version: %v", err)
 	}
-	if maxVersion != 3 {
-		t.Fatalf("expected max schema version 3, got %d", maxVersion)
+	if maxVersion != 4 {
+		t.Fatalf("expected max schema version 4, got %d", maxVersion)
 	}
 }
 
@@ -199,8 +199,8 @@ func TestSchemaV1_ReopenKeepsVersionOne(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version after reopen: %v", err)
 	}
-	if maxVersion != 3 {
-		t.Fatalf("expected max schema version 3 after reopen, got %d", maxVersion)
+	if maxVersion != 4 {
+		t.Fatalf("expected max schema version 4 after reopen, got %d", maxVersion)
 	}
 }
 

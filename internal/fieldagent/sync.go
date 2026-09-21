@@ -15,7 +15,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/volumemount"
 )
 
-// loadInitialControllerData reloads registries, volume mounts, models, runtime classes, microservices, and config
+// loadInitialControllerData reloads registries, volume mounts, models, knowledge, runtime classes, microservices, and config
 // from the controller (or cache when isConnected is false). Matches the provisioned boot
 // path in Start() and live reprovision in Provision() without restarting background workers.
 func (fa *FieldAgent) loadInitialControllerData(isConnected bool) {
@@ -58,6 +58,13 @@ func (fa *FieldAgent) loadInitialControllerData(isConnected bool) {
 		logging.LogWarn(moduleName, fmt.Sprintf("Failed to load models on startup: %v", err))
 	} else {
 		logging.LogDebug(moduleName, "Models loaded successfully")
+	}
+
+	logging.LogDebug(moduleName, "Loading knowledge")
+	if err := fa.loadKnowledge(fromFile); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Failed to load knowledge on startup: %v", err))
+	} else {
+		logging.LogDebug(moduleName, "Knowledge loaded successfully")
 	}
 
 	logging.LogDebug(moduleName, "Loading runtime classes")
