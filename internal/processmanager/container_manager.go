@@ -556,6 +556,9 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	if err := cm.applyCatalogStartGate(ms); err != nil {
 		return err
 	}
+	if cm.volumeHeld(ms) {
+		return errVolumeInUse
+	}
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStatePulling)
 	})

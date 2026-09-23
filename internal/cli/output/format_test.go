@@ -35,9 +35,67 @@ func TestFormatEdgeletAPIHuman_StatusOrder(t *testing.T) {
 		"cpuUsage":               "1%",
 		"zzzExtra":               "x",
 	})
-	expectedPrefix := "connectionToController: not provisioned\ncpuUsage: 1%"
-	if len(out) < len(expectedPrefix) || out[:len(expectedPrefix)] != expectedPrefix {
+	if !strings.HasPrefix(out, "connectionToController: not provisioned\n") {
 		t.Fatalf("unexpected order output: %s", out)
+	}
+	if !strings.Contains(out, "cpuUsage:") {
+		t.Fatalf("expected cpuUsage line when edgeletStackCpu absent: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_StatusStackHumanUnits(t *testing.T) {
+	var agentMemBytes int64 = 25_667_952 // 24.48 MiB
+	out := FormatEdgeletAPIHuman("/v1/system/status", map[string]any{
+		"connectionToController": "ok",
+		"agentCpu":               0.03,
+		"agentMemory":            agentMemBytes,
+		"edgeletStackCpu":        0.05,
+		"edgeletStackMemory":     agentMemBytes,
+		"cpuUsage":               5.0,
+		"diskUsage":              0.000273,
+	})
+	if strings.Contains(out, "cpuUsage:") {
+		t.Fatalf("expected cpuUsage hidden when edgeletStackCpu present: %s", out)
+	}
+	if strings.Contains(out, "about") {
+		t.Fatalf("expected stack CPU without legacy about suffix: %s", out)
+	}
+	for _, want := range []string{
+		"agentCpu: 0.0300 cores",
+		"edgeletStackCpu: 0.0500 cores",
+		"agentMemory: 24.48 MiB",
+		"edgeletStackMemory: 24.48 MiB",
+		"diskUsage: 0.28 MiB (edgelet data)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_StatusHostCapacityHumanUnits(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/system/status", map[string]any{
+		"connectionToController": "ok",
+		"systemCpus":             8,
+		"systemTotalMemory":      float64(17_179_869_184),
+		"systemAvailableMemory":  float64(3_964_993_536),
+		"systemTotalDisk":        float64(494_384_795_648),
+		"systemAvailableDisk":    float64(21_714_755_584),
+		"systemTotalCpu":         20.854271355828516,
+	})
+	if strings.Contains(out, "e+") {
+		t.Fatalf("expected human byte units, not scientific notation: %s", out)
+	}
+	for _, want := range []string{
+		"systemTotalMemory: 16.00 GiB",
+		"systemAvailableMemory: 3.69 GiB",
+		"systemTotalDisk: 460.43 GiB",
+		"systemAvailableDisk: 20.22 GiB",
+		"systemTotalCpu: 20.85 %",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
 	}
 }
 
@@ -47,7 +105,7 @@ func TestFormatEdgeletAPIHuman_StatusIncludesAvailableNetworkInterfacesAfterTota
 		"availableNetworkInterfaces": "eth0, wlan0",
 		"connectionToController":     "ok",
 	})
-	totalCPULine := "systemTotalCpu: 3200%"
+	totalCPULine := "systemTotalCpu: 3200.00 %"
 	availableInterfacesLine := "availableNetworkInterfaces: eth0, wlan0"
 	totalIdx := strings.Index(out, totalCPULine)
 	availableIdx := strings.Index(out, availableInterfacesLine)

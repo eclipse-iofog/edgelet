@@ -11,7 +11,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [installation.md](installation.md) | install.sh, OTA, upgrade/rollback, controller readiness |
 | [deployment.md](deployment.md) | Production topology, engines, systemd, provisioning |
 | [persistence.md](persistence.md) | SQLite backup/restore, schema v4 in-place upgrade, secrets threat model |
-| [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity, microservice crashes |
+| [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity, leftover volume locks, microservice crashes |
 | [logging.md](logging.md) | Structured events, log levels, journald queries |
 
 ## Runtime and workloads

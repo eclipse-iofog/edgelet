@@ -47,6 +47,7 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		augmentWithCgroupStatus(statusMap)
 	}
 	augmentWithRuntimeStatus(statusMap)
+	augmentWithResourceMetrics(statusMap)
 	statusMap["runtimeClasses"] = statusreporter.GetAppliedRuntimeClasses()
 	statusMap["availableCdiDevices"] = statusreporter.GetAvailableCDIDevices()
 	knowledgeStatus, activeKnowledge, knowledgeLastUpdate := fieldagent.GetInstance().FogKnowledgeStatus()
@@ -121,6 +122,60 @@ func augmentWithDNSStatus(status map[string]any) {
 	status["dnsRateLimitedTotal"] = strconv.FormatUint(s.RateLimitedTotal, 10)
 	status["dnsRejectedTotal"] = strconv.FormatUint(s.RejectedTotal, 10)
 	status["dnsHealth"] = deriveDNSHealth(s)
+}
+
+var legacyLocalResourceMetricKeys = []string{
+	"agentCpuPercent",
+	"agentMemoryMiB",
+	"runtimeCpuPercent",
+	"runtimeMemoryMiB",
+	"edgeletTotalCpuPercent",
+	"edgeletTotalMemoryMiB",
+}
+
+func augmentWithResourceMetrics(status map[string]any) {
+	if status == nil {
+		return
+	}
+	for _, key := range legacyLocalResourceMetricKeys {
+		delete(status, key)
+	}
+
+	rcs := statusreporter.GetInstance().GetResourceConsumptionManagerStatus()
+	status["agentCpu"] = stackCPUScaleToCores(rcs.AgentCPUPercent)
+	status["agentMemory"] = stackMemoryMiBToBytes(rcs.AgentMemoryMiB)
+	status["runtimeCpu"] = stackCPUScaleToCores(rcs.RuntimeCPUPercent)
+	status["runtimeMemory"] = stackMemoryMiBToBytes(rcs.RuntimeMemoryMiB)
+	status["runtimeAvailable"] = rcs.RuntimeAvailable
+	status["runtimeDegraded"] = rcs.RuntimeDegraded
+	status["runtimeTracked"] = rcs.RuntimeTracked
+	status["edgeletStackCpu"] = stackCPUScaleToCores(rcs.EdgeletTotalCPUPercent)
+	status["edgeletStackMemory"] = stackMemoryMiBToBytes(rcs.EdgeletTotalMemoryMiB)
+	// Controller-shaped aliases (PUT status units).
+	status["cpuUsage"] = rcs.CPUUsage
+	status["memoryUsage"] = rcs.MemoryUsage
+	status["diskUsage"] = rcs.DiskUsage
+
+	status["systemCpus"] = rcs.SystemCpus
+	status["systemOs"] = rcs.SystemOs
+	status["systemOsVersion"] = rcs.SystemOsVersion
+	status["systemKernelVersion"] = rcs.SystemKernelVersion
+	status["systemTotalMemory"] = rcs.SystemTotalMemory
+	status["systemTotalDisk"] = rcs.TotalDiskSpace
+	status["systemAvailableMemory"] = rcs.AvailableMemory
+	status["systemAvailableDisk"] = rcs.AvailableDisk
+	status["systemTotalCpu"] = rcs.TotalCPU
+}
+
+func stackCPUScaleToCores(scale float64) float64 {
+	return scale / 100.0
+}
+
+func stackMemoryMiBToBytes(mib float64) int64 {
+	if mib <= 0 {
+		return 0
+	}
+	return int64(mib * 1024 * 1024) // #nosec G115 -- RSS MiB fits in int64
 }
 
 func deriveDNSHealth(s dnsresolver.StatsSnapshot) string {

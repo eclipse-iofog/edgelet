@@ -39,7 +39,7 @@ var configKeyRules = map[string]configKeyRule{
 	"diskLimitGiB":           {Key: "diskLimitGiB", Aliases: []string{"d"}, Type: configValueFloat, Help: "disk usage limit (GiB)"},
 	"diskDirectory":          {Key: "diskDirectory", Aliases: []string{"dl"}, Type: configValueString, Help: "disk directory"},
 	"memoryLimitMiB":         {Key: "memoryLimitMiB", Aliases: []string{"m"}, Type: configValueFloat, Help: "memory limit (MiB)"},
-	"cpuLimitPercent":        {Key: "cpuLimitPercent", Aliases: []string{"p"}, Type: configValueFloat, Help: "CPU limit (%)"},
+	"cpuLimitPercent":        {Key: "cpuLimitPercent", Aliases: []string{"p"}, Type: configValueFloat, Help: "Edgelet stack CPU alarm threshold (5–400; 100 = one logical CPU)"},
 	"logLimitGiB":            {Key: "logLimitGiB", Aliases: []string{"l"}, Type: configValueFloat, Help: "log limit (GiB)"},
 	"logDirectory":           {Key: "logDirectory", Aliases: []string{"ld"}, Type: configValueString, Help: "log directory"},
 	"logFileCount":           {Key: "logFileCount", Aliases: []string{"lc"}, Type: configValueInt, Help: "log file count"},

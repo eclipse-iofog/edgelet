@@ -41,6 +41,15 @@ func TestReapShimsForStaleTask_NoShims(t *testing.T) {
 	}
 }
 
+func TestReapManagedShimsForSocket_RefusesWhileContainerdChildIsLive(t *testing.T) {
+	setLiveContainerdChildPID(4242)
+	t.Cleanup(func() { clearLiveContainerdChildPID(4242) })
+	err := reapManagedShimsForSocket("/run/edgelet/containerd.sock", time.Second)
+	if err == nil {
+		t.Fatal("expected shim reap to wait until the containerd child has stopped")
+	}
+}
+
 func TestReapManagedShimsForSocket_FastDeleteShimPath(t *testing.T) {
 	prevFinder := findManagedShimPIDs
 	prevSignal := signalPID

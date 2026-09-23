@@ -717,6 +717,10 @@ func TestCleanupRuntimeArtifacts_StillOnRetry(t *testing.T) {
 	if err := os.WriteFile(stateMarker, []byte("stale"), 0o600); err != nil {
 		t.Fatalf("write state marker: %v", err)
 	}
+	controlSocket := filepath.Join(runDir, "edgelet.sock")
+	if err := os.WriteFile(controlSocket, []byte("sock"), 0o600); err != nil {
+		t.Fatalf("write control socket: %v", err)
+	}
 
 	if err := CleanupRuntimeArtifacts(); err != nil {
 		t.Fatalf("artifact cleanup failed: %v", err)
@@ -729,6 +733,34 @@ func TestCleanupRuntimeArtifacts_StillOnRetry(t *testing.T) {
 	}
 	if _, err := os.Stat(runDir); err != nil {
 		t.Fatalf("expected run dir recreated, stat err=%v", err)
+	}
+	if _, err := os.Stat(controlSocket); err != nil {
+		t.Fatalf("expected control-plane socket preserved, stat err=%v", err)
+	}
+	if _, err := os.Stat(runtimeArtifactCleanupSocket); !os.IsNotExist(err) {
+		t.Fatalf("expected containerd socket removed, stat err=%v", err)
+	}
+}
+
+func TestCleanupStaleRuntimeTasks_PreservesNamespaceDirectory(t *testing.T) {
+	stateDir, _ := withTempCleanupDirs(t)
+	namespaceDir := filepath.Join(stateDir, runtimeV2TaskDirName, "k8s.io")
+	unmarked := filepath.Join(namespaceDir, "wasm-task")
+	if err := os.MkdirAll(unmarked, 0o755); err != nil {
+		t.Fatalf("mkdir unmarked task: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unmarked, "log.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	if err := CleanupStaleRuntimeTasks(); err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+	if _, err := os.Stat(namespaceDir); err != nil {
+		t.Fatalf("expected namespace directory preserved, stat err=%v", err)
+	}
+	if _, err := os.Stat(unmarked); !os.IsNotExist(err) {
+		t.Fatalf("expected unmarked task directory removed, stat err=%v", err)
 	}
 }
 

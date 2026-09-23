@@ -630,6 +630,7 @@ func (pm *ProcessManager) containersMonitor() {
 			// Continue to monitoring immediately
 		}
 
+		ObserveDataPlaneDrainHold()
 		if IsQuiesced() {
 			pm.logger.Debug("Reconcile quiesced (pending engine restart)")
 			continue
@@ -917,6 +918,10 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 		item.FailureCount = 0
 	case "created":
 		if err := pm.startLocalMicroservice(item.LocalUUID); err != nil {
+			if errors.Is(err, errVolumeInUse) {
+				pm.noteLocalVolumeHold(item)
+				return
+			}
 			if nr, ok := engine.IsNonRestartableContainerError(err); ok {
 				pm.logger.Warnf(
 					"local reconcile created start failed with non-restartable terminal state localUUID=%s containerID=%s reason=%s exitCode=%d criMessage=%q decision=recreate",
@@ -947,11 +952,15 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 				reason,
 				exitCode,
 			)
-			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil {
+			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
 				return
 			}
 		}
 		if err := pm.startLocalMicroservice(item.LocalUUID); err != nil {
+			if errors.Is(err, errVolumeInUse) {
+				pm.noteLocalVolumeHold(item)
+				return
+			}
 			if nr, ok := engine.IsNonRestartableContainerError(err); ok {
 				pm.logger.Warnf(
 					"local reconcile exiting start failed with non-restartable terminal state localUUID=%s containerID=%s reason=%s exitCode=%d criMessage=%q decision=recreate",
@@ -961,7 +970,7 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 					nr.ExitCode,
 					nr.Message,
 				)
-				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil {
+				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
 					return
 				}
 			}
@@ -1013,6 +1022,12 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 
 	image := doc.ManifestImage()
 	localMS := models.BuildMicroserviceFromLocalManifest(doc, item.LocalUUID, image)
+	if pm.deferVolumeCreate(localMS, nil) {
+		item.LastError = volumeInUseStatusText
+		item.LastTransitionAt = now
+		_ = persistLocalWorkloadIfPresent(item)
+		return
+	}
 	registry := models.NewRegistry(2, "from_cache", true, "", "", "")
 	if doc.Spec.Registry != nil {
 		if reg, err := store.GetInstance().GetLocalRegistry(*doc.Spec.Registry); err == nil && reg != nil {
@@ -1030,6 +1045,10 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 	containerID, err := pm.LaunchLocalMicroservice(localMS, registry, hostIP)
 	if err != nil {
+		if errors.Is(err, errVolumeInUse) {
+			pm.noteLocalVolumeHold(item)
+			return
+		}
 		if errors.Is(err, modelcatalog.ErrWaiting) {
 			item.RuntimeState = "queued"
 			item.State = item.RuntimeState
@@ -1104,6 +1123,15 @@ func (pm *ProcessManager) checkTasks() {
 		}
 
 		if err := pm.executeTask(task); err != nil {
+			if errors.Is(err, errVolumeInUse) {
+				pm.noteVolumeInUse(task.MicroserviceUUID)
+				if pm.microserviceManager != nil {
+					if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+						ms.SetIsUpdating(false)
+					}
+				}
+				continue
+			}
 			pm.logger.Errorf("Error executing task %s for microservice %s: %v", task.Action, task.MicroserviceUUID, err)
 			if task.Retries < maxTaskRetries {
 				pm.retryTask(task)
@@ -1383,7 +1411,15 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 					continue
 				}
 			}
-			if crashDrivenMissing(lookupReporterStatus(ms.MicroserviceUUID)) && !ms.Rebuild {
+			if pm.deferVolumeCreate(ms, nil) {
+				continue
+			}
+			existing := lookupReporterStatus(ms.MicroserviceUUID)
+			released := volumeWaitActive(existing)
+			if released {
+				pm.clearVolumeWait(ms.MicroserviceUUID)
+			}
+			if crashDrivenMissing(existing) && !ms.Rebuild && !released {
 				pm.recordRestart(ms.MicroserviceUUID)
 			}
 			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
@@ -1438,6 +1474,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 				pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
 				continue
 			}
+			if pm.deferVolumeCreate(ms, status) {
+				continue
+			}
 			sandboxID, _ := pm.engine.GetContainerSandboxID(container.ID)
 			if stats != nil {
 				stats.scheduledUpdate++
@@ -1463,6 +1502,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 				pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
 				continue
 			}
+			if pm.deferVolumeCreate(ms, status) {
+				continue
+			}
 			sandboxID, _ := pm.engine.GetContainerSandboxID(container.ID)
 			pm.emitReconcileDecision(ms.MicroserviceUUID, "START", "created_container", "starting created container", runtimeops.LevelInfo, map[string]any{
 				"containerId": container.ID,
@@ -1478,6 +1520,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 					if !checker.Ready(ms.MicroserviceUUID, skip) {
 						pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
 						pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
+						continue
+					}
+					if pm.deferVolumeCreate(ms, status) {
 						continue
 					}
 					if stats != nil {
@@ -1618,11 +1663,21 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 
 	shouldUpdate := pm.shouldContainerBeUpdated(ms, container, status)
 	if shouldUpdate {
+		// A running container is stopped before replacement. The create that
+		// follows still refuses to start while a host process holds the volume.
+		if status.Status != models.MicroserviceStateRunning && pm.deferVolumeCreate(ms, nil) {
+			return
+		}
+		existing := lookupReporterStatus(ms.MicroserviceUUID)
+		released := volumeWaitActive(existing)
+		if released {
+			pm.clearVolumeWait(ms.MicroserviceUUID)
+		}
 		if ms.IsStuckInRestart {
 			ms.IsStuckInRestart = false
 		}
 		skip := pm.recreateSkipReason(ms)
-		if status.Status != models.MicroserviceStateRunning && !ms.Rebuild {
+		if status.Status != models.MicroserviceStateRunning && !ms.Rebuild && !released {
 			pm.recordRestart(ms.MicroserviceUUID)
 			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
 				pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
@@ -2092,8 +2147,16 @@ func (pm *ProcessManager) recreateLocalDeployment(item *models.LocalDeployedMicr
 		pm.bumpLocalFailure(item, err, "failed")
 		return err
 	}
+	if existing, lookupErr := pm.containerManager.GetContainerForMicroservice(item.LocalUUID); lookupErr == nil && existing == nil && pm.volumeHeld(ms) {
+		pm.noteLocalVolumeHold(item)
+		return errVolumeInUse
+	}
 	newID, err := pm.containerManager.RecreateContainer(pm.reconcileOperationContext(item.LocalUUID), ms, RecreateOptions{PullImage: pullImage})
 	if err != nil {
+		if errors.Is(err, errVolumeInUse) {
+			pm.noteLocalVolumeHold(item)
+			return err
+		}
 		pm.bumpLocalFailure(item, err, "failed")
 		return err
 	}
@@ -2140,6 +2203,9 @@ func (pm *ProcessManager) StartMicroservice(microserviceUUID string) error {
 		return err
 	}
 	if container == nil {
+		if ms, resolveErr := pm.resolveMicroserviceForLifecycle(microserviceUUID); resolveErr == nil && pm.deferVolumeCreate(ms, nil) {
+			return errVolumeInUse
+		}
 		_, err := pm.recreateMicroservice(microserviceUUID, true)
 		return err
 	}
@@ -2153,6 +2219,9 @@ func (pm *ProcessManager) StartMicroservice(microserviceUUID string) error {
 	}
 	if status.Status == models.MicroserviceStateRunning {
 		return nil
+	}
+	if ms, resolveErr := pm.resolveMicroserviceForLifecycle(microserviceUUID); resolveErr == nil && pm.deferVolumeCreate(ms, status) {
+		return errVolumeInUse
 	}
 	if engine.SupportsInPlaceRestart(pm.engineName) {
 		return pm.containerManager.StartContainerByMicroserviceUUID(ctx, microserviceUUID)
@@ -2358,6 +2427,10 @@ func (pm *ProcessManager) LaunchLocalMicroserviceWithProgress(ms *models.Microse
 func (pm *ProcessManager) launchLocalMicroserviceWithProgressLocked(ms *models.Microservice, registry *models.Registry, hostIP string, progress LocalDeployProgressCallback) (string, error) {
 	if err := pm.gateLocalCatalog(ms); err != nil {
 		return "", err
+	}
+	if pm.volumeHeld(ms) {
+		pm.noteVolumeInUse(ms.MicroserviceUUID)
+		return "", errVolumeInUse
 	}
 	if strings.TrimSpace(hostIP) == "" {
 		hostIP = network.GetInstance().GetCurrentIPAddress()

@@ -55,7 +55,18 @@ Cgroup bootstrap runs in `edgelet runtime-bootstrap` on the containerd unit. Con
 
 **systemd coupling:** `edgelet-containerd.service` is **not** `PartOf=edgelet.service`. Stopping or restarting **only** `edgelet` leaves the data plane running.
 
-**Data-plane stop (catalog runtimes included):** stopping or restarting `edgelet-containerd` drains labeled microservice containers first (`edgelet runtime drain`), then stops embedded containerd and reaps edgelet-managed shims. Total stop budget is **120 seconds** (default 90s drain + 30s reap/cleanup). If the control plane is briefly unavailable during stop, the data plane proceeds with degraded teardown rather than blocking indefinitely.
+**Data-plane stop:** `systemctl stop edgelet-containerd` (OpenRC: `rc-service edgelet-containerd stop`; other inits signal the same `edgelet runtime-bootstrap` process) drains labeled workloads through CRI while containerd is still up. Drain does not use the control-plane socket. The systemd stop budget is **120 seconds**.
+
+1. **Grace.** CRI stop (SIGTERM). Workloads that exclusive-lock a file on a persistent volume get a longer stop timeout than the 10 second runtime default.
+2. **Release.** Remove labeled containers, then their pod sandboxes (only after container delete succeeds). Exited containers are not stopped again.
+3. **Force.** SIGKILL leftover labeled processes and any process still holding `{diskDirectory}/volumes/data/` or `volumes/shared/`, except the data-plane parent, the live containerd child, and shims still attached to its socket.
+4. **Verify.** No non–data-plane process holds those volume trees, and no leftover labeled task remains.
+5. **Verify pass.** Write `/run/edgelet/drain-verified`, stop containerd, then `edgelet runtime reap-orphans` may reap shims (reap runs only after containerd stops).
+6. **Verify fail, timeout, or incomplete drain.** Containerd is left running and **shims are not reaped**. `runtime-bootstrap` clears the drain hold and stays in its signal loop (the unit remains active). Journal module `RUNTIME_BOOTSTRAP` records `drain_verify_failed`, `drain_timeout`, or `drain_degraded`, often with `leaving containerd running`.
+
+**Control-only restart** (`systemctl restart edgelet`, or a thin OTA whose ready embed hash already matches) leaves workloads running.
+
+`edgelet runtime drain` still drains through the control plane when it is up. `edgelet runtime drain --direct` is the CRI path used when the control socket is down. `reap-orphans` skips when `/run/edgelet/drain-verified` is absent.
 
 **Full embedded shutdown** (backup, uninstall, wipe):
 
@@ -131,12 +142,13 @@ Changing **`containerEngine`** still requires quiesce, MS cleanup, `pendingResta
 
 ## OTA restart matrix
 
-| Bundle change | Restart |
-|---------------|---------|
-| Thin **edgelet** binary only | `systemctl restart edgelet` |
-| Fat / containerd runtime bundle | `systemctl restart edgelet-containerd` then `edgelet` |
+| Change | Restart |
+|--------|---------|
+| **Thin OTA** — ready `data/current` embed hash matches the new binary | `edgelet` only. Workloads stay up. |
+| **Fat OTA** — embed hash changed, or `data/current` is missing or not ready | Drain and verify, then stop the data plane, replace the binary, start the data plane, start control. Verify failure aborts; the old binary stays and shims are not reaped. |
+| docker / podman | Control only. `edgelet-containerd` is not restarted. |
 
-See [installation.md](installation.md) for hash-based OTA details.
+See [installation.md](installation.md#fat-ota-and-thin-ota).
 
 ---
 

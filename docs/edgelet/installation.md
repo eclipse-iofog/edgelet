@@ -187,22 +187,30 @@ flowchart TD
   C -->|upgrade| U[Read install-receipt]
   C -->|rollback| R[Read previous-release]
   F --> D[download_or_stage_binary]
-  U --> U1[Backup config]
-  U1 --> U2[Cache old binary + write previous-release]
-  U2 --> U3[stop_edgelet_service]
-  U3 --> D
+  D --> VF[verify checksum]
+  VF --> IB[install_binary_file]
+  U --> U1[Backup config + cache old binary]
+  U1 --> UD[download_or_stage_binary]
+  UD --> V[verify checksum]
+  V --> RB{Fat or thin OTA?}
   R --> R1[Resolve binary: cache / --bin-path / URL]
-  R1 --> R2[stop_edgelet_service]
-  R2 --> IB[install_binary_file]
-  D --> V[verify_binary_checksum]
-  V --> IB
-  IB --> ID[install_dirs + config + receipt]
+  R1 --> RB
+  RB -->|fat| Q[drain + verify]
+  Q -->|pass| SDP[stop data plane]
+  SDP --> IB
+  Q -->|fail| ABORT[exit; old binary stays]
+  RB -->|thin, or docker/podman| SC[stop control only]
+  SC --> IB
+  IB --> ID[install_dirs + config]
   ID --> BS[copy_bundled_scripts]
   BS --> IU{linux?}
   IU -->|yes| INIT[install_init_unit → start services]
   IU -->|no| DONE[Done]
-  INIT --> DONE
+  INIT --> REC[write receipt on success]
+  REC --> DONE
 ```
+
+Fresh install writes the receipt before the first start. Upgrade and rollback write it after services start, and only after drain has verified when a data-plane restart was required.
 
 ### Phase 1 — Bootstrap
 
@@ -231,17 +239,20 @@ Constants set at the top of `install.sh`:
 
 ### Phase 3 — Upgrade (`--upgrade`)
 
-Requires an existing binary and `install-receipt`.
+Requires an existing binary and `install-receipt`. Control and the data plane stay up until the staged binary is checksum-verified. Fat and thin upgrades then diverge — see [Fat OTA and thin OTA](#fat-ota-and-thin-ota).
 
 1. Read current receipt (`installed_version`, `os`, `arch`, `container_engine`, `source_url`, `binary_sha256`)
 2. Resolve target version (`--version=` or GitHub `latest`)
 3. Copy `/etc/edgelet/config.yaml` to `/var/backups/edgelet/config.yaml.<timestamp>`
 4. `cache_binary` — copy current thin binary to `cache/edgelet-<ver>-<os>-<arch>`
-5. `write_previous_release` — record rollback metadata including `config_backup_path`
-6. `stop_edgelet_service`
-7. Download or stage new binary, verify checksum, install
-8. Update receipt (`install_method=upgrade` or `upgrade-airgap`)
-9. Refresh bundled scripts and `install_init_unit` — **restarts** edgelet via init; when `containerEngine=edgelet` and the embedded bundle hash changed, **stop/start** `edgelet-containerd` before edgelet
+5. Download or stage the new binary and verify its checksum
+6. Replace the binary:
+   - **Fat OTA** (`containerEngine=edgelet`, and the ready embed hash is missing or different): drain and verify while control is still up. Verify failure exits non-zero and leaves the installed binary in place. Verify success stops the data plane, then installs the new thin binary.
+   - **Thin OTA** (ready `data/current` matches the new embed hash), and **docker / podman**: stop the control service only. The data plane is not stopped.
+7. `write_previous_release` — record rollback metadata including `config_backup_path`
+8. Refresh directories, config, and bundled scripts
+9. `install_init_unit` — start control; when a data-plane restart was required, start `edgelet-containerd` first
+10. Write the install receipt only after that success (`install_method=upgrade` or `upgrade-airgap`)
 
 ```bash
 sudo sh /usr/share/edgelet/install.sh --upgrade --version=v1.2.3
@@ -250,15 +261,15 @@ sudo sh /usr/share/edgelet/install.sh --upgrade   # target = GitHub latest
 
 ### Phase 4 — Rollback (`--rollback`)
 
-Requires `previous-release` from the last upgrade.
+Requires `previous-release` from the last successful upgrade.
 
 1. Read `previous_version`, `previous_os`, `previous_arch`, `previous_download_url`, `config_backup_path`
 2. Prefer cached binary at `cache/edgelet-<previous_version>-<os>-<arch>`
 3. Else `--bin-path` (with optional `--airgap`), else download from `previous_download_url`
-4. `stop_edgelet_service`, install old binary
+4. Same fat vs thin replace as upgrade: drain and verify before a data-plane stop when the embed hash requires it; otherwise stop control only
 5. Restore config from `config_backup_path` unless `--force-config`
-6. `write_install_receipt` with `install_method=rollback`
-7. `install_init_unit` — **restarts** edgelet
+6. `install_init_unit` — start services (data plane first when a restart was required)
+7. `write_install_receipt` with `install_method=rollback` after that success
 
 ```bash
 sudo sh /usr/share/edgelet/install.sh --rollback
@@ -270,7 +281,7 @@ sudo sh /usr/share/edgelet/install.sh --rollback
 
 ### `install-receipt`
 
-Written after every successful install, upgrade, or rollback (`chmod 600`):
+Written after every successful install, upgrade, or rollback (`chmod 600`). On an upgrade or rollback that must restart the data plane, the receipt is written only after drain verified, the new thin binary is installed, and services have been started. A failed verify does not update the receipt.
 
 ```text
 installed_version=v1.2.3
@@ -287,7 +298,7 @@ binary_sha256=<sha256>
 
 ### `previous-release`
 
-Written on **upgrade** before replacing the binary:
+Written on **upgrade** after the thin binary is replaced (a failed drain never reaches this step):
 
 ```text
 previous_version=v1.2.2
@@ -311,7 +322,7 @@ Rollback uses the cache first; the version handler treats cache **or** a reachab
 
 ## Layer 2 — Fat embed (daemon)
 
-After a thin upgrade, if the embedded bundle hash changed, the next `edgelet daemon` start:
+After a fat upgrade, the next data-plane start:
 
 1. Extracts to `/var/lib/edgelet/data/<new-hash>/`
 2. Rotates `data/current` and `data/previous` symlinks
@@ -319,14 +330,29 @@ After a thin upgrade, if the embedded bundle hash changed, the next `edgelet dae
 
 Operator CLI (`edgelet ms`, `edgelet deploy`, …) runs in the **thin** process and does not trigger extract.
 
-### Service restart impact
+### Fat OTA and thin OTA
 
-| Change | Restart | Microservice impact |
-|--------|---------|---------------------|
-| Thin binary only (same embed hash) | `systemctl restart edgelet` (done by `install_init_unit`) | None on docker/podman; none on embedded split |
-| New embed hash | `edgelet-containerd` then `edgelet` (automated by `install.sh` when hash differs) | MS stop during data-plane restart; reconcile on control start |
+`install.sh` compares the new binary’s embed hash (`edgelet version --verbose`, line `embed hash:`) with the **ready** install under `/var/lib/edgelet/data/current`. Ready means that symlink points at a bundle whose `bin/edgelet` is the fat runtime. A `data/<hash>/` directory that exists without that fat binary is not installed.
 
-Details: [workload-continuity.md](workload-continuity.md).
+| OTA | When | What `install.sh` does |
+|-----|------|------------------------|
+| **Thin** | `containerEngine=edgelet` and ready `data/current` already matches the new embed hash | Replace the thin binary and restart **`edgelet` only**. Workloads keep running. |
+| **Fat** | `containerEngine=edgelet` and ready `data/current` is missing or has a different embed hash | Drain and verify, **then** stop the data plane, **then** replace the thin binary, then start the data plane and control. |
+| **docker / podman** | Engine is not `edgelet` | Restart control only. `edgelet-containerd` is never restarted. |
+
+Fat order, while control is still up:
+
+1. Drain labeled workloads through CRI (SIGTERM, then SIGKILL of leftovers and volume holders) and verify no process still holds `volumes/data/` or `volumes/shared/`.
+2. If verify fails, `install.sh` exits non-zero with `Data-plane drain did not verify; binary was not replaced`. The installed binary, the receipt, and workload shims stay as they were.
+3. If verify passes, stop `edgelet-containerd`, install `/usr/local/bin/edgelet`, start the data plane, start control, then write the install receipt.
+
+```bash
+# Installed embed hash is the directory name behind a ready current symlink.
+readlink /var/lib/edgelet/data/current
+/usr/local/bin/edgelet version --verbose
+```
+
+Details: [workload-continuity.md](workload-continuity.md). Journal and install.sh messages for a failed drain: [troubleshooting.md](troubleshooting.md#leftover-process-holding-a-volume).
 
 Coordinated rollback: controller or operator runs `install.sh --rollback`; an on-disk `data/previous` hash tree may still be reused if present.
 
@@ -566,7 +592,9 @@ sudo ./test/install/install-airgap.sh
 | `readyToUpgrade` never true | Receipt version vs target; daemon health; missing `/usr/share/edgelet/install.sh` |
 | Controller OTA no-op | Readiness false at command time; inspect daemon logs for version handler |
 | Rollback fails | `previous-release` missing; cache deleted; URL unreachable |
-| MS down after upgrade | New embed hash → see [workload-continuity.md](workload-continuity.md) |
+| MS down after upgrade | Fat OTA (embed hash change) stops workloads during the data-plane restart; thin OTA does not. See [workload-continuity.md](workload-continuity.md) |
+| Upgrade exits `drain did not verify` | Old binary is still installed. Journal `module=RUNTIME_BOOTSTRAP`. See [troubleshooting.md](troubleshooting.md#leftover-process-holding-a-volume) |
+| `volume in use by a leftover process` | A host process still holds the volume. Do not `edgelet volume rm`. See [troubleshooting.md](troubleshooting.md#leftover-process-holding-a-volume) |
 
 General daemon and service issues: [troubleshooting.md](troubleshooting.md).
 

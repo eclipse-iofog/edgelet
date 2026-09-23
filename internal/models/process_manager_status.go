@@ -94,6 +94,24 @@ func (p *ProcessManagerStatus) SetMicroservicesStatePercentage(microserviceUUID 
 	return p
 }
 
+// SetMicroserviceStatusWait records wait text on the current error and lastError.
+// The runtime state is left unchanged.
+func (p *ProcessManagerStatus) SetMicroserviceStatusWait(microserviceUUID, message string) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	status := p.MicroservicesStatus[microserviceUUID]
+	if status == nil {
+		status = NewMicroserviceStatus()
+		p.MicroservicesStatus[microserviceUUID] = status
+	}
+	status.ErrorMessage = &message
+	if strings.TrimSpace(message) != "" {
+		status.LastError = message
+		status.LastErrorAt = time.Now().UnixMilli()
+	}
+	return p
+}
+
 // SetMicroservicesStatusErrorMessage sets the error message for a microservice and returns the status for chaining
 func (p *ProcessManagerStatus) SetMicroservicesStatusErrorMessage(microserviceUUID string, message string) *ProcessManagerStatus {
 	p.mu.Lock()

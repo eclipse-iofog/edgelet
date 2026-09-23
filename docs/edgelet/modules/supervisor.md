@@ -99,7 +99,7 @@ Supervisor does not expose HTTP routes. Operator-facing control:
 |---------|----------------|
 | Daemon exits on start | DB migration failure, containerd not prestarted for `edgelet` engine |
 | `WARNING` daemon status | Docker/Podman socket unavailable after retry budget |
-| Immediate restart | Embedded containerd unexpected exit (fail-fast handler) |
+| Immediate restart (control `edgelet.service`) | Embedded containerd unexpected exit while the supervisor owns the child (fail-fast handler) |
 | Reload rejected | Config validation failed; Field Agent skips fog config POST |
 
 See [../troubleshooting.md](../troubleshooting.md).

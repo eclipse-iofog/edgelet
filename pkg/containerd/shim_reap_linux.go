@@ -114,6 +114,9 @@ func isRetryableReapIncomplete(err error) bool {
 }
 
 func reapManagedShimsForSocket(socketPath string, remainingBudget time.Duration) error {
+	if pid := currentLiveContainerdChildPID(); pid > 0 {
+		return fmt.Errorf("containerd child %d is still running; shim reap runs after it stops", pid)
+	}
 	graceTimeout, forceTimeout := shimReapBudgetFn(remainingBudget)
 
 	remaining, err := findManagedShimPIDs(socketPath)

@@ -130,6 +130,50 @@ func TestGetFogStatus_AnnotatesDuringRestart(t *testing.T) {
 	}
 }
 
+func TestGetFogStatus_IncludesHostCapacityKeys(t *testing.T) {
+	t.Cleanup(func() {
+		statusreporter.GetInstance().UpdateResourceConsumptionManagerStatus(func(s *models.ResourceConsumptionManagerStatus) {
+			*s = *models.NewResourceConsumptionManagerStatus()
+		})
+	})
+
+	statusreporter.GetInstance().UpdateResourceConsumptionManagerStatus(func(s *models.ResourceConsumptionManagerStatus) {
+		s.SystemCpus = 8
+		s.SystemOs = "linux"
+		s.SystemOsVersion = "Debian GNU/Linux 12 (bookworm)"
+		s.SystemKernelVersion = "6.1.0-18-amd64"
+		s.SystemTotalMemory = 16_000_000_000
+		s.TotalDiskSpace = 100_000_000_000
+		s.AvailableMemory = 8_000_000_000
+		s.AvailableDisk = 40_000_000_000
+	})
+
+	fa := &FieldAgent{
+		config: config.GetInstance(),
+		state:  NewState(),
+	}
+	status := fa.getFogStatus()
+
+	if status["systemCpus"] != 8 {
+		t.Fatalf("systemCpus: got %#v", status["systemCpus"])
+	}
+	if status["systemTotalMemory"] != float64(16_000_000_000) {
+		t.Fatalf("systemTotalMemory: got %#v", status["systemTotalMemory"])
+	}
+	if status["systemTotalDisk"] != float64(100_000_000_000) {
+		t.Fatalf("systemTotalDisk: got %#v", status["systemTotalDisk"])
+	}
+	if status["systemOs"] != "linux" {
+		t.Fatalf("systemOs: got %#v", status["systemOs"])
+	}
+	if status["systemOsVersion"] != "Debian GNU/Linux 12 (bookworm)" {
+		t.Fatalf("systemOsVersion: got %#v", status["systemOsVersion"])
+	}
+	if status["systemKernelVersion"] != "6.1.0-18-amd64" {
+		t.Fatalf("systemKernelVersion: got %#v", status["systemKernelVersion"])
+	}
+}
+
 func TestGetFogStatus_AvailableRuntimesPerEngine(t *testing.T) {
 	cfg := config.GetInstance()
 	originalEngine := cfg.ContainerEngine

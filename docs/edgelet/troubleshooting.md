@@ -362,9 +362,57 @@ Ensure the configured `containerEngineUrl` matches the running engine socket.
 
 ---
 
+## Leftover process holding a volume
+
+**Symptoms:** microservice status or `errorMessage` is `volume in use by a leftover process`; a new container logs `Cannot lock file` or another exclusive-lock error and exits (databases that exclusive-lock a file often do this). Common after a fat OTA or a data-plane stop whose drain did not verify. The volume files are still on disk. A host process still has them open.
+
+Do **not** run `edgelet volume rm` (or delete `volumes/data/` / `volumes/shared/`) to clear the lock. That destroys retained data and does not stop the process that holds the file.
+
+**Checks:**
+
+1. Confirm the wait text:
+
+   ```bash
+   edgelet ms inspect <uuid|namespace.name> --summary
+   ```
+
+2. Read the data-plane journal and the upgrade log. Failed drain is `module=RUNTIME_BOOTSTRAP` with `drain_verify_failed`, `drain_timeout`, or `drain_degraded`, and `data-plane drain did not verify`. `install.sh` prints `Data-plane drain did not verify; binary was not replaced` and leaves the previous thin binary installed.
+
+   ```bash
+   sudo journalctl -u edgelet-containerd -n 200 --no-pager | grep RUNTIME_BOOTSTRAP
+   ```
+
+3. Find the process that still has the volume open (default `diskDirectory` is `/var/lib/edgelet`):
+
+   ```bash
+   sudo lsof +D /var/lib/edgelet/volumes/data /var/lib/edgelet/volumes/shared
+   sudo fuser -v /var/lib/edgelet/volumes/data /var/lib/edgelet/volumes/shared
+   ```
+
+**Recovery:** stop the process that holds the volume. Reconcile keeps the current runtime state and the text `volume in use by a leftover process` until that process is gone, including after an operator rebuild. The next cycle creates the container once the path is free.
+
+On a node that is already up, stopping the holder is enough. Do not restart the data plane unless you intend to stop every workload.
+
+When an upgrade or `stop edgelet-containerd` aborted, the journal line is `leaving containerd running`. Drain did not verify: `runtime-bootstrap` cleared the drain hold and stayed running with containerd still up (the unit did not exit, so systemd did not restart it). A leftover workload process may still hold the volume. `KillMode=process` means stop only signaled the parent; the containerd child can still be serving CRI. `edgelet runtime reap-orphans` does nothing until `/run/edgelet/drain-verified` exists. Stop the holder, then drain again while the CRI socket is up:
+
+```bash
+sudo edgelet runtime drain --direct
+```
+
+Exit 0 means verify passed. Re-run `install.sh` for an aborted upgrade, or stop and start the data plane only after that:
+
+```bash
+sudo systemctl stop edgelet-containerd
+sudo systemctl start edgelet-containerd
+```
+
+OpenRC: `rc-service edgelet-containerd stop`, then `start`, after `drain --direct` exits 0.
+
+---
+
 ## Microservice crash / restart loop
 
-**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`.
+**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`. `Cannot lock file` on a persistent volume is a leftover process, not this crash loop — see [Leftover process holding a volume](#leftover-process-holding-a-volume).
 
 **Checks:**
 

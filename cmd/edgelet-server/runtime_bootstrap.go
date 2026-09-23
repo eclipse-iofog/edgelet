@@ -12,6 +12,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/cgroups"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
+	"github.com/eclipse-iofog/edgelet/internal/processmanager"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
@@ -49,6 +50,13 @@ func runRuntimeBootstrap() {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to start embedded containerd: %v\n", err)
 		exitDaemon(1)
 	}
+	svc.SetUnexpectedExitHandler(func(err error) {
+		logging.LogError("RUNTIME_BOOTSTRAP", "embedded containerd child exited; restarting data plane", err)
+		exitDaemon(1)
+	})
+	if err := processmanager.EndDataPlaneDrainHold(); err != nil {
+		logging.LogWarn("RUNTIME_BOOTSTRAP", fmt.Sprintf("failed to clear data-plane drain hold: %v", err))
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
@@ -65,12 +73,20 @@ func runRuntimeBootstrap() {
 			logging.LogInfo("RUNTIME_BOOTSTRAP", "Stopping embedded containerd data plane")
 
 			drainSec := cfg.ShutdownDrainTimeout()
-			stopEmbeddedContainerdDataPlane(
+			outcome := stopEmbeddedContainerdDataPlane(
 				constants.EdgeletContainerdSocket,
 				drainSec,
 				svc,
 				defaultRuntimeBootstrapStopDeps(),
 			)
+			if !outcome.complete {
+				logging.LogError(
+					"RUNTIME_BOOTSTRAP",
+					fmt.Sprintf("data-plane drain did not verify (status=%s); leaving containerd running", outcome.status()),
+					fmt.Errorf("drain status %s", outcome.status()),
+				)
+				continue
+			}
 
 			logging.LogInfo("RUNTIME_BOOTSTRAP", "Embedded containerd data plane stopped")
 			return

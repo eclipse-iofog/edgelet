@@ -663,13 +663,13 @@ const containerdWatchdogFailureThreshold = 3
 // containerdWatchdogShouldSkipEscalation reports whether intentional data-plane
 // downtime must not trigger a control-plane restart.
 func containerdWatchdogShouldSkipEscalation(attachOnly bool) bool {
-	return attachOnly || processmanager.IsQuiescedForDataPlaneDrain()
+	return attachOnly || processmanager.DataPlaneDrainHoldActive() || processmanager.IsQuiescedForDataPlaneDrain()
 }
 
 // containerdWatchdogShouldEscalateUnhealthy reports whether repeated socket check
 // failures should request a control-plane restart.
 func containerdWatchdogShouldEscalateUnhealthy(consecutiveFailures int) bool {
-	if processmanager.IsQuiescedForDataPlaneDrain() {
+	if processmanager.DataPlaneDrainHoldActive() || processmanager.IsQuiescedForDataPlaneDrain() {
 		return false
 	}
 	return consecutiveFailures >= containerdWatchdogFailureThreshold

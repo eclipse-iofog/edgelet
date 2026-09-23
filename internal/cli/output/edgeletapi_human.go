@@ -12,19 +12,24 @@ import (
 
 var statusOutputOrder = []string{
 	"connectionToController",
-	"agentCpuPercent",
-	"agentMemoryMiB",
-	"runtimeCpuPercent",
-	"runtimeMemoryMiB",
+	"agentCpu",
+	"agentMemory",
+	"runtimeCpu",
+	"runtimeMemory",
 	"runtimeAvailable",
 	"runtimeDegraded",
-	"edgeletTotalCpuPercent",
-	"edgeletTotalMemoryMiB",
-	"cpuUsage",
+	"edgeletStackCpu",
+	"edgeletStackMemory",
 	"diskUsage",
 	"edgeletDaemon",
 	"memoryUsage",
 	"runningMicroservices",
+	"systemCpus",
+	"systemOs",
+	"systemOsVersion",
+	"systemKernelVersion",
+	"systemTotalMemory",
+	"systemTotalDisk",
 	"systemAvailableDisk",
 	"systemAvailableMemory",
 	"systemTime",
@@ -284,6 +289,9 @@ func formatStatusMap(result map[string]any, preferred []string) string {
 	seen := make(map[string]bool, len(result))
 	var b strings.Builder
 	for _, key := range preferred {
+		if skipHumanStatusKey(key, result) {
+			continue
+		}
 		value, ok := result[key]
 		if !ok {
 			continue
@@ -299,19 +307,194 @@ func formatStatusMap(result map[string]any, preferred []string) string {
 	}
 	slices.Sort(remaining)
 	for _, key := range remaining {
+		if skipHumanStatusKey(key, result) {
+			continue
+		}
 		_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatStatusValue(key, result[key]))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
+func skipHumanStatusKey(key string, result map[string]any) bool {
+	switch key {
+	case "cpuUsage":
+		_, ok := result["edgeletStackCpu"]
+		return ok
+	case "memoryUsage":
+		_, ok := result["edgeletStackMemory"]
+		return ok
+	case "agentCpuPercent", "agentMemoryMiB", "runtimeCpuPercent", "runtimeMemoryMiB", "edgeletTotalCpuPercent", "edgeletTotalMemoryMiB":
+		return true
+	default:
+		return false
+	}
+}
+
 func formatStatusValue(key string, value any) string {
 	switch key {
+	case "systemTotalMemory", "systemAvailableMemory", "systemTotalDisk", "systemAvailableDisk",
+		"agentMemory", "runtimeMemory", "edgeletStackMemory":
+		if formatted, ok := formatStatusByteCount(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "systemTotalCpu":
+		if formatted, ok := formatStatusHostCPUPercent(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "agentCpu", "runtimeCpu", "edgeletStackCpu":
+		if formatted, ok := formatStatusCPUCores(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "cpuUsage":
+		if formatted, ok := formatStatusStackCPU(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "memoryUsage":
+		if formatted, ok := formatStatusStackMemoryMiB(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "diskUsage":
+		if formatted, ok := formatStatusEdgeletDiskUsage(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
 	case "runtimeClasses":
 		return formatRuntimeClassesStatusValue(value)
 	case "availableCdiDevices":
 		return formatJoinedStatusList(value)
 	default:
 		return fmt.Sprintf("%v", value)
+	}
+}
+
+func formatStatusByteCount(value any) (string, bool) {
+	bytes, ok := statusValueAsFloat64(value)
+	if !ok || bytes < 0 {
+		return "", false
+	}
+	const unit = 1024.0
+	switch {
+	case bytes >= unit*unit*unit*unit:
+		return fmt.Sprintf("%.2f TiB", bytes/(unit*unit*unit*unit)), true
+	case bytes >= unit*unit*unit:
+		return fmt.Sprintf("%.2f GiB", bytes/(unit*unit*unit)), true
+	case bytes >= unit*unit:
+		return fmt.Sprintf("%.2f MiB", bytes/(unit*unit)), true
+	case bytes >= unit:
+		return fmt.Sprintf("%.2f KiB", bytes/unit), true
+	default:
+		return fmt.Sprintf("%.0f B", bytes), true
+	}
+}
+
+func formatStatusHostCPUPercent(value any) (string, bool) {
+	percent, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%.2f %%", percent), true
+}
+
+// formatStatusStackCPU formats controller cpuUsage (per-core scale, 100 = one CPU) as cores.
+func formatStatusStackCPU(value any) (string, bool) {
+	scale, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return formatCPUCoresFloat(scale / 100.0)
+}
+
+func formatCPUCoresFloat(cores float64) (string, bool) {
+	switch {
+	case cores >= 10:
+		return fmt.Sprintf("%.2f cores", cores), true
+	case cores >= 1:
+		return fmt.Sprintf("%.3f cores", cores), true
+	default:
+		return fmt.Sprintf("%.4f cores", cores), true
+	}
+}
+
+func formatStatusCPUCores(value any) (string, bool) {
+	cores, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return formatCPUCoresFloat(cores)
+}
+
+func formatStatusStackMemoryMiB(value any) (string, bool) {
+	mib, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%.2f MiB", mib), true
+}
+
+func formatStatusEdgeletDiskUsage(value any) (string, bool) {
+	if s, ok := value.(string); ok {
+		s = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "about "))
+		if strings.HasSuffix(s, " MiB") {
+			mib, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, " MiB")), 64)
+			if err == nil {
+				return fmt.Sprintf("%.2f MiB (edgelet data)", mib), true
+			}
+		}
+		if strings.HasSuffix(s, " GiB") {
+			gib, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, " GiB")), 64)
+			if err == nil {
+				return fmt.Sprintf("%.2f GiB (edgelet data)", gib), true
+			}
+		}
+	}
+	gib, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	if gib < 1 {
+		return fmt.Sprintf("%.2f MiB (edgelet data)", gib*1024), true
+	}
+	return fmt.Sprintf("%.2f GiB (edgelet data)", gib), true
+}
+
+func statusValueAsFloat64(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		f, err := typed.Float64()
+		return f, err == nil
+	case string:
+		s := strings.TrimSpace(typed)
+		s = strings.TrimPrefix(s, "about ")
+		s = strings.TrimSpace(s)
+		if strings.HasSuffix(s, "%") {
+			s = strings.TrimSpace(strings.TrimSuffix(s, "%"))
+			f, err := strconv.ParseFloat(s, 64)
+			return f, err == nil
+		}
+		if s == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		return f, err == nil
+	default:
+		return 0, false
 	}
 }
 

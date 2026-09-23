@@ -11,6 +11,15 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/utils"
 )
 
+const (
+	cpuLimitMin = 5
+	cpuLimitMax = 400
+)
+
+func cpuLimitRangeError() error {
+	return fmt.Errorf("CPU limit must be between %d and %d (100 = one logical CPU for the Edgelet stack)", cpuLimitMin, cpuLimitMax)
+}
+
 // ValidateConfig validates the configuration
 func ValidateConfig(cfg *Config) error {
 	var errors []string
@@ -25,9 +34,9 @@ func ValidateConfig(cfg *Config) error {
 		errors = append(errors, "memory limit must be between 128 and 1048576 MB")
 	}
 
-	// Validate CPU limit
-	if cfg.CPULimit < 5 || cfg.CPULimit > 100 {
-		errors = append(errors, "CPU limit must be between 5% and 100%")
+	// Validate CPU limit (cores×100; compare with resource consumption stack CPU)
+	if cfg.CPULimit < cpuLimitMin || cfg.CPULimit > cpuLimitMax {
+		errors = append(errors, cpuLimitRangeError().Error())
 	}
 
 	// Validate log disk limit
@@ -173,8 +182,8 @@ func ValidateProperty(key, value string) error {
 		if err != nil {
 			return fmt.Errorf("invalid CPU limit value: %w", err)
 		}
-		if val < 5 || val > 100 {
-			return errors.New("CPU limit must be between 5% and 100%")
+		if val < cpuLimitMin || val > cpuLimitMax {
+			return cpuLimitRangeError()
 		}
 	case "logLimit":
 		val, err := strconv.ParseFloat(value, 64)

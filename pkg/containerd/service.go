@@ -214,7 +214,9 @@ func (s *Service) Run() error {
 
 	processExitCh := make(chan error, 1)
 	go func() {
-		processExitCh <- cmd.Wait()
+		waitErr := cmd.Wait()
+		clearLiveContainerdChildPID(cmd.Process.Pid)
+		processExitCh <- waitErr
 	}()
 
 	startupErrCh := make(chan error, 1)
@@ -519,6 +521,7 @@ func (s *Service) spawnChild() (*exec.Cmd, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start child process: %w", err)
 	}
+	setLiveContainerdChildPID(cmd.Process.Pid)
 
 	s.mu.Lock()
 	s.cmd = cmd
@@ -788,6 +791,14 @@ func cleanupStaleRuntimeTasksInDir(base string) staleTaskCleanupResult {
 			continue
 		}
 		taskDir := filepath.Join(base, entry.Name())
+		if entry.Name() == constants.EdgeletContainerdNamespace {
+			nested := cleanupStaleRuntimeTasksInDir(taskDir)
+			if nested.fatalErr != nil {
+				errs = append(errs, nested.fatalErr.Error())
+			}
+			ebusyDirs = append(ebusyDirs, nested.ebusyDirs...)
+			continue
+		}
 		addressPath := filepath.Join(taskDir, "address")
 		_, statErr := os.Stat(addressPath)
 		if statErr == nil {
@@ -981,17 +992,14 @@ func CleanupRuntimeArtifacts() error {
 		return fmt.Errorf("stop orphaned embedded containerd children: %w", err)
 	}
 
-	paths := []string{
-		runtimeArtifactCleanupSocket,
-		runtimeArtifactCleanupRunDir,
-		runtimeArtifactCleanupStateDir,
-	}
-
 	var errs []string
-	for _, path := range paths {
-		if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-			errs = append(errs, fmt.Sprintf("%s: %v", path, err))
-		}
+	if err := os.Remove(runtimeArtifactCleanupSocket); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("%s: %v", runtimeArtifactCleanupSocket, err))
+	}
+	// Keep /run/edgelet itself. Removing it unlinks the control-plane socket
+	// while the daemon is still running.
+	if err := os.RemoveAll(runtimeArtifactCleanupStateDir); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("%s: %v", runtimeArtifactCleanupStateDir, err))
 	}
 
 	for _, dir := range []string{runtimeArtifactCleanupRunDir, runtimeArtifactCleanupStateDir} {

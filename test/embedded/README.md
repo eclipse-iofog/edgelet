@@ -89,6 +89,21 @@ Separate from the default v2 embedded matrix. Uses **`iofog-test-v1`** and
 Both embedded suites use **`install.sh` split** install via `test/lima/lib/install-split.sh`.
 See [docs/edgelet/workload-continuity.md](../../docs/edgelet/workload-continuity.md).
 
+## Data-plane drain (fat embed change)
+
+Host checks (docs and `KillMode=process`) do not need a VM:
+
+```bash
+./test/embedded/ota-dataplane-drain.sh --docs
+```
+
+Live checks run inside the embedded Lima VM after `vm-install.sh`. They deploy a private volume workload, restart control while the ready embed hash matches (shim processes stay), then lock that volume and drain through CRI. Pass `--upgrade-bin` when a second thin binary has a different embed hash.
+
+```bash
+./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test
+./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test --upgrade-bin=build/edgelet-linux-arm64
+```
+
 Unified orchestrator:
 
 ```bash

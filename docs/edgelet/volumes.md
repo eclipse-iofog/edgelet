@@ -191,6 +191,10 @@ Scheduled prune does not call unrestricted Docker/Podman volume prune.
 
 ## Troubleshooting
 
+### Volume in use / `Cannot lock file`
+
+Status text `volume in use by a leftover process` means a host process still has the volume directory open (often an exclusive lock inside a database file). Stop that process. Do not `edgelet volume rm` and do not delete `volumes/data/` or `volumes/shared/` to clear the lock — that removes retained data. Recovery steps: [troubleshooting.md](troubleshooting.md#leftover-process-holding-a-volume).
+
 ### Disk usage grows after microservices are deleted
 
 1. List remaining volume claims:

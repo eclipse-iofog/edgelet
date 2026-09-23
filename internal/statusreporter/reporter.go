@@ -191,23 +191,23 @@ func (sr *StatusReporter) GetStatusReport() string {
 		daemonStatus = "RUNNING"
 	}
 	result += fmt.Sprintf("Edgelet daemon                : %s\n", daemonStatus)
-	result += fmt.Sprintf("Agent CPU percent             : about %.2f %%\n", rcs.AgentCPUPercent)
-	result += fmt.Sprintf("Agent memory MiB              : about %.2f\n", rcs.AgentMemoryMiB)
+	result += fmt.Sprintf("Agent CPU                     : %.6f\n", rcs.AgentCPUPercent/100.0)
+	result += fmt.Sprintf("Agent memory                  : %d\n", stackMemoryMiBToBytes(rcs.AgentMemoryMiB))
 	if rcs.RuntimeTracked {
-		result += fmt.Sprintf("Runtime CPU percent           : about %.2f %%\n", rcs.RuntimeCPUPercent)
-		result += fmt.Sprintf("Runtime memory MiB            : about %.2f\n", rcs.RuntimeMemoryMiB)
+		result += fmt.Sprintf("Runtime CPU                   : %.6f\n", rcs.RuntimeCPUPercent/100.0)
+		result += fmt.Sprintf("Runtime memory                : %d\n", stackMemoryMiBToBytes(rcs.RuntimeMemoryMiB))
 		result += fmt.Sprintf("Runtime available             : %t\n", rcs.RuntimeAvailable)
 		if rcs.RuntimeDegraded {
 			result += "Runtime degraded              : true\n"
 		}
 	}
-	result += fmt.Sprintf("Memory Usage                : about %.2f MiB\n", memoryUsage)
+	result += fmt.Sprintf("Memory Usage                : %.2f MiB\n", memoryUsage)
 	if diskUsage < 1 {
-		result += fmt.Sprintf("Disk Usage                  : about %.2f MiB\n", diskUsage*1024)
+		result += fmt.Sprintf("Disk Usage                  : %.2f MiB\n", diskUsage*1024)
 	} else {
-		result += fmt.Sprintf("Disk Usage                  : about %.2f GiB\n", diskUsage)
+		result += fmt.Sprintf("Disk Usage                  : %.2f GiB\n", diskUsage)
 	}
-	result += fmt.Sprintf("CPU Usage                   : about %.2f %%\n", cpuUsage)
+	result += fmt.Sprintf("CPU Usage                   : %.4f\n", cpuUsage)
 	result += fmt.Sprintf("Running Microservices       : %d\n", sr.processManagerStatus.RunningMicroservicesCount)
 	result += fmt.Sprintf("Connection to Controller    : %s\n", connectionStatus)
 	result += fmt.Sprintf("System Time                 : %s\n", dateFormat)
@@ -219,11 +219,21 @@ func (sr *StatusReporter) GetStatusReport() string {
 		diskPercent = (availableDisk / totalDisk) * 100.0
 	}
 
+	result += fmt.Sprintf("System CPUs                 : %d\n", rcs.SystemCpus)
+	result += fmt.Sprintf("System OS                   : %s\n", rcs.SystemOs)
+	if rcs.SystemOsVersion != "" {
+		result += fmt.Sprintf("System OS version           : %s\n", rcs.SystemOsVersion)
+	}
+	if rcs.SystemKernelVersion != "" {
+		result += fmt.Sprintf("System kernel version       : %s\n", rcs.SystemKernelVersion)
+	}
+	result += fmt.Sprintf("System Total Memory         : %d\n", rcs.SystemTotalMemory)
+	result += fmt.Sprintf("System Total Disk           : %d\n", rcs.TotalDiskSpace)
 	result += fmt.Sprintf("System Available Disk       : %.2f MB (%.2f %%)\n", availableDisk, diskPercent)
 	result += fmt.Sprintf("System Available Memory     : %.2f MB\n", availableMemory)
 	result += fmt.Sprintf("System Total CPU            : %.2f %%\n", hostCPU)
-	result += fmt.Sprintf("Edgelet total CPU percent   : %.2f\n", rcs.EdgeletTotalCPUPercent)
-	result += fmt.Sprintf("Edgelet total memory MiB    : %.2f\n", rcs.EdgeletTotalMemoryMiB)
+	result += fmt.Sprintf("Edgelet stack CPU             : %.6f\n", rcs.EdgeletTotalCPUPercent/100.0)
+	result += fmt.Sprintf("Edgelet stack memory          : %d\n", stackMemoryMiBToBytes(rcs.EdgeletTotalMemoryMiB))
 	availableInterfaces := getAvailableNetworkInterfaces()
 	availableInterfacesLine := "none"
 	if len(availableInterfaces) > 0 {
@@ -596,4 +606,11 @@ func (sr *StatusReporter) GetName() string {
 // GetModuleIndex returns the module index
 func (sr *StatusReporter) GetModuleIndex() int {
 	return utils.StatusReporter
+}
+
+func stackMemoryMiBToBytes(mib float64) int64 {
+	if mib <= 0 {
+		return 0
+	}
+	return int64(mib * 1024 * 1024) // #nosec G115 -- RSS MiB fits in int64
 }

@@ -5,6 +5,33 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.5]
+
+### Changed
+
+- **Data-plane stop:** drains labeled workloads through CRI while containerd is still up, without the local API socket. After graceful stop, it removes labeled containers and pod sandboxes so containerd does not restore exited catalog workloads (for example WASM runtimes) before shim reap.
+- **Fat OTA:** drain and verify before replacing the binary or restarting the data plane, using `edgelet runtime drain --direct` on the staged thin binary while control is still up. Thin OTA (matching ready embed hash) leaves the data plane running.
+- **Ready embed:** current counts as installed only when the fat binary is present. An incomplete extract directory does not skip a data-plane restart.
+- **Linux thin binary:** `runtime drain --direct` execs the embedded fat runtime for quiesce so the thin wrapper stays within the existing size limit.
+- **Agent `cpuLimit`:** maximum raised from **100** to **400** (default **80** unchanged); limit is stack CPU in cores×100, same unit as **`cpuUsage`**.
+- **`edgelet system status` (human):** host memory and disk capacity fields print as **GiB/MiB**; **`systemTotalCpu`** prints two decimal places. Edgelet stack CPU prints as **core count** (not host `%`); stack memory as **MiB**; **`diskUsage`** as **MiB/GiB (edgelet data)**. Human output hides duplicate **`cpuUsage`** / **`memoryUsage`** when stack totals are present. **`PUT status`** and controller JSON keep numeric wire values (GiB for `diskUsage`, per-core scale for CPU).
+- **`GET /v1/system/status` (local JSON):** stack breakdown keys are **`agentCpu`**, **`runtimeCpu`**, **`edgeletStackCpu`** (float **cores**) and **`agentMemory`**, **`runtimeMemory`**, **`edgeletStackMemory`** (int **bytes**). Replaces local-only **`agentCpuPercent`**, **`*MemoryMiB`**, and **`edgeletTotal*`** names. **`cpuUsage`**, **`memoryUsage`**, and **`diskUsage`** remain controller-shaped aliases on the local route.
+
+### Added
+
+- **Host capacity on status:** `PUT status` and `GET /v1/system/status` include **`systemCpus`** (logical CPU count), **`systemTotalMemory`** and **`systemAvailableMemory`** (bytes), and **`systemTotalDisk`** and **`systemAvailableDisk`** (bytes for the filesystem containing configured **`diskDirectory`**). **`systemTotalCpu`** remains host CPU utilization 0–100%, not core count.
+- **Host OS on status:** **`systemOs`** (family, e.g. `linux`), **`systemOsVersion`** (distro/release display string), and **`systemKernelVersion`** (Linux kernel release; **`""`** on non-Linux). Sampled once at daemon start from host `os-release` / gopsutil; same keys on controller **`PUT status`** and local **`GET /v1/system/status`**. Controller handoff: [docs/edgelet/CONTROLLER-HANDOFF-STATUS-HOST.md](docs/edgelet/CONTROLLER-HANDOFF-STATUS-HOST.md).
+
+### Fixed
+
+- **Host OS status:** `systemOs` is GOOS family (`linux`, not distro `ID`); `systemOsVersion` prefers `/etc/os-release` **`PRETTY_NAME`**; `systemKernelVersion` is populated on all Linux distros (not only when `systemOs` was literally `linux`).
+- **Incomplete drain:** a drain that does not verify does not reap shims. Failed verify aborts the upgrade and leaves the installed binary in place.
+- **Volume in use:** reconcile will not start a second container on a volume still held by a host process. Volume data is not deleted to recover a leftover process.
+- **Catalog data-plane restart:** stopping or restarting `edgelet-containerd` no longer leaves Spin or Edgelet WASM workloads in a state where shim reap kills the runtime while containerd still owns the task.
+- **Labeled release order:** a pod sandbox is removed only after its container delete succeeds. An exited container is not stopped again through CRI, avoiding torn sandbox metadata on a later stop.
+- **Data-plane during drain:** volume force-kill and orphan shim reap skip the live containerd child, `runtime-bootstrap`, and shims still attached to the edgelet containerd socket.
+- **Data-plane self-heal:** if the embedded containerd child exits unexpectedly, `runtime-bootstrap` logs and exits with status 1 so systemd `Restart=always` starts a new data plane. A drain that does not verify clears the drain hold, leaves containerd running, and keeps the unit in its signal loop instead of exiting.
+
 ## [v1.1.0-rc.4]
 
 ### Added
