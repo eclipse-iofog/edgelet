@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eclipse-iofog/edgelet/internal/catalogwake"
 	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
@@ -218,6 +219,7 @@ func (m *Manager) markFailed(name string, pullErr error) error {
 		return err
 	}
 	nowSec := m.now().Unix()
+	prevState := row.State
 	row.State = models.ModelStateFailed
 	if pullErr != nil {
 		row.LastError = pullErr.Error()
@@ -225,7 +227,22 @@ func (m *Manager) markFailed(name string, pullErr error) error {
 	row.ObservedGeneration = row.Generation
 	row.LastTransitionAt = nowSec
 	row.LastReconcileAt = nowSec
-	return m.db.UpsertLocalModel(row)
+	if err := m.db.UpsertLocalModel(row); err != nil {
+		return err
+	}
+	m.releaseName(row.Name)
+	noteCatalogTransition(row.Name, row.Source, prevState, row.State)
+	return nil
+}
+
+func noteCatalogTransition(name, source, prev, next string) {
+	if prev == next {
+		return
+	}
+	if next != models.ModelStateReady && next != models.ModelStateFailed {
+		return
+	}
+	catalogwake.Notify(name, source)
 }
 
 func (m *Manager) releaseName(name string) {

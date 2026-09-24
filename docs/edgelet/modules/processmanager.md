@@ -22,7 +22,7 @@ The Process Manager reconciles **desired workload state** (from Controller, loca
 | `store` | Local workloads, control plane row, `runtime_container_refs` |
 | `network` | Bridge/network setup for workloads |
 | `statusreporter` | ProcessManager status, running counts |
-| `config` | Reconcile interval, engine name, logging |
+| `config` | Engine name, reconcile-cycle logging |
 
 | Used by | Reason |
 |---------|--------|
@@ -38,7 +38,7 @@ The Process Manager reconciles **desired workload state** (from Controller, loca
 `(*ProcessManager).Start(engine, microserviceManager)`:
 
 1. Store engine reference and create `ContainerManager`
-2. Start goroutines: `containersMonitor`, `checkTasks`
+2. Start goroutines: `containersMonitor`, `containerStatsLoop`, `checkTasks`
 3. Task queue capacity 100
 
 ### Stop
@@ -47,21 +47,34 @@ Cancel context, close task queue, wait for goroutines, drain shutdown with confi
 
 ### Reconcile loop
 
-`containersMonitor()` ticks every `monitorContainersStatusFreqSeconds` or immediately on `Update()`:
+`containersMonitor()` wakes about every 5 seconds, and immediately when a workload is marked. A pass reconciles only the workloads that are due.
+
+A workload is reconciled when:
+
+- its spec changes
+- its container starts, exits, is OOM-killed, or is deleted
+- a backoff or volume wait is due
+- a catalog item it needs becomes ready or failed
+
+A full compare of every workload still runs about once a minute.
+
+With the embedded engine and a healthy event stream, an idle workload is not inspected every 5 seconds. If the event stream is down, inspection returns to every 5 seconds until the stream is healthy. Docker and Podman still check running-or-not every 5 seconds; a container that is not running is reconciled on that check. CPU and memory on status refresh about every 10 seconds, on `containerStatsLoop()`, separate from reconcile.
+
+When a pass has work, due workloads run in this order:
 
 ```
-reconcileControlPlane()
-handleLatestMicroservices()      // Controller-managed MS
-reconcileLocalDeployments()      // local_workloads
+reconcileControlPlane()              // when that workload is due
+reconcileControllerMicroservices()   // marked controller UUIDs
+reconcileMarkedLocal()               // marked local_workloads
 deleteRemainingMicroservices()
 pruneStaleProcessManagerStatuses()
 updateRunningMicroservicesCount()
 updateCurrentMicroservices()
 ```
 
-Skips all reconcile when `IsQuiesced()` (pending engine restart).
+An idle pass with a healthy event stream does not load containers. Reconcile is skipped while `IsQuiesced()` (pending engine restart). When the engine is ready again, the next pass is a full compare.
 
-`Update()` from Field Agent calls `notifyMonitorThread()` to avoid waiting for the next tick.
+Startup and reconnect call `Update()`, which marks every workload once and wakes the monitor.
 
 ## Workload sources
 
@@ -81,7 +94,9 @@ Local and ControlPlane deployments use desired-state fields (`desired_state`, `r
 - **stopped** — stop container, keep record
 - **deleted** — remove container and **delete** the `local_workloads` row (no persistent tombstone). Reconcile re-reads the row before write and never inserts a missing UUID.
 
-ControlPlane reconcile runs **before** managed microservices on each cycle so the controller container is stable before dependent workloads.
+A local recreate is stored as starting, with the new generation not yet observed, before the old container is removed. A delete of that container does not start another container or treat the new generation as observed while that apply is still in progress.
+
+When the ControlPlane workload is due, it is reconciled **before** managed microservices so the controller container is stable before dependent workloads.
 
 See [../workload-continuity.md](../workload-continuity.md) for restart and engine-switch behavior.
 
@@ -89,9 +104,10 @@ See [../workload-continuity.md](../workload-continuity.md) for restart and engin
 
 | Key | Effect |
 |-----|--------|
-| `monitorContainersStatusFreqSeconds` | Reconcile tick interval |
-| `containerEngine` | Recorded in runtime state; affects healthcheck path |
+| `containerEngine` | Recorded in runtime state; affects healthcheck path and whether reconcile uses the event stream |
 | `logReconcileCycleEveryNTicks` | Structured reconcile cycle logging |
+
+The 5-second wake, the full compare (about once a minute), and the CPU and memory sample (about every 10 seconds) are built in. `config.yaml` has no keys for them.
 
 ## External APIs
 
@@ -153,6 +169,8 @@ Last crash text for controller-managed workloads is **in-memory**. An agent rest
 | File | Role |
 |------|------|
 | `manager.go` | Monitor loop, `Update`, task queue, crash-loop backoff |
+| `reconcile_schedule.go` | Which workloads are due on a pass |
+| `container_stats.go` | CPU and memory sample loop |
 | `container_manager.go` | Engine CRUD for containers |
 | `status_sync.go` | Current vs last error, 30s RUNNING grace |
 | `restart_checker.go` | Real restart events → `STUCK_IN_RESTART` |

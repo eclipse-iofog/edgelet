@@ -509,6 +509,7 @@ func (m *Manager) markObservedReady(row *models.LocalModel, result *modelpull.Re
 		return err
 	}
 	nowSec := m.now().Unix()
+	prevState := current.State
 	if current.State != models.ModelStateReady {
 		current.LastTransitionAt = nowSec
 	}
@@ -531,5 +532,12 @@ func (m *Manager) markObservedReady(row *models.LocalModel, result *modelpull.Re
 		current.ManifestPath = modelpull.ManifestPath(m.modelsRoot, current.Name)
 		current.ContentPath = modelpull.ContentDir(m.modelsRoot, current.Name)
 	}
-	return m.db.UpsertLocalModel(current)
+	if err := m.db.UpsertLocalModel(current); err != nil {
+		return err
+	}
+	// Drop the in-flight name before waking reconcile. A slow catalog scan
+	// must not leave a finished pull looking active.
+	m.releaseName(current.Name)
+	noteCatalogTransition(current.Name, current.Source, prevState, current.State)
+	return nil
 }

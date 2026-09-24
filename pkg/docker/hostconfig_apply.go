@@ -114,7 +114,7 @@ func applyWorkloadCreateConfig(config *container.Config, hostConfig *container.H
 		}
 	}
 
-	if fp, err := containerapply.Marshal(containerapply.FromMicroservice(ms)); err == nil && fp != "" && fp != "{}" {
+	if fp, err := containerapply.ApplyLabel(ms, config.Env); err == nil && fp != "" {
 		if config.Labels == nil {
 			config.Labels = make(map[string]string)
 		}

@@ -5,6 +5,7 @@ package cri
 import (
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/containerapply"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 )
 
@@ -190,5 +191,25 @@ func TestContainerConfigFromMicroservice_OmitEntrypointCommands(t *testing.T) {
 	}
 	if len(cfg.Args) != 0 {
 		t.Fatalf("empty commands must not set Args, got %v", cfg.Args)
+	}
+}
+
+func TestContainerConfigFromMicroservice_ApplyLabelIncludesEnvHash(t *testing.T) {
+	ms := models.NewMicroservice("ms-env", "docker.io/library/alpine:3.19")
+	env := []string{"FOO=bar", "BAZ=qux"}
+	cfg, err := ContainerConfigFromMicroservice(ms, "host", env, "0.log", "", "", "sandbox-env", "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := ""
+	if cfg.Labels != nil {
+		label = cfg.Labels[containerapply.LabelFingerprint]
+	}
+	got, ok := containerapply.EnvHashFromLabel(label)
+	if !ok {
+		t.Fatal("new container apply label must include an environment digest")
+	}
+	if got != containerapply.HashEnv(env) {
+		t.Fatalf("env hash = %q want %q", got, containerapply.HashEnv(env))
 	}
 }

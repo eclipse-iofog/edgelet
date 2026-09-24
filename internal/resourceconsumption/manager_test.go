@@ -3,6 +3,7 @@ package resourceconsumption
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
@@ -175,6 +176,44 @@ func TestCollectUsageData_EmbeddedRuntimeMissingDegraded(t *testing.T) {
 	}
 	if status.CPUUsage != 2 {
 		t.Fatalf("total cpu should equal agent only, got %.2f", status.CPUUsage)
+	}
+}
+
+func TestCollectUsageData_DiskWalkCachedAndCPUDoesNotSleep(t *testing.T) {
+	t.Cleanup(resetResourceConsumptionTestState())
+
+	if cpuSampleInterval != 0 {
+		t.Fatalf("cpu sample interval = %s; sampler must not sleep", cpuSampleInterval)
+	}
+	if diskWalkInterval != 60*time.Second {
+		t.Fatalf("disk walk interval = %s want 60s", diskWalkInterval)
+	}
+
+	walks := 0
+	agentPID := int32(1000)
+	cfg := config.GetInstance()
+	rcm := &Manager{
+		config: cfg,
+		processReader: fakeProcessReader{
+			cpuByPID: map[int32]float64{agentPID: 1},
+			rssByPID: map[int32]int64{agentPID: 10 * 1024 * 1024},
+		},
+		hostCPUReader:   func(context.Context) float64 { return 0.1 },
+		cpuHistory:      make(map[string][]float64),
+		directorySizeFn: func(string) int64 { walks++; return 42 },
+	}
+	rcm.ctx = context.Background()
+	rcm.statusReporter = statusreporter.GetInstance()
+	rcm.InstanceConfigUpdated()
+
+	oldGetpid := getAgentPID
+	getAgentPID = func() int32 { return agentPID }
+	t.Cleanup(func() { getAgentPID = oldGetpid })
+
+	rcm.collectUsageData()
+	rcm.collectUsageData()
+	if walks != 1 {
+		t.Fatalf("directory walk ran %d times on the usage cadence, want 1", walks)
 	}
 }
 

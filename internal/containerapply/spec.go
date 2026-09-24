@@ -1,10 +1,13 @@
 package containerapply
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -61,6 +64,10 @@ type Fingerprint struct {
 	Sysctls              map[string]string        `json:"sysctls,omitempty"`
 	Ulimits              map[string]models.Ulimit `json:"ulimits,omitempty"`
 	Devices              []models.DeviceMapping   `json:"devices,omitempty"`
+	// EnvHash is the applied environment snapshot. It is written on create so a
+	// later compare can use labels instead of the OCI spec. A missing hash is
+	// not a recreate reason.
+	EnvHash string `json:"envHash,omitempty"`
 }
 
 // FromMicroservice builds the apply fingerprint for a microservice.
@@ -138,10 +145,72 @@ func Marshal(fp Fingerprint) (string, error) {
 	return string(raw), nil
 }
 
+// HashEnv returns a stable digest of KEY=VALUE pairs. Order does not matter.
+func HashEnv(env []string) string {
+	type pair struct{ key, value string }
+	pairs := make([]pair, 0, len(env))
+	for _, e := range env {
+		if e == "" {
+			continue
+		}
+		key, value := e, ""
+		if idx := strings.Index(e, "="); idx >= 0 {
+			key, value = e[:idx], e[idx+1:]
+		}
+		pairs = append(pairs, pair{key, value})
+	}
+	slices.SortFunc(pairs, func(a, b pair) int {
+		if a.key != b.key {
+			return strings.Compare(a.key, b.key)
+		}
+		return strings.Compare(a.value, b.value)
+	})
+	sum := sha256.New()
+	for _, p := range pairs {
+		_, _ = sum.Write([]byte(p.key))
+		_, _ = sum.Write([]byte{'='})
+		_, _ = sum.Write([]byte(p.value))
+		_, _ = sum.Write([]byte{0})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// ApplyLabel is the create-time apply label, including the environment digest.
+func ApplyLabel(ms *models.Microservice, env []string) (string, error) {
+	fp := FromMicroservice(ms)
+	fp.EnvHash = HashEnv(env)
+	return Marshal(fp)
+}
+
+// EnvHashFromLabel returns the stored environment digest when the label has one.
+func EnvHashFromLabel(label string) (string, bool) {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		return "", false
+	}
+	var fp Fingerprint
+	if err := json.Unmarshal([]byte(trimmed), &fp); err != nil {
+		return "", false
+	}
+	hash := strings.TrimSpace(fp.EnvHash)
+	if hash == "" {
+		return "", false
+	}
+	return hash, true
+}
+
+// HasEnvHash reports whether the apply label includes an environment digest.
+func HasEnvHash(label string) bool {
+	_, ok := EnvHashFromLabel(label)
+	return ok
+}
+
 // MatchesLabel reports whether the stored fingerprint matches the microservice.
 // A missing label matches only when the spec has no apply fields (legacy containers).
+// An environment digest on the label is ignored here; callers compare that separately.
 func MatchesLabel(label string, ms *models.Microservice) bool {
 	want := FromMicroservice(ms)
+	want.EnvHash = ""
 	trimmed := strings.TrimSpace(label)
 	if trimmed == "" {
 		return want.Empty()
@@ -150,6 +219,7 @@ func MatchesLabel(label string, ms *models.Microservice) bool {
 	if err := json.Unmarshal([]byte(trimmed), &got); err != nil {
 		return false
 	}
+	got.EnvHash = ""
 	wantJSON, err := Marshal(want)
 	if err != nil {
 		return false

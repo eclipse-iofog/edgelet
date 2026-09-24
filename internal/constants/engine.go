@@ -23,6 +23,11 @@ const (
 	// User data directory — matches default diskDirectory config value.
 	EdgeletDataDir = "/var/lib/edgelet"
 
+	// RuntimeDrainStageRel is the directory under diskDirectory where a
+	// hash-mismatch data-plane drain stages the fat runtime. It lives on the
+	// data volume so the file can be executed when /run is mounted noexec.
+	RuntimeDrainStageRel = "data/.runtime-drain"
+
 	// Containerd persistent data root — separate from EdgeletDataDir so that
 	// image layers and snapshots are not counted by diskLimit.
 	EdgeletContainerdLibDir     = "/var/lib/edgelet-containerd"

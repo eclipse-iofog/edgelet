@@ -15,6 +15,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
 	"github.com/eclipse-iofog/edgelet/pkg/data"
+	"github.com/eclipse-iofog/edgelet/pkg/datadir"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,10 +39,15 @@ func ExecDirectDrain(timeoutSeconds int) error {
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultDrainTimeoutSecs
 	}
+	dataDir, stageDir, err := directDrainLocations(utils.ConfigYAMLPath)
+	if err != nil {
+		return err
+	}
 	path, err := resolveDirectDrainFat(directDrainEnv{
 		Engine:    containerEngineFromConfig(utils.ConfigYAMLPath),
 		EmbedHash: data.EmbeddedBundleHash(),
-		StageDir:  filepath.Join(constants.EdgeletRunDir, "runtime-drain"),
+		DataDir:   dataDir,
+		StageDir:  stageDir,
 		Lookup:    data.ReadyCurrentRuntime,
 		Stage:     data.StageDrainFatELF,
 	})
@@ -84,23 +90,69 @@ func resolveDirectDrainFat(env directDrainEnv) (string, error) {
 	if env.Stage == nil {
 		return "", errors.New("data-plane drain could not stage the runtime")
 	}
+	if err := ensureRuntimeDrainStageDir(env.StageDir); err != nil {
+		return "", err
+	}
 	return env.Stage(env.StageDir)
 }
 
+// directDrainLocations returns the disk directory used to find data/current
+// and the directory where a hash mismatch stages the fat runtime. Both use
+// the same resolved diskDirectory from config.
+func directDrainLocations(configPath string) (string, string, error) {
+	resolved, err := datadir.Resolve(diskDirectoryFromConfig(configPath))
+	if err != nil {
+		return "", "", err
+	}
+	return resolved, filepath.Join(resolved, constants.RuntimeDrainStageRel), nil
+}
+
+func ensureRuntimeDrainStageDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("data-plane drain could not stage the runtime")
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("prepare data-plane drain runtime: %w", err)
+	}
+	if err := os.Chmod(dir, 0o750); err != nil { // #nosec G302 -- stage directory is private to the runtime and must stay executable
+		return fmt.Errorf("prepare data-plane drain runtime: %w", err)
+	}
+	return nil
+}
+
 func containerEngineFromConfig(path string) string {
+	return engineFromProfile(profileFromConfig(path))
+}
+
+func diskDirectoryFromConfig(path string) string {
+	profile := profileFromConfig(path)
+	if profile == nil {
+		return constants.EdgeletDataDir
+	}
+	dir := strings.TrimSpace(profile.GetProperty("diskDirectory"))
+	if dir == "" {
+		return constants.EdgeletDataDir
+	}
+	return dir
+}
+
+func profileFromConfig(path string) *models.ProfileConfig {
 	raw, err := os.ReadFile(path) // #nosec G304 -- operator config path supplied by the caller
 	if err != nil {
-		return constants.EngineEdgelet
+		return nil
 	}
 	var doc models.YamlConfig
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return constants.EngineEdgelet
+		return nil
 	}
 	name := strings.TrimSpace(doc.CurrentProfile)
 	if name == "" {
 		name = "default"
 	}
-	profile := doc.GetProfile(name)
+	return doc.GetProfile(name)
+}
+
+func engineFromProfile(profile *models.ProfileConfig) string {
 	if profile == nil {
 		return constants.EngineEdgelet
 	}

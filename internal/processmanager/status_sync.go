@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
+	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 )
 
 // errorClearGrace is how long a microservice must stay RUNNING before the
@@ -92,6 +93,29 @@ func setStatusSyncGraceForTest(d time.Duration) {
 func explicitEmptyErrorMessage() *string {
 	empty := ""
 	return &empty
+}
+
+// AdvanceRunningErrorClear clears the current error text once a workload has
+// stayed running for the grace period. It uses the status already stored and
+// does not inspect the runtime. The usage sampler can call this on its own loop.
+func AdvanceRunningErrorClear() {
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+		if s == nil {
+			return
+		}
+		for uuid, st := range s.MicroservicesStatus {
+			if st == nil || st.Status != models.MicroserviceStateRunning {
+				continue
+			}
+			if st.ErrorMessage == nil || strings.TrimSpace(*st.ErrorMessage) == "" {
+				continue
+			}
+			if !statusGrace.elapsed(uuid) {
+				continue
+			}
+			st.ErrorMessage = explicitEmptyErrorMessage()
+		}
+	})
 }
 
 // syncMicroserviceStatusToReporter stores runtime status for Pot reporting.

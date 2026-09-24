@@ -60,6 +60,7 @@ type FieldAgent struct {
 
 	// Microservice management (for MicroserviceManagerInterface)
 	latestMicroservices  []*models.Microservice
+	latestDesired        map[string]string
 	currentMicroservices []*models.Microservice
 	registries           []*models.Registry
 	microservicesMu      sync.RWMutex

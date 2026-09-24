@@ -104,6 +104,37 @@ func TestSyncMicroserviceStatusToReporter_ClearsCurrentErrorAfterGrace(t *testin
 	}
 }
 
+func TestRunningErrorClearsFromStoredStatus(t *testing.T) {
+	clk := withStatusSyncClock(t)
+	statusreporter.GetInstance().ResetProcessManagerStatus()
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+	errMsg := "exitCode=1 oomKilled=false"
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+		s.SetMicroservicesState("ms-1", models.MicroserviceStateFailed)
+		s.SetMicroservicesStatusErrorMessage("ms-1", errMsg)
+		running := models.NewMicroserviceStatusWithState(models.MicroserviceStateRunning)
+		running.ContainerID = "cid-1"
+		syncMicroserviceStatusToReporter(s, "ms-1", running)
+	})
+
+	clk.Advance(errorClearGrace - time.Second)
+	AdvanceRunningErrorClear()
+	got := statusreporter.GetInstance().GetProcessManagerStatus().LookupMicroserviceStatus("ms-1")
+	if got == nil || got.ErrorMessage == nil || *got.ErrorMessage != errMsg {
+		t.Fatalf("errorMessage = %#v before grace", got)
+	}
+
+	clk.Advance(time.Second)
+	AdvanceRunningErrorClear()
+	got = statusreporter.GetInstance().GetProcessManagerStatus().LookupMicroserviceStatus("ms-1")
+	if got.ErrorMessage == nil || *got.ErrorMessage != "" {
+		t.Fatalf("errorMessage = %#v after continuous running", got.ErrorMessage)
+	}
+	if got.LastError != errMsg {
+		t.Fatalf("lastError = %q", got.LastError)
+	}
+}
+
 func TestSyncMicroserviceStatusToReporter_StartingPreservesError(t *testing.T) {
 	withStatusSyncClock(t)
 	pmStatus := models.NewProcessManagerStatus()

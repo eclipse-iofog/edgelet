@@ -5,6 +5,24 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.7]
+
+### Fixed
+
+- A local bind-path recreate is saved before the old container is removed, so the delete wake does not start a second container or keep the previous mount.
+
+### Changed
+
+- Idle workloads are not inspected every few seconds while the containerd event stream is healthy
+- A container exit, OOM, delete, or start reconciles that workload immediately
+- If the event stream is down, inspection returns to the previous periodic check until the stream is healthy
+- A spec change, a local deploy, or a catalog item becoming ready or failed reconciles the affected workloads without a full scan
+- A full compare still runs about once a minute
+- CPU and memory figures refresh on their own schedule, about every 10 seconds
+- Existing containers keep working; they are not recreated just to store a new apply label
+- Controller and manual fat OTA succeed on hosts where `/run` is mounted `noexec` (drain staging under the data directory)
+- Failed controller OTA attempts leave output in `/var/log/edgelet/ota-install.log`
+
 ## [v1.1.0-rc.6]
 
 ### Changed

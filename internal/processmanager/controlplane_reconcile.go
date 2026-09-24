@@ -235,7 +235,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 			item.FailureCount = 0
 		}
 		_ = store.GetInstance().UpsertSystemControlPlane(item)
-		pm.mergeControlPlaneContainerStats(item, container, status)
 		pm.syncControlPlaneProcessManagerStatus(item, container, status)
 		return
 	case "failed", "unknown":
@@ -247,31 +246,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 	}
 
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
-	pm.mergeControlPlaneContainerStats(item, container, status)
 	pm.syncControlPlaneProcessManagerStatus(item, container, status)
-}
-
-func (pm *ProcessManager) mergeControlPlaneContainerStats(
-	item *models.ControlPlaneDeployment,
-	container *engine.Container,
-	status *models.MicroserviceStatus,
-) {
-	if pm == nil || item == nil || container == nil || status == nil {
-		return
-	}
-	if !item.ControllerRegistered {
-		return
-	}
-	if status.Status != models.MicroserviceStateRunning {
-		return
-	}
-	if pm.engine == nil {
-		return
-	}
-	if stats, err := pm.engine.GetContainerStats(container.ID); err == nil {
-		status.CPUUsage = stats.CPUUsage
-		status.MemoryUsage = stats.MemoryUsage
-	}
 }
 
 func (pm *ProcessManager) syncControlPlaneProcessManagerStatus(
@@ -292,9 +267,9 @@ func (pm *ProcessManager) syncControlPlaneProcessManagerStatus(
 		next := runtimeStatus
 		if next == nil {
 			next = models.NewMicroserviceStatusWithState(controlPlaneRuntimeStateToMicroserviceState(item.RuntimeState))
-			if container != nil {
-				next.ContainerID = container.ID
-			}
+		}
+		if container != nil && strings.TrimSpace(next.ContainerID) == "" {
+			next.ContainerID = container.ID
 		}
 		syncMicroserviceStatusToReporter(pmStatus, uuid, next)
 		synced = next

@@ -159,6 +159,47 @@ func TestFingerprintIgnoresKnowledgeCatalogItems(t *testing.T) {
 	}
 }
 
+func TestApplyLabelIncludesEnvHash(t *testing.T) {
+	ms := models.NewMicroservice("ms-1", "alpine:3.19")
+	env := []string{"FOO=bar", "BAZ=qux"}
+	label, err := ApplyLabel(ms, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := EnvHashFromLabel(label)
+	if !ok {
+		t.Fatal("new apply label must include an environment digest")
+	}
+	if got != HashEnv(env) {
+		t.Fatalf("env hash = %q want %q", got, HashEnv(env))
+	}
+	if HashEnv([]string{"BAZ=qux", "FOO=bar"}) != HashEnv(env) {
+		t.Fatal("environment digest must be order-independent")
+	}
+	if !MatchesLabel(label, ms) {
+		t.Fatal("digest on the label must still match apply fields")
+	}
+}
+
+func TestMatchesLabelIgnoresMissingEnvHash(t *testing.T) {
+	ms := models.NewMicroservice("ms-1", "alpine:3.19")
+	ms.Models = &models.ModelCatalog{
+		BindPath:    "/models",
+		Permissions: "ro",
+		Items:       []models.ModelCatalogItem{{Name: "a"}},
+	}
+	old, err := Marshal(FromMicroservice(ms))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if HasEnvHash(old) {
+		t.Fatal("legacy label must not report an environment digest")
+	}
+	if !MatchesLabel(old, ms) {
+		t.Fatal("legacy label without a digest must still match apply fields")
+	}
+}
+
 func TestPOSIXRlimitsUnlimited(t *testing.T) {
 	limits := map[string]models.Ulimit{
 		"nofile":  {Soft: 65536, Hard: 65536},

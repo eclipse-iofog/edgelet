@@ -81,6 +81,7 @@ func TryResumeReconcileAfterDataPlaneEngineReady() {
 
 	logging.LogInfo(ProcessManagerModuleName, "engine_ready_resume")
 	if pm != nil {
+		pm.requestFullSweep()
 		pm.notifyMonitorThread()
 	}
 }

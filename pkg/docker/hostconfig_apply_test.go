@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/containerapply"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/moby/moby/api/types/container"
 )
@@ -150,5 +151,24 @@ func TestApplyWorkloadCreateConfig_ReadOnlyWithoutTmpWarns(t *testing.T) {
 	warnings := applyWorkloadCreateConfig(&container.Config{}, &container.HostConfig{}, ms, "")
 	if len(warnings) != 1 {
 		t.Fatalf("expected read-only /tmp warning, got %v", warnings)
+	}
+}
+
+func TestApplyWorkloadCreateConfig_ApplyLabelIncludesEnvHash(t *testing.T) {
+	ms := models.NewMicroservice("ms-env", "alpine:3.19")
+	env := []string{"FOO=bar", "BAZ=qux"}
+	cfg := &container.Config{Image: ms.ImageName, Env: env}
+	hc := &container.HostConfig{}
+	applyWorkloadCreateConfig(cfg, hc, ms, "")
+	label := ""
+	if cfg.Labels != nil {
+		label = cfg.Labels[containerapply.LabelFingerprint]
+	}
+	got, ok := containerapply.EnvHashFromLabel(label)
+	if !ok {
+		t.Fatal("new container apply label must include an environment digest")
+	}
+	if got != containerapply.HashEnv(env) {
+		t.Fatalf("env hash = %q want %q", got, containerapply.HashEnv(env))
 	}
 }

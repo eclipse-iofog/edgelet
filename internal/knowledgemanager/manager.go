@@ -490,6 +490,7 @@ func (m *Manager) markReady(row *models.LocalKnowledge, result *modelpull.Result
 	if err != nil {
 		return err
 	}
+	prevState := current.State
 	current.State = models.KnowledgeStateReady
 	current.LastError = ""
 	if result != nil {
@@ -501,5 +502,12 @@ func (m *Manager) markReady(row *models.LocalKnowledge, result *modelpull.Result
 			current.Format = result.Format
 		}
 	}
-	return m.db.UpsertLocalKnowledge(current)
+	if err := m.db.UpsertLocalKnowledge(current); err != nil {
+		return err
+	}
+	// Drop the in-flight name before waking reconcile. A slow catalog scan
+	// must not leave a finished pull looking active.
+	m.releaseName(current.Name)
+	noteCatalogTransition(current.Name, current.Source, prevState, current.State)
+	return nil
 }

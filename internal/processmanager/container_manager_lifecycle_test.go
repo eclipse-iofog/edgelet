@@ -2,6 +2,7 @@ package processmanager
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -71,11 +72,22 @@ func (e *lifecycleTestEngine) CreateContainer(*models.Microservice, string) (str
 
 func (e *lifecycleTestEngine) GetContainerIPAddress(string) (string, error) { return "10.0.0.2", nil }
 
-func (e *lifecycleTestEngine) GetContainerStatus(string, string) (*models.MicroserviceStatus, error) {
-	if e.status != nil {
-		return e.status, nil
+func (e *lifecycleTestEngine) GetContainerStatus(id, _ string) (*models.MicroserviceStatus, error) {
+	st := e.status
+	if st == nil {
+		st = models.NewMicroserviceStatusWithState(models.MicroserviceStateRunning)
+	} else {
+		cp := *st
+		st = &cp
 	}
-	return models.NewMicroserviceStatusWithState(models.MicroserviceStateRunning), nil
+	if strings.TrimSpace(st.ContainerID) == "" {
+		st.ContainerID = id
+	}
+	if st.IPAddress == nil || strings.TrimSpace(*st.IPAddress) == "" {
+		ip := "10.0.0.2"
+		st.IPAddress = &ip
+	}
+	return st, nil
 }
 
 func (e *lifecycleTestEngine) GetContainerStats(string) (*engine.ContainerStats, error) {

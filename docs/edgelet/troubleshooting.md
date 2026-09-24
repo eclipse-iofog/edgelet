@@ -202,6 +202,26 @@ Prefer **`systemctl stop` then `systemctl start`** over blind `restart` during s
 
 ---
 
+## Upgrade stays on the old version
+
+**Symptoms:** An upgrade finishes without changing the installed version. The data-plane journal or install output contains `exec data-plane drain: permission denied`. `findmnt /run` shows `noexec`. Releases that stage the drain runtime under `/run/edgelet/runtime-drain/` cannot execute it on that mount, so a fat upgrade stops before the thin binary is replaced.
+
+**Checks:**
+
+```bash
+findmnt /run
+sudo tail -n 200 /var/log/edgelet/ota-install.log
+ls -l /var/lib/edgelet/data/.runtime-drain/edgelet
+/usr/local/bin/edgelet version --verbose
+readlink /var/lib/edgelet/data/current
+```
+
+`/var/log/edgelet/ota-install.log` is the detached `install.sh` output from a controller upgrade. Each attempt truncates the file, then writes that attempt. A non-zero `install.sh` exit is also written to the edgelet service log.
+
+**Recovery:** Install a release that stages the drain runtime under `diskDirectory` (`/var/lib/edgelet/data/.runtime-drain/` by default). `/run` can remain `noexec`. Then run the upgrade again. If the log says the drain did not verify, see [Leftover process holding a volume](#leftover-process-holding-a-volume).
+
+---
+
 ## Catalog runtime / orphan shims after data-plane restart
 
 **Symptoms:** `device or resource busy` on sandbox or task cleanup; `dial unix:///run/edgelet/containerd.sock: timeout`; journal mentions `left-over process` or `containerd-shim-*` after `edgelet-containerd` stop; catalog workloads (WASM, spin, etc.) fail to start until manual cleanup.

@@ -57,7 +57,7 @@ Constants in `runtime.go`: `HostAPIPort`, `HostConsolePort`, volume names, conta
 |-------|----------------|
 | `store.system_control_plane` | Singleton deployment row + manifest YAML |
 | `runtimeapi` | Async apply, validation, operation polling |
-| `processmanager` | `reconcileControlPlane()` each monitor tick |
+| `processmanager` | `reconcileControlPlane()` when that workload is due (spec change, container event, backoff or volume wait, catalog ready or failed, or the about-once-a-minute full compare). See [processmanager.md](processmanager.md) |
 | `processmanager/controlplane_dns.go` | Upsert/remove DNS workload record |
 
 At most **one** CP deployment per node (SQLite `id=1` check).

@@ -66,7 +66,8 @@ Key `config.yaml` fields affecting Supervisor:
 | `containerEngineUrl` | Engine socket/URL |
 | `diskDirectory` | SQLite path root (`edgelet.db`) |
 | `leaveRunningOnControlStop` | Shutdown policy for workloads |
-| `monitorContainersStatusFreqSeconds` | Process Manager reconcile tick (wired at PM start) |
+
+With the embedded engine and a healthy event stream, an idle workload is not inspected every 5 seconds. If the event stream is down, inspection returns to every 5 seconds until the stream is healthy. Docker and Podman still check running-or-not every 5 seconds. A full compare runs about once a minute, and CPU and memory on status refresh about every 10 seconds. Those intervals are built in. See [processmanager.md](processmanager.md).
 
 See [../installation.md](../installation.md) for install paths and [../deployment.md](../deployment.md) for systemd unit `edgelet.service`.
 

@@ -205,6 +205,15 @@ func (l *loggingEngine) AreMicroserviceAndContainerEqual(containerID string, ms 
 	return l.inner.AreMicroserviceAndContainerEqual(containerID, ms, registry)
 }
 
+func (l *loggingEngine) SetContainerSpecCompare(allow bool) {
+	type specGate interface {
+		SetContainerSpecCompare(bool)
+	}
+	if g, ok := l.inner.(specGate); ok {
+		g.SetContainerSpecCompare(allow)
+	}
+}
+
 func (l *loggingEngine) EnsureNetwork(name string) error {
 	start := time.Now()
 	err := l.inner.EnsureNetwork(name)

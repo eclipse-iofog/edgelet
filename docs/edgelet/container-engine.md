@@ -1,6 +1,14 @@
 # Container engine
 
-Edgelet supports multiple container runtimes through a single `ContainerEngine` interface (`pkg/engine/engine.go`). The process manager, reconciliation loop, and healthcheck runner behave identically regardless of engine. Selection is via `containerEngine` in config, validated against **platform capabilities** (not compile-time flavor).
+Edgelet supports multiple container runtimes through a single `ContainerEngine` interface (`pkg/engine/engine.go`). Selection is via `containerEngine` in config, validated against **platform capabilities** (not compile-time flavor).
+
+## Reconcile
+
+A workload is reconciled when its spec changes, when its container starts, exits, is OOM-killed, or is deleted, when a backoff or volume wait is due, or when a catalog item it needs becomes ready or failed. A full compare still runs about once a minute.
+
+With the embedded engine and a healthy event stream, an idle workload is not inspected every 5 seconds. If the event stream is down, inspection returns to every 5 seconds until the stream is healthy. Docker and Podman still check running-or-not every 5 seconds. CPU and memory on status refresh about every 10 seconds.
+
+Those intervals are built in. `config.yaml` has no keys for the wake, the full compare, or the CPU and memory sample. Detail: [modules/processmanager.md](modules/processmanager.md).
 
 ---
 
