@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +29,8 @@ const (
 	edgeletAPISocketWaitBudget = 45 * time.Second
 	edgeletAPISocketPoll       = 500 * time.Millisecond
 )
+
+var errStopBudgetExhausted = errors.New("data-plane stop budget exhausted")
 
 // bootstrapTestWaitForAPISocket, when set, overrides waitForEdgeletAPISocket (tests only).
 var bootstrapTestWaitForAPISocket func(time.Duration) bool
@@ -258,8 +261,15 @@ func quiesceDataPlaneViaCRI(drainSec int) dataPlaneDrainOutcome {
 	deps.ListTasks = func(ctx context.Context) ([]string, error) {
 		return cri.ListLabeledResidueIDs(ctx, runtime)
 	}
+	remainingStop := &atomic.Int64{}
+	remainingStop.Store(processmanager.LabeledWorkloadStopTimeoutSec)
+	deps.RemainingStop = remainingStop
 	deps.Release = func(ctx context.Context) error {
-		return cri.ReleaseLabeledWorkloads(ctx, runtime, deps.StopTimeoutSec)
+		sec := remainingStop.Load()
+		if sec < 1 {
+			return errStopBudgetExhausted
+		}
+		return cri.ReleaseLabeledWorkloads(ctx, runtime, sec)
 	}
 	deps.ProtectPID = containerd.IsDataPlaneProtectedPID
 

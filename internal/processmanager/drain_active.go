@@ -8,6 +8,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/constants"
 	"github.com/eclipse-iofog/edgelet/internal/runtimestate"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
+	"github.com/eclipse-iofog/edgelet/pkg/engine"
 )
 
 const drainActiveMarkerContents = "active\n"
@@ -54,6 +55,15 @@ func EndDataPlaneDrainHold() error {
 	err := os.Remove(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	return nil
+}
+
+// ErrIfDataPlaneDrainHold returns ErrReconcilePaused while a data-plane stop
+// is in progress. Create must return that error instead of calling the runtime.
+func ErrIfDataPlaneDrainHold() error {
+	if DataPlaneDrainHoldActive() {
+		return engine.ErrReconcilePaused
 	}
 	return nil
 }

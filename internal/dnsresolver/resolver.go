@@ -886,15 +886,13 @@ func isHostReservedName(name string, compat bool) bool {
 }
 
 func (r *Resolver) hostAdvertiseIP() string {
-	cfg := config.GetInstance()
-	if ip := strings.TrimSpace(cfg.IPAddressExternal); ip != "" {
+	if ip, err := GatewayIPForScope(ScopeManaged); err == nil && strings.TrimSpace(ip) != "" {
 		return ip
 	}
 	if ip := strings.TrimSpace(network.GetInstance().GetCurrentIPAddress()); ip != "" {
 		return ip
 	}
-	ip, _ := GatewayIPForScope(ScopeManaged)
-	return ip
+	return ""
 }
 
 func GatewayIPForScope(scope Scope) (string, error) {

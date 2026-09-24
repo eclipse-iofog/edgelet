@@ -1,7 +1,9 @@
 package processmanager
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -545,6 +547,36 @@ func TestReconcileLocalDesiredRunning_KeepsLastErrorOnFirstRunning(t *testing.T)
 	}
 	if got.RestartCount != 2 {
 		t.Fatalf("expected restart_count kept, got %d", got.RestartCount)
+	}
+}
+
+func TestLaunchLocalDeploymentPausedDoesNotBumpRestart(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	eng := &lifecycleTestEngine{
+		createErr: fmt.Errorf("RunPodSandbox for local-ms: %w", engine.ErrReconcilePaused),
+	}
+	pm := &ProcessManager{
+		engine: eng,
+		logger: logging.NewModuleLogger("test-process-manager"),
+		ctx:    context.Background(),
+	}
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:    "local-paused",
+		ManifestYAML: minimalLocalManifestYAML(),
+		Generation:   1,
+	}
+	pm.launchLocalDeployment(item, time.Now().Unix())
+	if item.RestartCount != 0 || item.FailureCount != 0 {
+		t.Fatalf("restartCount=%d failureCount=%d", item.RestartCount, item.FailureCount)
+	}
+	if item.LastError != "" {
+		t.Fatalf("lastError=%q", item.LastError)
+	}
+	if item.RuntimeState != "queued" {
+		t.Fatalf("runtime state %q, want queued so the next tick retries", item.RuntimeState)
+	}
+	if localDeploymentLaunchInFlight(item, time.Now().Unix()) {
+		t.Fatal("paused launch must not stay in flight")
 	}
 }
 

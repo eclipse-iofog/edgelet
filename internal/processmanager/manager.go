@@ -952,7 +952,7 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 				reason,
 				exitCode,
 			)
-			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 				return
 			}
 		}
@@ -970,7 +970,7 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 					nr.ExitCode,
 					nr.Message,
 				)
-				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 					return
 				}
 			}
@@ -991,6 +991,20 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 		}
 	}
 
+	_ = persistLocalWorkloadIfPresent(item)
+}
+
+func runtimeWaitErr(err error) bool {
+	return errors.Is(err, errVolumeInUse) || errors.Is(err, engine.ErrReconcilePaused)
+}
+
+func pauseLocalLaunch(item *models.LocalDeployedMicroservice, now int64) {
+	if item == nil {
+		return
+	}
+	item.RuntimeState = "queued"
+	item.State = item.RuntimeState
+	item.LastTransitionAt = now
 	_ = persistLocalWorkloadIfPresent(item)
 }
 
@@ -1045,6 +1059,10 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 	containerID, err := pm.LaunchLocalMicroservice(localMS, registry, hostIP)
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			pauseLocalLaunch(item, now)
+			return
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteLocalVolumeHold(item)
 			return
@@ -1123,6 +1141,14 @@ func (pm *ProcessManager) checkTasks() {
 		}
 
 		if err := pm.executeTask(task); err != nil {
+			if errors.Is(err, engine.ErrReconcilePaused) {
+				if pm.microserviceManager != nil {
+					if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+						ms.SetIsUpdating(false)
+					}
+				}
+				continue
+			}
 			if errors.Is(err, errVolumeInUse) {
 				pm.noteVolumeInUse(task.MicroserviceUUID)
 				if pm.microserviceManager != nil {
@@ -2153,6 +2179,9 @@ func (pm *ProcessManager) recreateLocalDeployment(item *models.LocalDeployedMicr
 	}
 	newID, err := pm.containerManager.RecreateContainer(pm.reconcileOperationContext(item.LocalUUID), ms, RecreateOptions{PullImage: pullImage})
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			return err
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteLocalVolumeHold(item)
 			return err

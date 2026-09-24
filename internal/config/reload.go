@@ -43,6 +43,7 @@ func FullReload(hooks ReloadHooks) error {
 		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 	SetLastReloadSuccessful(true)
+	ScheduleIPAddressExternalRefresh()
 
 	logLimitMB := logging.DaemonLogBudgetMB(cfg.LogLimit, logging.SeriesControlPlane, logging.RuntimeSplitFromEnv())
 	if err := logging.InstanceConfigUpdated(cfg.LogDirectory, logLimitMB, cfg.LogFileCount, cfg.LogLevel); err != nil {

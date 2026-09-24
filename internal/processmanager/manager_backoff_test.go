@@ -2,6 +2,7 @@ package processmanager
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -174,6 +175,53 @@ func TestRetryTask_NotImmediate(t *testing.T) {
 	tasks := drainTasks(pm.taskQueue)
 	if len(tasks) != 1 || tasks[0] != task {
 		t.Fatalf("expected retry after delay, got %#v", tasks)
+	}
+}
+
+func TestReconcilePausedCreateDoesNotIncrementRestartCount(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	events := captureEvents(t)
+	pm, ms, eng := newBackoffReconcilePM(t, "ms-paused")
+	reg := &models.Registry{ID: 1, URL: "from_cache"}
+	pm.containerManager = newLifecycleCM(eng, reg)
+	ms.RegistryID = 1
+	eng.workload = nil
+	eng.createErr = fmt.Errorf("RunPodSandbox for edgelet-ms: %w", engine.ErrReconcilePaused)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pm.ctx = ctx
+	pm.wg.Add(1)
+	task := NewContainerTask(TaskActionAdd, ms.MicroserviceUUID)
+	pm.taskQueue.Add(task)
+	go pm.checkTasks()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && pm.taskQueue.Size() != 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	pm.wg.Wait()
+
+	if task.Retries != 0 {
+		t.Fatalf("paused create incremented task retries to %d", task.Retries)
+	}
+	got := statusreporter.GetInstance().GetProcessManagerStatus().GetMicroserviceStatus(ms.MicroserviceUUID)
+	if got != nil && got.RestartCount != 0 {
+		t.Fatalf("restartCount=%d", got.RestartCount)
+	}
+	if got != nil && got.Status == models.MicroserviceStateFailed {
+		t.Fatal("paused create stored a failed status")
+	}
+	if got != nil && got.ErrorMessage != nil && *got.ErrorMessage != "" {
+		t.Fatalf("paused create stored lastError %q", *got.ErrorMessage)
+	}
+	for _, event := range *events {
+		if event.Message == "container create failed" {
+			t.Fatal("paused create was reported as container create failed")
+		}
+	}
+	if ms.GetIsUpdating() {
+		t.Fatal("paused create left reconcile in flight")
 	}
 }
 

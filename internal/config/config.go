@@ -289,7 +289,7 @@ func (c *Config) SetProperty(key, value string) error {
 // GetConfigReport returns a formatted config report string (for info endpoint)
 // Uses IPAddressExternal from config
 func (c *Config) GetConfigReport() string {
-	return c.GetConfigReportWithIP(c.IPAddressExternal)
+	return c.GetConfigReportWithIP(c.GetIPAddressExternal())
 }
 
 // GetConfigReportWithIP returns a formatted config report string with provided IP address

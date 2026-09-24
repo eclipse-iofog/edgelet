@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -57,6 +58,9 @@ func (l *loggingEngine) CreateContainer(ms *models.Microservice, hostname string
 		image = ms.ImageName
 	}
 	containerID, err = l.inner.CreateContainer(ms, hostname)
+	if errors.Is(err, ErrReconcilePaused) {
+		return "", err
+	}
 	l.emitMutating(runtimeops.EventEngineCRIContainerCreated, containerID, image, runtimeops.ReasonCreateFailed, "container create failed", "container created", start, err, err == nil)
 	return containerID, err
 }

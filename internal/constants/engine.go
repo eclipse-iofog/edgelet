@@ -35,6 +35,9 @@ const (
 	EdgeletManagedCNIConfigName = "10-edgelet.conflist"
 	EdgeletCNIConfigFile        = "/var/lib/edgelet-containerd/cni/conf/10-edgelet.conflist"
 	EdgeletContainerdConfigFile = "/var/lib/edgelet-containerd/config.toml"
+	// EdgeletWasmShimLogDir is the working directory inherited by wasm shim -info.
+	// The shim opens a relative file named "log" and does not create it.
+	EdgeletWasmShimLogDir = "/var/lib/edgelet-containerd/shim-log"
 
 	// Ephemeral runtime directory — lives on tmpfs on systemd hosts, cleared on reboot.
 	EdgeletRunDir           = "/run/edgelet"

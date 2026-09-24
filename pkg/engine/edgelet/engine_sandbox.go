@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/eclipse-iofog/edgelet/internal/processmanager"
 	"github.com/eclipse-iofog/edgelet/pkg/engine/edgelet/cri"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -35,6 +36,9 @@ func (e *Engine) preflightReleasePodSandbox(ctx context.Context, msUUID string) 
 }
 
 func (e *Engine) runPodSandboxWithRecovery(ctx context.Context, podConfig *runtimeapi.PodSandboxConfig, runtimeHandler, msUUID string) (string, error) {
+	if err := processmanager.ErrIfDataPlaneDrainHold(); err != nil {
+		return "", err
+	}
 	e.preflightReleasePodSandbox(ctx, msUUID)
 	sandboxID, err := e.criClient.RunPodSandbox(ctx, podConfig, runtimeHandler)
 	if err == nil {
@@ -46,6 +50,9 @@ func (e *Engine) runPodSandboxWithRecovery(ctx context.Context, podConfig *runti
 			_ = e.criClient.RemovePodSandbox(ctx, reservedID)
 		}
 		e.preflightReleasePodSandbox(ctx, msUUID)
+		if err := processmanager.ErrIfDataPlaneDrainHold(); err != nil {
+			return "", err
+		}
 		return e.criClient.RunPodSandbox(ctx, podConfig, runtimeHandler)
 	}
 	return "", err

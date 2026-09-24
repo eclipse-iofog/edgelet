@@ -440,7 +440,9 @@ func (e *Engine) CreateContainer(ms *models.Microservice, hostname string) (stri
 	sandboxStart := time.Now()
 	sandboxID, err := e.runPodSandboxWithRecovery(ctx, podConfig, runtimeHandler, ms.MicroserviceUUID)
 	if err != nil {
-		e.emitCRISubstep(runtimeops.EventEngineCRISandboxCreated, "criRunPodSandbox", "", "", ms.ImageName, runtimeops.ReasonCreateFailed, sandboxStart, err)
+		if !errors.Is(err, engine.ErrReconcilePaused) {
+			e.emitCRISubstep(runtimeops.EventEngineCRISandboxCreated, "criRunPodSandbox", "", "", ms.ImageName, runtimeops.ReasonCreateFailed, sandboxStart, err)
+		}
 		return "", fmt.Errorf("RunPodSandbox for %s: %w", containerName, err)
 	}
 	e.emitEngineInfo(runtimeops.EventEngineCRISandboxCreated, "", sandboxID, ms.ImageName, "pod sandbox created", sandboxStart, map[string]any{

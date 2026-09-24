@@ -2,8 +2,14 @@ package processmanager
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
+	"strings"
+	"sync/atomic"
 	"time"
+
+	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
 
 const (
@@ -44,6 +50,14 @@ type QuiesceDeps struct {
 	// to that child's socket.
 	ProtectPID    func(pid int) bool
 	AfterKillWait time.Duration
+	// RemainingStop is the CRI stop budget still left on the quiesce deadline.
+	// Release reads it so a retry does not start a fresh stop timeout.
+	RemainingStop *atomic.Int64
+	// Poll is the delay between CRI delete retries. Zero uses the drain poll interval.
+	Poll time.Duration
+	// Sleep and Now override the clock in tests.
+	Sleep func(time.Duration)
+	Now   func() time.Time
 }
 
 // QuiesceLabeledWorkloads runs CRI SIGTERM, deletes labeled containers and pod
@@ -55,32 +69,104 @@ func QuiesceLabeledWorkloads(ctx context.Context, runtime LabeledWorkloadRuntime
 		ctx = context.Background()
 	}
 	deps = deps.withDefaults(runtime)
+	started := deps.Now()
+	deadline := started.Add(timeout)
+	if timeout <= 0 {
+		deadline = started
+	}
 
-	graceErr := DrainLabeledWorkloads(ctx, runtime, timeout, deps.StopTimeoutSec)
-	if graceErr != nil && !IsLabeledWorkloadDrainTimeout(graceErr) && runtime != nil {
-		// Runtime list/stop failed. Still force volume holders, then fail closed
-		// unless verify can prove the node is clear.
-		forceVolumeHolders(deps)
-		if verifyErr := verifyDataPlaneClear(ctx, deps); verifyErr != nil {
-			return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+	var graceErr, releaseErr error
+	var residue []string
+	attempted := false
+
+	for {
+		if attempted && !deps.Now().Before(deadline) {
+			return finishQuiesce(ctx, deps, graceErr, releaseErr, residue)
 		}
+		attempted = true
+
+		stopSec := stopTimeoutForBudget(deps.StopTimeoutSec, deadline)
+		deps.setStopBudget(stopSec)
+		remaining := deadline.Sub(deps.Now())
+		if remaining < 0 {
+			remaining = 0
+		}
+		// A zero budget must not be passed through: the grace helper treats
+		// that as a fresh adaptive stop, and release treats it as one second.
+		if remaining <= 0 || stopSec <= 0 {
+			graceErr = fmt.Errorf("timed out draining labeled workloads after %s", timeout)
+		} else {
+			graceErr = DrainLabeledWorkloads(ctx, runtime, remaining, stopSec)
+		}
+
+		if graceErr != nil && !IsLabeledWorkloadDrainTimeout(graceErr) && runtime != nil {
+			// List or stop failed. A volume holder still fails closed immediately.
+			// A CRI error is retried until the same deadline.
+			forceVolumeHolders(deps)
+			if holdErr := volumeHoldersRemain(deps); holdErr != nil {
+				logQuiesceVerifyFailed(graceErr, releaseErr, nil)
+				return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+			}
+		} else {
+			stopSec = stopTimeoutForBudget(deps.StopTimeoutSec, deadline)
+			deps.setStopBudget(stopSec)
+			releaseErr = nil
+			if deps.Release != nil && stopSec > 0 {
+				releaseErr = deps.Release(ctx)
+			}
+			var taskErr error
+			residue, taskErr = labeledResidue(ctx, deps)
+			if taskErr != nil && graceErr == nil {
+				graceErr = taskErr
+			}
+			if releaseErr == nil && taskErr == nil && len(residue) == 0 {
+				forceLeftovers(ctx, deps)
+				if holdErr := volumeHoldersRemain(deps); holdErr != nil {
+					logQuiesceVerifyFailed(graceErr, nil, nil)
+					return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+				}
+				if taskErr = verifyDataPlaneClear(ctx, deps); taskErr != nil {
+					if isVolumeHolderErr(taskErr) {
+						logQuiesceVerifyFailed(graceErr, nil, nil)
+						return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+					}
+					residue, _ = labeledResidue(ctx, deps)
+				} else {
+					return DrainQuiesceResult{Status: DrainQuiesceComplete}
+				}
+			}
+		}
+
+		if !deps.Now().Before(deadline) {
+			return finishQuiesce(ctx, deps, graceErr, releaseErr, residue)
+		}
+		wait := deps.Poll
+		if left := deadline.Sub(deps.Now()); left < wait {
+			wait = left
+		}
+		if wait > 0 {
+			deps.Sleep(wait)
+		}
+	}
+}
+
+func finishQuiesce(ctx context.Context, deps QuiesceDeps, graceErr, releaseErr error, residue []string) DrainQuiesceResult {
+	if holdErr := volumeHoldersRemain(deps); holdErr != nil {
+		logQuiesceVerifyFailed(graceErr, releaseErr, residue)
+		return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+	}
+	if residue == nil {
+		residue, _ = labeledResidue(ctx, deps)
+	}
+	if releaseErr != nil || len(residue) > 0 {
+		logQuiesceVerifyFailed(graceErr, releaseErr, residue)
+		return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
+	}
+	if graceErr != nil && !IsLabeledWorkloadDrainTimeout(graceErr) {
 		return DrainQuiesceResult{Status: DrainQuiesceTimedOut}
 	}
-
-	if deps.Release != nil {
-		if err := deps.Release(ctx); err != nil {
-			return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
-		}
-	}
-	if blocked, err := labeledTasksRemain(ctx, deps); err != nil || blocked {
-		return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
-	}
-
-	forceLeftovers(ctx, deps)
-	if verifyErr := verifyDataPlaneClear(ctx, deps); verifyErr != nil {
-		return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
-	}
-	return DrainQuiesceResult{Status: DrainQuiesceComplete}
+	logQuiesceVerifyFailed(graceErr, releaseErr, residue)
+	return DrainQuiesceResult{Status: DrainQuiesceVerifyFailed}
 }
 
 // labeledTasksRemain reports whether containerd still has a labeled container or sandbox.
@@ -120,7 +206,75 @@ func (d QuiesceDeps) withDefaults(runtime LabeledWorkloadRuntime) QuiesceDeps {
 			return runtime.ListLabeledRunning(ctx)
 		}
 	}
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Sleep == nil {
+		d.Sleep = time.Sleep
+	}
+	if d.Poll <= 0 {
+		d.Poll = shutdownDrainPollInterval
+	}
 	return d
+}
+
+func (d QuiesceDeps) setStopBudget(sec int64) {
+	if d.RemainingStop != nil {
+		d.RemainingStop.Store(sec)
+	}
+}
+
+func labeledResidue(ctx context.Context, deps QuiesceDeps) ([]string, error) {
+	if deps.ListTasks == nil {
+		return nil, errLabeledTasksUnknown
+	}
+	tasks, err := deps.ListTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func volumeHoldersRemain(deps QuiesceDeps) error {
+	if deps.VolumeHolders == nil {
+		return nil
+	}
+	holders, err := deps.VolumeHolders(deps.DiskDirectory)
+	if err != nil {
+		return err
+	}
+	if len(deps.killablePIDs(holders)) > 0 {
+		return errVolumeHoldersRemain
+	}
+	return nil
+}
+
+func isVolumeHolderErr(err error) bool {
+	return errors.Is(err, errVolumeHoldersRemain)
+}
+
+func logQuiesceVerifyFailed(graceErr, releaseErr error, residue []string) {
+	logging.LogWarn(ProcessManagerModuleName, fmt.Sprintf(
+		"data-plane drain verify failed grace=%s release=%s %s",
+		quiesceErrText(graceErr), quiesceErrText(releaseErr), residueSample(residue),
+	))
+}
+
+func quiesceErrText(err error) string {
+	if err == nil {
+		return "none"
+	}
+	return err.Error()
+}
+
+func residueSample(ids []string) string {
+	const maxIDs = 8
+	n := len(ids)
+	sample := ids
+	if n > maxIDs {
+		sample = ids[:maxIDs]
+	}
+	return fmt.Sprintf("residue count=%d ids=%s", n, strings.Join(sample, ","))
 }
 
 func forceLeftovers(ctx context.Context, deps QuiesceDeps) {

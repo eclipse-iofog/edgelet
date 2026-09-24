@@ -29,6 +29,7 @@ type lifecycleTestEngine struct {
 	createdID     string
 	status        *models.MicroserviceStatus
 	startErr      error
+	createErr     error
 	configDrifted bool
 }
 
@@ -60,6 +61,9 @@ func (e *lifecycleTestEngine) PullImage(string, *models.Registry, *engine.PullIm
 }
 
 func (e *lifecycleTestEngine) CreateContainer(*models.Microservice, string) (string, error) {
+	if e.createErr != nil {
+		return "", e.createErr
+	}
 	e.createdID = "cid-new"
 	e.workload = nil
 	return e.createdID, nil
