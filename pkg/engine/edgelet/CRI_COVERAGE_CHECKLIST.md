@@ -23,6 +23,19 @@
 | Annotations | ContainerConfig.Annotations | DONE |
 | CdiDevs | ContainerConfig.CDIDevices | DONE |
 | Healthcheck | `iofog.org/healthcheck` label (JSON); exec runner | DONE (labels) |
+| Catalog bind (`bindPath` + permissions) | One bind of the per-MS models projection | DONE |
+| Entrypoint / commands (omit or `[]` = image default) | ContainerConfig.Command / Args | DONE |
+| WorkingDir | ContainerConfig.WorkingDir | DONE |
+| RunAsGroup | LinuxContainerSecurityContext.RunAsGroup | DONE |
+| ReadOnlyRootFilesystem | LinuxContainerSecurityContext.ReadonlyRootfs | DONE |
+| Tmpfs | Host tmpfs + CRI bind mount | DONE |
+| ShmSize | Sized host tmpfs bind at `/dev/shm` | DONE |
+| Cpus | CpuQuota / CpuPeriod (period 100000) | DONE |
+| MemoryReservation | LinuxContainerResources.Unified `memory.low` | DONE |
+| MemorySwap | MemorySwapLimitInBytes (`-1` unlimited) | DONE |
+| Sysctls | LinuxPodSandboxConfig.Sysctls | DONE |
+| Ulimits | OCI Process.Rlimits after CRI create | DONE |
+| Devices | ContainerConfig.Devices | DONE |
 
 ## Pod Sandbox
 

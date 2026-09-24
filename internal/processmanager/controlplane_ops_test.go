@@ -1,8 +1,12 @@
 package processmanager
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/controlplane"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
@@ -118,6 +122,7 @@ func TestRestartControlPlaneDeployment_DockerInPlaceStopStart(t *testing.T) {
 	pm.containerManager = NewContainerManager(eng, nil, "docker")
 
 	dep := controlPlaneRestartTestDeployment("cp-restart-docker")
+	dep.LastError = "previous crash"
 	if err := store.GetInstance().UpsertSystemControlPlane(dep); err != nil {
 		t.Fatalf("upsert control plane: %v", err)
 	}
@@ -139,8 +144,8 @@ func TestRestartControlPlaneDeployment_DockerInPlaceStopStart(t *testing.T) {
 	if got.RuntimeState != "running" {
 		t.Fatalf("expected runtime_state=running, got %q", got.RuntimeState)
 	}
-	if got.LastError != "" {
-		t.Fatalf("expected cleared last_error, got %q", got.LastError)
+	if got.LastError != "previous crash" {
+		t.Fatalf("expected last_error kept after restart, got %q", got.LastError)
 	}
 }
 
@@ -215,5 +220,98 @@ func TestRestartControlPlaneDeployment_LaunchesMissingContainer(t *testing.T) {
 	}
 	if !launchCalled {
 		t.Fatal("expected launch path when container is missing")
+	}
+}
+
+func openControlPlaneVolumeTest(t *testing.T) string {
+	t.Helper()
+	disk := t.TempDir()
+	cfg := config.GetInstance()
+	orig := cfg.DiskDirectory
+	cfg.DiskDirectory = disk
+	t.Cleanup(func() { cfg.DiskDirectory = orig })
+
+	db := store.GetInstance()
+	_ = db.Close()
+	if err := db.Open(disk); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return disk
+}
+
+func writeControlPlaneVolumeMarkers(t *testing.T, disk, uuid string) (dbMarker, logMarker string) {
+	t.Helper()
+	dbMarker = filepath.Join(store.PersistentVolumeHostPath(disk, uuid, controlplane.VolumeDBName, models.VolumeScopePrivate), "keep.txt")
+	logMarker = filepath.Join(store.PersistentVolumeHostPath(disk, uuid, controlplane.VolumeLogName, models.VolumeScopePrivate), "keep.txt")
+	for _, marker := range []string{dbMarker, logMarker} {
+		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dbMarker, logMarker
+}
+
+func TestDeleteControlPlaneRemovesPrivateVolumeDirs(t *testing.T) {
+	disk := openControlPlaneVolumeTest(t)
+	uuid := "cp-delete-volumes"
+	dbMarker, logMarker := writeControlPlaneVolumeMarkers(t, disk, uuid)
+
+	dep := controlPlaneRestartTestDeployment(uuid)
+	if err := store.GetInstance().UpsertSystemControlPlane(dep); err != nil {
+		t.Fatalf("upsert control plane: %v", err)
+	}
+
+	eng := &lifecycleTestEngine{}
+	pm := &ProcessManager{
+		logger:           logging.NewModuleLogger("test-process-manager"),
+		engineName:       "docker",
+		engine:           eng,
+		containerManager: NewContainerManager(eng, nil, "docker"),
+	}
+	if err := pm.DeleteControlPlane(); err != nil {
+		t.Fatalf("DeleteControlPlane: %v", err)
+	}
+	for _, marker := range []string{dbMarker, logMarker} {
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatalf("expected control-plane volume removed: %s err=%v", marker, err)
+		}
+	}
+}
+
+func TestRestartControlPlaneKeepsPrivateVolumeDirs(t *testing.T) {
+	disk := openControlPlaneVolumeTest(t)
+	uuid := "cp-restart-volumes"
+	dbMarker, logMarker := writeControlPlaneVolumeMarkers(t, disk, uuid)
+
+	dep := controlPlaneRestartTestDeployment(uuid)
+	if err := store.GetInstance().UpsertSystemControlPlane(dep); err != nil {
+		t.Fatalf("upsert control plane: %v", err)
+	}
+
+	eng := &controlPlaneRestartTrackEngine{}
+	eng.workload = &engine.Container{
+		ID:    "old-cid",
+		Image: "ghcr.io/datasance/controller:3.8.0-beta.0",
+		Labels: map[string]string{
+			workloadmeta.LabelMicroserviceUID: uuid,
+		},
+	}
+	pm := &ProcessManager{
+		logger:           logging.NewModuleLogger("test-process-manager"),
+		engineName:       "docker",
+		engine:           eng,
+		containerManager: NewContainerManager(eng, nil, "docker"),
+	}
+	if err := pm.RestartControlPlaneDeployment(dep, false); err != nil {
+		t.Fatalf("RestartControlPlaneDeployment: %v", err)
+	}
+	for _, marker := range []string{dbMarker, logMarker} {
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("control-plane restart must keep volume data: %s: %v", marker, err)
+		}
 	}
 }

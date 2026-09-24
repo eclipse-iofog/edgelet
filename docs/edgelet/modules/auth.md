@@ -90,7 +90,7 @@ No HTTP server in this package. Surfaces through:
 
 - EdgeletAPI middleware (validation)
 - Field Agent Controller client (outbound signed JWT)
-- Service account projection files
+- Service account projection files (`token`, `ca.crt`, `edgelet.jwk`)
 
 ## Observability
 

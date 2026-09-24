@@ -41,9 +41,11 @@ Entry: `(*Supervisor).Start()` in `supervisor.go`.
    - Edgelet engine: requires prestarted `containerdSvc`; starts socket watchdog goroutine
 6. `processmanager.Start(engine, fieldAgent)`
 7. Optional HealthcheckRunner when engine is `edgelet`
-8. ResourceManager → GPS → EdgeletAPI (waits up to 15s for listeners)
+8. GPS → EdgeletAPI (waits up to 15s for listeners)
 9. Pruning Manager (engine + microservice image list wired)
 10. Edge Guard Manager
+
+Host hardware/USB inventory posting is not started. Edge Guard remains.
 11. Set daemon `RUNNING` (or `WARNING` if external engine degraded)
 
 ### Stop
@@ -97,7 +99,7 @@ Supervisor does not expose HTTP routes. Operator-facing control:
 |---------|----------------|
 | Daemon exits on start | DB migration failure, containerd not prestarted for `edgelet` engine |
 | `WARNING` daemon status | Docker/Podman socket unavailable after retry budget |
-| Immediate restart | Embedded containerd unexpected exit (fail-fast handler) |
+| Immediate restart (control `edgelet.service`) | Embedded containerd unexpected exit while the supervisor owns the child (fail-fast handler) |
 | Reload rejected | Config validation failed; Field Agent skips fog config POST |
 
 See [../troubleshooting.md](../troubleshooting.md).

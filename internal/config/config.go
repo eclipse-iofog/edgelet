@@ -37,7 +37,6 @@ type Config struct {
 	LogLevel                        string
 	StatusFrequency                 int
 	ChangeFrequency                 int
-	DeviceScanFrequency             int
 	WatchdogEnabled                 bool
 	EdgeGuardFrequency              int64
 	GPSDevice                       string
@@ -379,9 +378,6 @@ func (c *Config) GetConfigReportWithIP(ipAddress string) string {
 
 	// Change frequency
 	buildLine("Change Update Frequency", fmt.Sprintf("%d", c.ChangeFrequency))
-
-	// Device scan frequency
-	buildLine("Scan Devices Frequency", fmt.Sprintf("%d", c.DeviceScanFrequency))
 
 	// Watchdog enabled
 	watchdogStr := "off"

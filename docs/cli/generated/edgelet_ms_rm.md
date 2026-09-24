@@ -6,6 +6,10 @@ Remove a microservice
 
 Remove a microservice and its local deployment state.
 
+Persistent VOLUME directories are retained. Shared claims drop this consumer only.
+--cleanup records a reserved bit for a later explicit volume prune; it does not
+delete data now and does not start a sweeper.
+
 WARNING: This deletes the microservice record and associated container resources.
 
 ```
@@ -15,7 +19,8 @@ edgelet ms rm <id> [flags]
 ### Options
 
 ```
-  -h, --help   help for rm
+      --cleanup   Reserve a cleanup bit for later orphan prune; does not delete persistent VOLUME data now
+  -h, --help      help for rm
 ```
 
 ### Options inherited from parent commands

@@ -6,29 +6,38 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/eclipse-iofog/edgelet/internal/models"
 )
 
 var statusOutputOrder = []string{
 	"connectionToController",
-	"agentCpuPercent",
-	"agentMemoryMiB",
-	"runtimeCpuPercent",
-	"runtimeMemoryMiB",
+	"agentCpu",
+	"agentMemory",
+	"runtimeCpu",
+	"runtimeMemory",
 	"runtimeAvailable",
 	"runtimeDegraded",
-	"edgeletTotalCpuPercent",
-	"edgeletTotalMemoryMiB",
-	"cpuUsage",
+	"edgeletStackCpu",
+	"edgeletStackMemory",
 	"diskUsage",
 	"edgeletDaemon",
 	"memoryUsage",
 	"runningMicroservices",
+	"systemCpus",
+	"systemOs",
+	"systemOsVersion",
+	"systemKernelVersion",
+	"systemTotalMemory",
+	"systemTotalDisk",
 	"systemAvailableDisk",
 	"systemAvailableMemory",
 	"systemTime",
 	"systemTotalCpu",
 	"availableNetworkInterfaces",
 	"availableRuntimes",
+	"runtimeClasses",
+	"availableCdiDevices",
 }
 
 var infoOutputOrder = []string{
@@ -54,7 +63,6 @@ var infoOutputOrder = []string{
 	"logFilesCount",
 	"logLevel",
 	"upgradeScanFrequency",
-	"deviceScanFrequency",
 	"pruningFrequency",
 	"edgeGuardFrequency",
 	"gpsCoordinates",
@@ -75,7 +83,6 @@ var infoAliasToCanonical = map[string]string{
 	"diskLimit":            "diskUsageLimit",
 	"logLevel":             "logFilesLevel",
 	"upgradeScanFrequency": "readyToUpgradeScanFrequency",
-	"deviceScanFrequency":  "scanDevicesFrequency",
 }
 
 // FormatEdgeletAPIHuman renders human-readable output for a EdgeletAPI v1 route payload.
@@ -83,13 +90,19 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 	routePath = stripQuery(routePath)
 	switch routePath {
 	case "/v1/system/status":
-		return formatFlatMapWithOrder(result, statusOutputOrder)
+		return formatStatusMap(result, statusOutputOrder)
 	case "/v1/system/info":
 		return formatInfoWithAliasOrder(result)
 	case "/v1/ms":
 		return formatMSList(result)
 	case "/v1/images":
 		return formatImageList(result)
+	case "/v1/models":
+		return formatModelList(result)
+	case "/v1/knowledge":
+		return formatKnowledgeList(result)
+	case "/v1/volumes":
+		return formatVolumeList(result)
 	case "/v1/deploy/registries":
 		return formatRegistryList(result)
 	case "/v1/deploy/runtimeclasses":
@@ -105,15 +118,440 @@ func FormatEdgeletAPIHuman(routePath string, result map[string]any) string {
 		if strings.HasPrefix(routePath, "/v1/ms/") {
 			return formatMSInspect(result)
 		}
+		if strings.HasPrefix(routePath, "/v1/models/") {
+			return formatModelInspect(result)
+		}
+		if strings.HasPrefix(routePath, "/v1/knowledge/") {
+			return formatKnowledgeInspect(result)
+		}
+		if strings.HasPrefix(routePath, "/v1/volumes/shared/") || strings.HasPrefix(routePath, "/v1/volumes/") {
+			return formatVolumeInspect(result)
+		}
 		return ""
 	}
+}
+
+var msInspectOrder = []string{
+	"uuid",
+	"name",
+	"application",
+	"source",
+	"type",
+	"state",
+	"statusText",
+	"errorMessage",
+	"lastError",
+	"lastErrorAt",
+	"containerId",
+	"podId",
+	"image",
+	"desiredState",
+	"runtimeState",
+	"healthStatus",
+	"percentage",
+	"restartCount",
 }
 
 func formatMSInspect(result map[string]any) string {
 	if len(result) == 0 {
 		return ""
 	}
-	return formatFlatMapWithOrder(result, nil)
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	if _, hasRaw := result["raw"]; hasRaw {
+		// Full inspect includes nested engine state; empty human falls back to JSON.
+		return ""
+	}
+	var b strings.Builder
+	seen := make(map[string]bool, len(result))
+	for _, key := range msInspectOrder {
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		if formatted, ok := formatInspectScalar(value); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+			seen[key] = true
+		}
+	}
+	if catalog := formatNamedCatalogInspect("models", result["models"]); catalog != "" {
+		_, _ = fmt.Fprint(&b, catalog)
+		seen["models"] = true
+	}
+	if catalog := formatNamedCatalogInspect("knowledge", result["knowledge"]); catalog != "" {
+		_, _ = fmt.Fprint(&b, catalog)
+		seen["knowledge"] = true
+	}
+	remaining := make([]string, 0, len(result))
+	for key := range result {
+		if seen[key] || key == "models" || key == "knowledge" || key == "manifestYAML" {
+			continue
+		}
+		remaining = append(remaining, key)
+	}
+	slices.Sort(remaining)
+	for _, key := range remaining {
+		if formatted, ok := formatInspectScalar(result[key]); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatNamedCatalogInspect(kind string, raw any) string {
+	catalog, ok := raw.(map[string]any)
+	if !ok || len(catalog) == 0 {
+		return ""
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "models"
+	}
+	var b strings.Builder
+	if bind := MapValueAsRawString(catalog, "bindPath"); strings.TrimSpace(bind) != "" {
+		_, _ = fmt.Fprintf(&b, "%s.bindPath: %s\n", kind, bind)
+	}
+	if perms := MapValueAsRawString(catalog, "permissions"); strings.TrimSpace(perms) != "" {
+		_, _ = fmt.Fprintf(&b, "%s.permissions: %s\n", kind, perms)
+	}
+	if names := catalogItemNames(catalog["items"]); names != "" {
+		_, _ = fmt.Fprintf(&b, "%s.items: %s\n", kind, names)
+	}
+	return b.String()
+}
+
+func catalogItemNames(raw any) string {
+	switch items := raw.(type) {
+	case []any:
+		names := make([]string, 0, len(items))
+		for _, item := range items {
+			switch typed := item.(type) {
+			case map[string]any:
+				if name := strings.TrimSpace(MapValueAsRawString(typed, "name")); name != "" {
+					names = append(names, name)
+				}
+			case string:
+				if name := strings.TrimSpace(typed); name != "" {
+					names = append(names, name)
+				}
+			}
+		}
+		return strings.Join(names, ", ")
+	case []string:
+		return strings.Join(items, ", ")
+	default:
+		return ""
+	}
+}
+
+func formatInspectScalar(value any) (string, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return "", false
+	case map[string]any:
+		return "", false
+	case []any:
+		if len(typed) == 0 {
+			return "", false
+		}
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if _, isMap := item.(map[string]any); isMap {
+				return "", false
+			}
+			parts = append(parts, fmt.Sprintf("%v", item))
+		}
+		return strings.Join(parts, ", "), true
+	case []string:
+		if len(typed) == 0 {
+			return "", false
+		}
+		return strings.Join(typed, ", "), true
+	case *string:
+		if typed == nil {
+			return "", false
+		}
+		return *typed, true
+	default:
+		s := strings.TrimSpace(fmt.Sprintf("%v", typed))
+		if s == "" || s == "<nil>" {
+			return "", false
+		}
+		return s, true
+	}
+}
+
+func formatStatusMap(result map[string]any, preferred []string) string {
+	if len(result) == 0 {
+		return ""
+	}
+	seen := make(map[string]bool, len(result))
+	var b strings.Builder
+	for _, key := range preferred {
+		if skipHumanStatusKey(key, result) {
+			continue
+		}
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatStatusValue(key, value))
+		seen[key] = true
+	}
+	remaining := make([]string, 0, len(result))
+	for key := range result {
+		if !seen[key] {
+			remaining = append(remaining, key)
+		}
+	}
+	slices.Sort(remaining)
+	for _, key := range remaining {
+		if skipHumanStatusKey(key, result) {
+			continue
+		}
+		_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatStatusValue(key, result[key]))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func skipHumanStatusKey(key string, result map[string]any) bool {
+	switch key {
+	case "cpuUsage":
+		_, ok := result["edgeletStackCpu"]
+		return ok
+	case "memoryUsage":
+		_, ok := result["edgeletStackMemory"]
+		return ok
+	case "agentCpuPercent", "agentMemoryMiB", "runtimeCpuPercent", "runtimeMemoryMiB", "edgeletTotalCpuPercent", "edgeletTotalMemoryMiB":
+		return true
+	default:
+		return false
+	}
+}
+
+func formatStatusValue(key string, value any) string {
+	switch key {
+	case "systemTotalMemory", "systemAvailableMemory", "systemTotalDisk", "systemAvailableDisk",
+		"agentMemory", "runtimeMemory", "edgeletStackMemory":
+		if formatted, ok := formatStatusByteCount(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "systemTotalCpu":
+		if formatted, ok := formatStatusHostCPUPercent(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "agentCpu", "runtimeCpu", "edgeletStackCpu":
+		if formatted, ok := formatStatusCPUCores(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "cpuUsage":
+		if formatted, ok := formatStatusStackCPU(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "memoryUsage":
+		if formatted, ok := formatStatusStackMemoryMiB(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "diskUsage":
+		if formatted, ok := formatStatusEdgeletDiskUsage(value); ok {
+			return formatted
+		}
+		return fmt.Sprintf("%v", value)
+	case "runtimeClasses":
+		return formatRuntimeClassesStatusValue(value)
+	case "availableCdiDevices":
+		return formatJoinedStatusList(value)
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func formatStatusByteCount(value any) (string, bool) {
+	bytes, ok := statusValueAsFloat64(value)
+	if !ok || bytes < 0 {
+		return "", false
+	}
+	const unit = 1024.0
+	switch {
+	case bytes >= unit*unit*unit*unit:
+		return fmt.Sprintf("%.2f TiB", bytes/(unit*unit*unit*unit)), true
+	case bytes >= unit*unit*unit:
+		return fmt.Sprintf("%.2f GiB", bytes/(unit*unit*unit)), true
+	case bytes >= unit*unit:
+		return fmt.Sprintf("%.2f MiB", bytes/(unit*unit)), true
+	case bytes >= unit:
+		return fmt.Sprintf("%.2f KiB", bytes/unit), true
+	default:
+		return fmt.Sprintf("%.0f B", bytes), true
+	}
+}
+
+func formatStatusHostCPUPercent(value any) (string, bool) {
+	percent, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%.2f %%", percent), true
+}
+
+// formatStatusStackCPU formats controller cpuUsage (per-core scale, 100 = one CPU) as cores.
+func formatStatusStackCPU(value any) (string, bool) {
+	scale, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return formatCPUCoresFloat(scale / 100.0)
+}
+
+func formatCPUCoresFloat(cores float64) (string, bool) {
+	switch {
+	case cores >= 10:
+		return fmt.Sprintf("%.2f cores", cores), true
+	case cores >= 1:
+		return fmt.Sprintf("%.3f cores", cores), true
+	default:
+		return fmt.Sprintf("%.4f cores", cores), true
+	}
+}
+
+func formatStatusCPUCores(value any) (string, bool) {
+	cores, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return formatCPUCoresFloat(cores)
+}
+
+func formatStatusStackMemoryMiB(value any) (string, bool) {
+	mib, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%.2f MiB", mib), true
+}
+
+func formatStatusEdgeletDiskUsage(value any) (string, bool) {
+	if s, ok := value.(string); ok {
+		s = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "about "))
+		if strings.HasSuffix(s, " MiB") {
+			mib, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, " MiB")), 64)
+			if err == nil {
+				return fmt.Sprintf("%.2f MiB (edgelet data)", mib), true
+			}
+		}
+		if strings.HasSuffix(s, " GiB") {
+			gib, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(s, " GiB")), 64)
+			if err == nil {
+				return fmt.Sprintf("%.2f GiB (edgelet data)", gib), true
+			}
+		}
+	}
+	gib, ok := statusValueAsFloat64(value)
+	if !ok {
+		return "", false
+	}
+	if gib < 1 {
+		return fmt.Sprintf("%.2f MiB (edgelet data)", gib*1024), true
+	}
+	return fmt.Sprintf("%.2f GiB (edgelet data)", gib), true
+}
+
+func statusValueAsFloat64(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		f, err := typed.Float64()
+		return f, err == nil
+	case string:
+		s := strings.TrimSpace(typed)
+		s = strings.TrimPrefix(s, "about ")
+		s = strings.TrimSpace(s)
+		if strings.HasSuffix(s, "%") {
+			s = strings.TrimSpace(strings.TrimSuffix(s, "%"))
+			f, err := strconv.ParseFloat(s, 64)
+			return f, err == nil
+		}
+		if s == "" {
+			return 0, false
+		}
+		f, err := strconv.ParseFloat(s, 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func formatRuntimeClassesStatusValue(value any) string {
+	parts := make([]string, 0)
+	switch typed := value.(type) {
+	case []models.RuntimeClassStatus:
+		for _, item := range typed {
+			parts = append(parts, item.Display())
+		}
+	case []any:
+		for _, raw := range typed {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(MapValueAsRawString(item, "name"))
+			handler := strings.TrimSpace(MapValueAsRawString(item, "handler"))
+			source := strings.TrimSpace(MapValueAsRawString(item, "source"))
+			if name == "" {
+				continue
+			}
+			parts = append(parts, name+" ("+handler+", "+source+")")
+		}
+	case []map[string]any:
+		for _, item := range typed {
+			name := strings.TrimSpace(MapValueAsRawString(item, "name"))
+			handler := strings.TrimSpace(MapValueAsRawString(item, "handler"))
+			source := strings.TrimSpace(MapValueAsRawString(item, "source"))
+			if name == "" {
+				continue
+			}
+			parts = append(parts, name+" ("+handler+", "+source+")")
+		}
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatJoinedStatusList(value any) string {
+	switch typed := value.(type) {
+	case []string:
+		return strings.Join(typed, ", ")
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s == "" {
+				continue
+			}
+			parts = append(parts, s)
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 func formatFlatMapWithOrder(result map[string]any, preferred []string) string {
@@ -221,7 +659,7 @@ func formatRegistryList(result map[string]any) string {
 		return "No registries found."
 	}
 	rows := [][]string{
-		{"ID", "URL", "PUBLIC", "USERNAME", "EMAIL"},
+		{"ID", "URL", "TYPE", "INSECURE", "PUBLIC", "USERNAME", "EMAIL"},
 	}
 	for _, raw := range rawItems {
 		item, ok := raw.(map[string]any)
@@ -231,12 +669,258 @@ func formatRegistryList(result map[string]any) string {
 		rows = append(rows, []string{
 			MapValueAsString(item, "id"),
 			MapValueAsString(item, "url"),
+			ValueOrDefault(MapValueAsString(item, "type"), "oci"),
+			formatBoolFlag(item["insecure"]),
 			MapValueAsString(item, "isPublic"),
 			MapValueAsString(item, "userName"),
 			MapValueAsString(item, "userEmail"),
 		})
 	}
 	return formatAlignedTable(rows)
+}
+
+func formatModelList(result map[string]any) string {
+	rawItems, ok := result["items"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return "No models found."
+	}
+	rows := [][]string{
+		{"NAME", "SOURCE", "REPO", "REVISION", "REGISTRY", "STATE", "FORMAT"},
+	}
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			MapValueAsString(item, "name"),
+			ValueOrDefault(MapValueAsString(item, "source"), "-"),
+			MapValueAsString(item, "repo"),
+			ValueOrDefault(MapValueAsString(item, "revision"), "-"),
+			MapValueAsString(item, "registryId"),
+			ValueOrDefault(MapValueAsString(item, "state"), "-"),
+			ValueOrDefault(MapValueAsString(item, "format"), "-"),
+		})
+	}
+	return formatAlignedTable(rows)
+}
+
+var modelInspectOrder = []string{
+	"name",
+	"source",
+	"uuid",
+	"bindRefCount",
+	"repo",
+	"revision",
+	"registryId",
+	"format",
+	"state",
+	"files",
+	"generation",
+	"observedGeneration",
+	"resolvedRevision",
+	"digest",
+	"revisionFloating",
+	"totalBytes",
+	"contentPath",
+	"lastError",
+}
+
+func formatKnowledgeList(result map[string]any) string {
+	rawItems, ok := result["items"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return "No knowledge found."
+	}
+	rows := [][]string{
+		{"NAME", "SOURCE", "REPO", "REVISION", "REGISTRY", "STATE", "FORMAT"},
+	}
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			MapValueAsString(item, "name"),
+			ValueOrDefault(MapValueAsString(item, "source"), "-"),
+			MapValueAsString(item, "repo"),
+			ValueOrDefault(MapValueAsString(item, "revision"), "-"),
+			MapValueAsString(item, "registryId"),
+			ValueOrDefault(MapValueAsString(item, "state"), "-"),
+			ValueOrDefault(MapValueAsString(item, "format"), "-"),
+		})
+	}
+	return formatAlignedTable(rows)
+}
+
+var knowledgeInspectOrder = []string{
+	"name",
+	"source",
+	"uuid",
+	"bindRefCount",
+	"repo",
+	"revision",
+	"registryId",
+	"format",
+	"state",
+	"files",
+	"generation",
+	"resolvedRevision",
+	"digest",
+	"revisionFloating",
+	"totalBytes",
+	"lastError",
+}
+
+func formatKnowledgeInspect(result map[string]any) string {
+	if len(result) == 0 {
+		return ""
+	}
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	var b strings.Builder
+	seen := make(map[string]bool, len(result))
+	for _, key := range knowledgeInspectOrder {
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		if formatted, ok := formatInspectScalar(value); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+			seen[key] = true
+		}
+	}
+	remaining := make([]string, 0, len(result))
+	for key := range result {
+		if !seen[key] {
+			remaining = append(remaining, key)
+		}
+	}
+	slices.Sort(remaining)
+	for _, key := range remaining {
+		if formatted, ok := formatInspectScalar(result[key]); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatModelInspect(result map[string]any) string {
+	if len(result) == 0 {
+		return ""
+	}
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	var b strings.Builder
+	seen := make(map[string]bool, len(result))
+	for _, key := range modelInspectOrder {
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		if formatted, ok := formatInspectScalar(value); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+			seen[key] = true
+		}
+	}
+	remaining := make([]string, 0, len(result))
+	for key := range result {
+		if !seen[key] {
+			remaining = append(remaining, key)
+		}
+	}
+	slices.Sort(remaining)
+	for _, key := range remaining {
+		if formatted, ok := formatInspectScalar(result[key]); ok {
+			_, _ = fmt.Fprintf(&b, "%s: %s\n", key, formatted)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formatVolumeList(result map[string]any) string {
+	rawItems, ok := result["volumes"].([]any)
+	if !ok || len(rawItems) == 0 {
+		return "No persistent volumes found."
+	}
+	rows := [][]string{
+		{"NAME", "SCOPE", "KIND", "UUID", "CONSUMERS", "DESIRED", "HOSTPATH"},
+	}
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		uuid := MapValueAsString(item, "uuid")
+		if uuid == "<unknown>" || uuid == "<nil>" || strings.EqualFold(uuid, "null") {
+			uuid = "-"
+		}
+		rows = append(rows, []string{
+			MapValueAsString(item, "name"),
+			ValueOrDefault(MapValueAsString(item, "scope"), "-"),
+			ValueOrDefault(MapValueAsString(item, "kind"), "-"),
+			uuid,
+			formatConsumers(item["consumers"]),
+			formatBoolFlag(item["desired"]),
+			ValueOrDefault(MapValueAsString(item, "hostPath"), "-"),
+		})
+	}
+	return formatAlignedTable(rows)
+}
+
+func formatConsumers(raw any) string {
+	switch typed := raw.(type) {
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "-"
+		}
+		return strings.Join(parts, ",")
+	case []string:
+		if len(typed) == 0 {
+			return "-"
+		}
+		return strings.Join(typed, ",")
+	default:
+		s := strings.TrimSpace(fmt.Sprintf("%v", raw))
+		if s == "" || s == "<nil>" {
+			return "-"
+		}
+		return s
+	}
+}
+
+func formatVolumeInspect(result map[string]any) string {
+	if len(result) == 0 {
+		return ""
+	}
+	if status, ok := result["status"]; ok && fmt.Sprintf("%v", status) == "ok" {
+		return ""
+	}
+	return formatMSInspect(result)
+}
+
+func formatBoolFlag(raw any) string {
+	switch v := raw.(type) {
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	default:
+		s := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", raw)))
+		if s == "true" || s == "1" {
+			return "true"
+		}
+		return "false"
+	}
 }
 
 func formatRuntimeClassList(result map[string]any) string {

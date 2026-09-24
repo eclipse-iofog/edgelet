@@ -16,10 +16,16 @@ The resource consumption manager samples **edgelet stack and host** usage agains
 
 | Field | Meaning |
 |-------|---------|
-| `agentCpuPercent` / `agentMemoryMiB` | Control-plane `edgelet daemon` process |
-| `runtimeCpuPercent` / `runtimeMemoryMiB` | Embedded containerd child (embedded engine only) |
-| `cpuUsage` / `memoryUsage` | **Edgelet stack total** (agent + runtime when available) — also sent to Pot in `PUT status` |
-| `systemTotalCpu` / `systemAvailableMemory` | Whole host |
+| `agentCpu` / `agentMemory` | Control-plane `edgelet daemon` process (cores / bytes) — **local API only** |
+| `runtimeCpu` / `runtimeMemory` | Embedded containerd child (embedded engine only; cores / bytes) — **local API only** |
+| `edgeletStackCpu` / `edgeletStackMemory` | Stack totals (cores / bytes) — **local API only** |
+| `cpuUsage` / `memoryUsage` | **Edgelet stack total** (agent + runtime when available) — also sent to Pot in `PUT status`. Stack CPU uses per-core scale (`100` = one logical CPU); human CLI prints stack breakdown in **cores** and hides duplicate `cpuUsage` when `edgeletStackCpu` is present. |
+| `diskUsage` | Edgelet data directory usage in **GiB** (not host filesystem total) |
+| `systemCpus` | Logical CPU count |
+| `systemOs` / `systemOsVersion` / `systemKernelVersion` | GOOS family (`linux`, `darwin`, `windows`); Linux `PRETTY_NAME` or platform+version; Linux kernel only (`""` on non-Linux) |
+| `systemTotalMemory` / `systemAvailableMemory` | Host RAM capacity / free (bytes) |
+| `systemTotalDisk` / `systemAvailableDisk` | Filesystem of `diskDirectory` total / free (bytes) |
+| `systemTotalCpu` | Host CPU busy 0–100% (not core count) |
 
 External `docker` / `podman` engines report agent-only stack totals (no runtime child tracking).
 
@@ -56,7 +62,7 @@ Limits loaded from config profile (typical keys):
 |-----|------|
 | Disk limit | bytes |
 | Memory limit | bytes |
-| CPU limit | percentage |
+| CPU limit | stack cores × 100 (5–400; default 80 = 0.8 CPU; monitor-only) |
 
 Exact YAML names match `config.yaml` profiles — see default config in `internal/config/default_config.yaml`.
 

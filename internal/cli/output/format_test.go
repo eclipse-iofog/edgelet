@@ -35,9 +35,67 @@ func TestFormatEdgeletAPIHuman_StatusOrder(t *testing.T) {
 		"cpuUsage":               "1%",
 		"zzzExtra":               "x",
 	})
-	expectedPrefix := "connectionToController: not provisioned\ncpuUsage: 1%"
-	if len(out) < len(expectedPrefix) || out[:len(expectedPrefix)] != expectedPrefix {
+	if !strings.HasPrefix(out, "connectionToController: not provisioned\n") {
 		t.Fatalf("unexpected order output: %s", out)
+	}
+	if !strings.Contains(out, "cpuUsage:") {
+		t.Fatalf("expected cpuUsage line when edgeletStackCpu absent: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_StatusStackHumanUnits(t *testing.T) {
+	var agentMemBytes int64 = 25_667_952 // 24.48 MiB
+	out := FormatEdgeletAPIHuman("/v1/system/status", map[string]any{
+		"connectionToController": "ok",
+		"agentCpu":               0.03,
+		"agentMemory":            agentMemBytes,
+		"edgeletStackCpu":        0.05,
+		"edgeletStackMemory":     agentMemBytes,
+		"cpuUsage":               5.0,
+		"diskUsage":              0.000273,
+	})
+	if strings.Contains(out, "cpuUsage:") {
+		t.Fatalf("expected cpuUsage hidden when edgeletStackCpu present: %s", out)
+	}
+	if strings.Contains(out, "about") {
+		t.Fatalf("expected stack CPU without legacy about suffix: %s", out)
+	}
+	for _, want := range []string{
+		"agentCpu: 0.0300 cores",
+		"edgeletStackCpu: 0.0500 cores",
+		"agentMemory: 24.48 MiB",
+		"edgeletStackMemory: 24.48 MiB",
+		"diskUsage: 0.28 MiB (edgelet data)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_StatusHostCapacityHumanUnits(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/system/status", map[string]any{
+		"connectionToController": "ok",
+		"systemCpus":             8,
+		"systemTotalMemory":      float64(17_179_869_184),
+		"systemAvailableMemory":  float64(3_964_993_536),
+		"systemTotalDisk":        float64(494_384_795_648),
+		"systemAvailableDisk":    float64(21_714_755_584),
+		"systemTotalCpu":         20.854271355828516,
+	})
+	if strings.Contains(out, "e+") {
+		t.Fatalf("expected human byte units, not scientific notation: %s", out)
+	}
+	for _, want := range []string{
+		"systemTotalMemory: 16.00 GiB",
+		"systemAvailableMemory: 3.69 GiB",
+		"systemTotalDisk: 460.43 GiB",
+		"systemAvailableDisk: 20.22 GiB",
+		"systemTotalCpu: 20.85 %",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
 	}
 }
 
@@ -47,7 +105,7 @@ func TestFormatEdgeletAPIHuman_StatusIncludesAvailableNetworkInterfacesAfterTota
 		"availableNetworkInterfaces": "eth0, wlan0",
 		"connectionToController":     "ok",
 	})
-	totalCPULine := "systemTotalCpu: 3200%"
+	totalCPULine := "systemTotalCpu: 3200.00 %"
 	availableInterfacesLine := "availableNetworkInterfaces: eth0, wlan0"
 	totalIdx := strings.Index(out, totalCPULine)
 	availableIdx := strings.Index(out, availableInterfacesLine)
@@ -56,6 +114,32 @@ func TestFormatEdgeletAPIHuman_StatusIncludesAvailableNetworkInterfacesAfterTota
 	}
 	if availableIdx < totalIdx {
 		t.Fatalf("expected available interfaces after systemTotalCpu, got: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_StatusRuntimeClassesAndCDI(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/system/status", map[string]any{
+		"availableRuntimes": "crun, spin",
+		"runtimeClasses": []any{
+			map[string]any{"name": "nvidia", "handler": "nvidia", "source": "local"},
+			map[string]any{"name": "spin", "handler": "spin", "source": "managed"},
+		},
+		"availableCdiDevices": []any{"nvidia.com/gpu=0", "nvidia.com/gpu=1"},
+	})
+	if !strings.Contains(out, "availableRuntimes: crun, spin") {
+		t.Fatalf("expected availableRuntimes preserved, got: %s", out)
+	}
+	if !strings.Contains(out, "runtimeClasses: nvidia (nvidia, local), spin (spin, managed)") {
+		t.Fatalf("expected formatted runtime classes, got: %s", out)
+	}
+	if !strings.Contains(out, "availableCdiDevices: nvidia.com/gpu=0, nvidia.com/gpu=1") {
+		t.Fatalf("expected joined CDI list, got: %s", out)
+	}
+	runtimesIdx := strings.Index(out, "availableRuntimes:")
+	classesIdx := strings.Index(out, "runtimeClasses:")
+	cdiIdx := strings.Index(out, "availableCdiDevices:")
+	if runtimesIdx == -1 || classesIdx < runtimesIdx || cdiIdx < classesIdx {
+		t.Fatalf("expected new keys appended after availableRuntimes, got: %s", out)
 	}
 }
 
@@ -143,7 +227,14 @@ func TestFormatRegistryInspect_HumanReadable(t *testing.T) {
 	out := FormatRegistryInspect(map[string]any{
 		"id": 3, "url": "registry.example.com", "isPublic": false,
 		"userName": "john", "userEmail": "john@example.com", "password": "s3cr3t",
+		"type": "hf", "insecure": true, "ca": "should-not-print",
 	}, false)
+	if !strings.Contains(out, "TYPE: hf") || !strings.Contains(out, "INSECURE: true") {
+		t.Fatalf("expected type and insecure in inspect output, got: %s", out)
+	}
+	if strings.Contains(out, "should-not-print") || strings.Contains(strings.ToLower(out), "ca:") {
+		t.Fatalf("inspect must not print secrets, got: %s", out)
+	}
 	expectedB64 := base64.StdEncoding.EncodeToString([]byte("s3cr3t"))
 	if !strings.Contains(out, "PASSWORD_B64: "+expectedB64) {
 		t.Fatalf("expected PASSWORD_B64 output, got: %s", out)
@@ -160,6 +251,174 @@ func TestFormatLogEntries_PreservesDockerStyleSpacing(t *testing.T) {
 	}, false)
 	if out != "line1\n\nline3\n" {
 		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_ModelListColumns(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/models", map[string]any{
+		"items": []any{
+			map[string]any{
+				"name": "llama-2-7b-q2k", "repo": "second-state/Llama-2-7B-Chat-GGUF",
+				"revision": "main", "registryId": 5, "state": "Ready", "format": "gguf",
+			},
+		},
+	})
+	for _, want := range []string{"NAME", "SOURCE", "REPO", "STATE", "llama-2-7b-q2k", "Ready"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in model list, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_ModelListSourceColumn(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/models", map[string]any{
+		"items": []any{
+			map[string]any{
+				"name": "operator-model", "source": "local", "repo": "org/local",
+				"revision": "main", "registryId": 1, "state": "Ready", "format": "gguf",
+			},
+			map[string]any{
+				"name": "fleet-model", "source": "managed", "repo": "org/fleet",
+				"revision": "main", "registryId": 5, "state": "Pulling", "format": "gguf",
+			},
+		},
+	})
+	if !strings.Contains(out, "SOURCE") || !strings.Contains(out, "local") || !strings.Contains(out, "managed") {
+		t.Fatalf("expected source column with local and managed rows, got: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_KnowledgeListColumns(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/knowledge", map[string]any{
+		"items": []any{
+			map[string]any{
+				"name": "product-docs", "repo": "acme/product-manuals",
+				"revision": "main", "registryId": 5, "state": "Ready", "format": "jsonl",
+			},
+		},
+	})
+	for _, want := range []string{"NAME", "SOURCE", "REPO", "STATE", "product-docs", "Ready"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge list, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_KnowledgeInspectSourceAndUUID(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/knowledge/fleet-docs", map[string]any{
+		"name": "fleet-docs", "source": "managed", "uuid": "3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f",
+		"bindRefCount": 2, "state": "Ready", "repo": "org/fleet",
+	})
+	for _, want := range []string{"source: managed", "uuid: 3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f", "bindRefCount: 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge inspect, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_ModelInspectSourceAndUUID(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/models/fleet-model", map[string]any{
+		"name": "fleet-model", "source": "managed", "uuid": "3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f",
+		"bindRefCount": 2, "state": "Ready", "repo": "org/fleet",
+	})
+	for _, want := range []string{"source: managed", "uuid: 3f2c8a1e-2b64-4c0d-9f11-0a1b2c3d4e5f", "bindRefCount: 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in model inspect, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_MSInspectFullFallsBackToJSON(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid": "ms-1", "name": "infer", "state": "queued",
+		"statusText": "waiting for model download: test-model (Pulling)",
+		"models": map[string]any{
+			"bindPath":    "/models",
+			"permissions": "ro",
+			"items":       []any{map[string]any{"name": "test-model"}},
+		},
+		"raw": map[string]any{"engineInspect": map[string]any{"id": "ctr"}},
+	})
+	if out != "" {
+		t.Fatalf("full inspect must leave human empty for JSON fallback, got: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_MSInspectSummaryCard(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid": "ms-1", "name": "infer", "state": "queued",
+		"statusText": "waiting for model download: test-model (Pulling)",
+		"models": map[string]any{
+			"bindPath":    "/models",
+			"permissions": "ro",
+			"items":       []any{map[string]any{"name": "test-model"}},
+		},
+	})
+	for _, want := range []string{"uuid: ms-1", "models.bindPath: /models", "models.permissions: ro", "models.items: test-model", "test-model"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in summary inspect, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_MSInspectKnowledgeCatalog(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid": "ms-1", "name": "infer", "state": "queued",
+		"statusText": "waiting for knowledge download: product-docs (Pulling)",
+		"knowledge": map[string]any{
+			"bindPath":    "/knowledge",
+			"permissions": "ro",
+			"items":       []any{map[string]any{"name": "product-docs"}},
+		},
+	})
+	for _, want := range []string{"uuid: ms-1", "knowledge.bindPath: /knowledge", "knowledge.permissions: ro", "knowledge.items: product-docs", "product-docs"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in knowledge inspect, got: %s", want, out)
+		}
+	}
+}
+
+func TestFormatEdgeletAPIHuman_MSInspectDurabilityKeys(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid":         "ms-1",
+		"name":         "infer",
+		"state":        "running",
+		"errorMessage": "crash",
+		"lastError":    "crash",
+		"lastErrorAt":  int64(1726660000123),
+		"restartCount": 4,
+	})
+	for _, want := range []string{
+		"errorMessage: crash",
+		"lastError: crash",
+		"lastErrorAt: 1726660000123",
+		"restartCount: 4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in inspect, got: %s", want, out)
+		}
+	}
+	errIdx := strings.Index(out, "errorMessage:")
+	lastIdx := strings.Index(out, "lastError:")
+	atIdx := strings.Index(out, "lastErrorAt:")
+	if errIdx < 0 || lastIdx < errIdx || atIdx < lastIdx {
+		t.Fatalf("expected errorMessage then lastError then lastErrorAt, got: %s", out)
+	}
+}
+
+func TestFormatEdgeletAPIHuman_RegistryListShowsType(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/deploy/registries", map[string]any{
+		"items": []any{
+			map[string]any{"id": 5, "url": "https://huggingface.co", "type": "hf", "insecure": false, "isPublic": true},
+		},
+	})
+	for _, want := range []string{"TYPE", "INSECURE", "hf"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in registry list, got: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "password") {
+		t.Fatalf("registry list must not print secrets, got: %s", out)
 	}
 }
 

@@ -8,7 +8,7 @@ StatusReporter is the **in-memory aggregation hub** for module health and teleme
 
 - Hold structured status objects for each major module
 - Track daemon lifecycle (`STARTING`, `RUNNING`, `WARNING`, …)
-- Maintain `modulesStatus[]` array (7 slots) for Supervisor reporting
+- Maintain `modulesStatus[]` array (fixed indexes; Resource Manager slot unused) for Supervisor reporting
 - Background worker for system time synchronization
 - Assemble composite status for API and Controller export
 
@@ -50,7 +50,7 @@ Supervisor updates `SupervisorStatus.modulesStatus[i]` using constants from `int
 | 2 | Status Reporter |
 | 3 | EdgeletAPI |
 | 4 | Field Agent |
-| 5 | Resource Manager |
+| 5 | *(unused — former Resource Manager; indexes are not reshuffled)* |
 | 6 | GPS Manager |
 
 `SupervisorStatus` fields: `daemonStatus`, `daemonLastStart`, `operationDuration`, `warningMessage`.
@@ -64,11 +64,12 @@ Supervisor updates `SupervisorStatus.modulesStatus[i]` using constants from `int
 | `GetFieldAgentStatus` | `FieldAgentStatus` |
 | `GetEdgeletAPIStatus` | `EdgeletAPIStatus` |
 | `GetResourceConsumptionManagerStatus` | Resource usage |
-| `GetResourceManagerStatus` | Resource manager |
 | `GetSSHProxyManagerStatus` | SSH tunnel state |
 | `GetVolumeMountManagerStatus` | Active mount count |
 
-Process Manager status includes per-microservice map, registry status, running count.
+Process Manager status includes the per-microservice map (runtime state, `errorMessage`, `lastError`, `lastErrorAt`, `restartCount`), registry status, and running count.
+
+Current `errorMessage` stays set until **30 seconds** of continuous RUNNING, then is sent as `""`. `lastError` is the last crash text and is **not** cleared on recovery. For controller-managed workloads those last-crash fields are **in-memory** (lost on agent restart until the next failure). Local inspect may also surface SQLite `last_error` / `restart_count`.
 
 ## External APIs
 
@@ -95,6 +96,8 @@ No direct config keys; updated via module callbacks on config reload.
 | Stale module status | Module failed to update on stop |
 | WARNING stuck | Edge Guard or engine degraded; check `warningMessage` |
 | Missing MS in status | Process Manager not publishing map |
+| Last crash gone after `edgelet` restart | Controller-managed last-error is in-memory; next inspect/exit fills it |
+| Dashboard still shows a crash after recovery | Grace window: `errorMessage` clears only after 30s continuous RUNNING |
 
 ## Code map
 

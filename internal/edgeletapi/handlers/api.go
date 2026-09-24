@@ -252,7 +252,30 @@ func (h *EdgeletAPIHandler) HandleSystemProvision(w http.ResponseWriter, r *http
 		})
 	case http.MethodDelete:
 		scope := strings.TrimSpace(r.URL.Query().Get("scope"))
-		if err := h.facade.Deprovision(scope); err != nil {
+		purgeVolumes, err := parseBooleanFormValue(r.URL.Query().Get("purgeVolumes"), "purgeVolumes")
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+			return
+		}
+		if r.Body != nil {
+			var body struct {
+				Scope        *string `json:"scope"`
+				PurgeVolumes *bool   `json:"purgeVolumes"`
+			}
+			dec := json.NewDecoder(r.Body)
+			if decodeErr := dec.Decode(&body); decodeErr == nil {
+				if body.Scope != nil && scope == "" {
+					scope = strings.TrimSpace(*body.Scope)
+				}
+				if body.PurgeVolumes != nil && strings.TrimSpace(r.URL.Query().Get("purgeVolumes")) == "" {
+					purgeVolumes = *body.PurgeVolumes
+				}
+			} else if !errors.Is(decodeErr, io.EOF) && r.ContentLength > 0 {
+				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, "invalid JSON body", nil)
+				return
+			}
+		}
+		if err := h.facade.Deprovision(scope, purgeVolumes); err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "invalid deprovision scope") {
 				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 				return
@@ -322,6 +345,10 @@ func (h *EdgeletAPIHandler) HandleSystemPrune(w http.ResponseWriter, r *http.Req
 	}
 	result, err := h.facade.Prune(r.URL.Query().Get("mode"))
 	if err != nil {
+		if errors.Is(err, runtimeapi.ErrSystemPruneVolumes) {
+			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+			return
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "invalid prune mode") {
 			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 			return
@@ -782,7 +809,6 @@ func (h *EdgeletAPIHandler) HandleConfig(w http.ResponseWriter, r *http.Request)
 			"logLevel":               cfg.LogLevel,
 			"statusFrequencySeconds": cfg.StatusFrequency,
 			"changeFrequencySeconds": cfg.ChangeFrequency,
-			"deviceScanFrequency":    cfg.DeviceScanFrequency,
 			"watchdogEnabled":        cfg.WatchdogEnabled,
 			"edgeGuardFrequency":     cfg.EdgeGuardFrequency,
 			"gpsMode":                cfg.GPSMode,
@@ -1067,7 +1093,7 @@ func (h *EdgeletAPIHandler) HandleMicroservices(w http.ResponseWriter, r *http.R
 				return
 			}
 			if summary := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("summary")), "true"); summary {
-				writeSuccess(w, http.StatusOK, map[string]any{
+				payload := map[string]any{
 					"uuid":         item["uuid"],
 					"name":         item["name"],
 					"application":  item["application"],
@@ -1077,21 +1103,34 @@ func (h *EdgeletAPIHandler) HandleMicroservices(w http.ResponseWriter, r *http.R
 					"containerId":  item["containerId"],
 					"image":        item["image"],
 					"healthStatus": item["healthStatus"],
-				})
+				}
+				if podID, ok := item["podId"]; ok && strings.TrimSpace(fmt.Sprintf("%v", podID)) != "" && podID != nil {
+					payload["podId"] = podID
+				}
+				writeSuccess(w, http.StatusOK, payload)
 				return
 			}
 			writeSuccess(w, http.StatusOK, item)
 		case http.MethodDelete:
-			uuid, err := h.facade.RemoveRuntimeMicroservice(id)
+			cleanup, parseErr := parseBooleanFormValue(r.URL.Query().Get("cleanup"), "cleanup")
+			if parseErr != nil {
+				writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, parseErr.Error(), nil)
+				return
+			}
+			uuid, err := h.facade.RemoveRuntimeMicroserviceWithCleanup(id, cleanup)
 			if err != nil {
 				writeMicroserviceLifecycleError(w, err)
 				return
 			}
-			writeSuccess(w, http.StatusOK, map[string]any{
+			payload := map[string]any{
 				"status":           "ok",
 				"microserviceUuid": uuid,
 				"warning":          "if microservice is controller-managed, reconcile may recreate it",
-			})
+			}
+			if cleanup {
+				payload["cleanupReserved"] = true
+			}
+			writeSuccess(w, http.StatusOK, payload)
 		default:
 			writeAPIError(w, http.StatusMethodNotAllowed, ErrCodeMethodNotAllowed, "method not allowed", nil)
 		}
@@ -1414,10 +1453,11 @@ func (h *EdgeletAPIHandler) HandleDeployRegistriesApply(w http.ResponseWriter, r
 		writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 		return
 	}
-	logging.LogInfo(apiHandlerModuleName, fmt.Sprintf("local registry apply succeeded id=%d url=%s dryRun=%v", reg.ID, strings.TrimSpace(reg.URL), dryRun))
+	logging.LogInfo(apiHandlerModuleName, fmt.Sprintf("local registry apply succeeded id=%d url=%s type=%s dryRun=%v", reg.ID, strings.TrimSpace(reg.URL), reg.NormalizedType(), dryRun))
 	writeSuccess(w, http.StatusOK, map[string]any{
 		"accepted": true,
 		"dryRun":   dryRun,
+		"kind":     "Registry",
 		"registry": reg,
 	})
 }
@@ -1443,6 +1483,8 @@ func (h *EdgeletAPIHandler) HandleDeployRegistriesValidate(w http.ResponseWriter
 		"kind":       doc.Kind,
 		"url":        doc.Spec.URL,
 		"private":    doc.Spec.Private,
+		"type":       doc.Spec.Type,
+		"insecure":   doc.Spec.Insecure,
 	})
 }
 
@@ -1509,11 +1551,7 @@ func (h *EdgeletAPIHandler) HandleDeployRuntimeClassesApply(w http.ResponseWrite
 
 	doc, err := h.facade.ParseAndValidateLocalRuntimeClassManifest(manifest)
 	if err != nil {
-		if errors.Is(err, runtimeapi.ErrRuntimeClassUnsupported) {
-			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
-			return
-		}
-		writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+		writeRuntimeClassManifestError(w, err)
 		return
 	}
 
@@ -1561,6 +1599,10 @@ func (h *EdgeletAPIHandler) HandleDeployRuntimeClassesApply(w http.ResponseWrite
 			if errors.Is(applyErr, runtimeapi.ErrRuntimeClassUnsupported) {
 				current.ErrorCode = ErrCodeInvalidArgument
 			}
+			var managedErr *runtimeapi.ErrRuntimeClassManagedName
+			if errors.As(applyErr, &managedErr) {
+				current.ErrorCode = ErrCodeConflict
+			}
 			current.ErrorMessage = applyErr.Error()
 			current.ErrorDetails = runtimeClassErrorDetails(applyErr)
 			close(done)
@@ -1590,6 +1632,9 @@ func (h *EdgeletAPIHandler) HandleDeployRuntimeClassesApply(w http.ResponseWrite
 			statusCode := http.StatusInternalServerError
 			if current.ErrorCode == ErrCodeInvalidArgument {
 				statusCode = http.StatusBadRequest
+			}
+			if current.ErrorCode == ErrCodeConflict {
+				statusCode = http.StatusConflict
 			}
 			details := current.ErrorDetails
 			if details == nil {
@@ -1666,11 +1711,7 @@ func (h *EdgeletAPIHandler) HandleDeployRuntimeClassesValidate(w http.ResponseWr
 	}
 	doc, err := h.facade.ParseAndValidateLocalRuntimeClassManifest(manifest)
 	if err != nil {
-		if errors.Is(err, runtimeapi.ErrRuntimeClassUnsupported) {
-			writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
-			return
-		}
-		writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+		writeRuntimeClassManifestError(w, err)
 		return
 	}
 	writeSuccess(w, http.StatusOK, map[string]any{
@@ -1886,8 +1927,25 @@ func runtimeClassDeleteStatusAndCode(err error) (int, string) {
 		if errors.As(err, &inUseErr) {
 			return http.StatusBadRequest, ErrCodeInvalidArgument
 		}
+		var managedErr *runtimeapi.ErrRuntimeClassManagedName
+		if errors.As(err, &managedErr) {
+			return http.StatusConflict, ErrCodeConflict
+		}
 		return http.StatusInternalServerError, ErrCodeInternal
 	}
+}
+
+func writeRuntimeClassManifestError(w http.ResponseWriter, err error) {
+	if errors.Is(err, runtimeapi.ErrRuntimeClassUnsupported) {
+		writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
+		return
+	}
+	var managedErr *runtimeapi.ErrRuntimeClassManagedName
+	if errors.As(err, &managedErr) {
+		writeAPIError(w, http.StatusConflict, ErrCodeConflict, err.Error(), managedErr.Details())
+		return
+	}
+	writeAPIError(w, http.StatusBadRequest, ErrCodeInvalidArgument, err.Error(), nil)
 }
 
 func runtimeClassErrorDetails(err error) map[string]any {
@@ -2537,8 +2595,6 @@ func configKeyToShortCode(key string) (string, bool) {
 		return "sf", true
 	case "cf", "changeFrequencySeconds":
 		return "cf", true
-	case "sd", "deviceScanFrequency":
-		return "sd", true
 	case "wd", "watchdogEnabled":
 		return "wd", true
 	case "egf", "edgeGuardFrequency":

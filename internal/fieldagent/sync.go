@@ -15,7 +15,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/volumemount"
 )
 
-// loadInitialControllerData reloads registries, volume mounts, microservices, and config
+// loadInitialControllerData reloads registries, volume mounts, models, knowledge, runtime classes, microservices, and config
 // from the controller (or cache when isConnected is false). Matches the provisioned boot
 // path in Start() and live reprovision in Provision() without restarting background workers.
 func (fa *FieldAgent) loadInitialControllerData(isConnected bool) {
@@ -47,10 +47,31 @@ func (fa *FieldAgent) loadInitialControllerData(isConnected bool) {
 				logging.LogWarn(moduleName, fmt.Sprintf("loadVolumeMounts returned error: %v", err))
 			}
 		}()
-		logging.LogInfo(moduleName, "Volume mounts processing completed, proceeding to load microservices")
+		logging.LogInfo(moduleName, "Volume mounts processing completed, proceeding to load models")
 	} else {
 		logging.LogDebug(moduleName, "Skipping controller volume mount fetch; using SQLite cache")
 		volumemount.GetInstance()
+	}
+
+	logging.LogDebug(moduleName, "Loading models")
+	if err := fa.loadModels(fromFile); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Failed to load models on startup: %v", err))
+	} else {
+		logging.LogDebug(moduleName, "Models loaded successfully")
+	}
+
+	logging.LogDebug(moduleName, "Loading knowledge")
+	if err := fa.loadKnowledge(fromFile); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Failed to load knowledge on startup: %v", err))
+	} else {
+		logging.LogDebug(moduleName, "Knowledge loaded successfully")
+	}
+
+	logging.LogDebug(moduleName, "Loading runtime classes")
+	if err := fa.loadRuntimeClasses(fromFile); err != nil {
+		logging.LogWarn(moduleName, fmt.Sprintf("Failed to load runtime classes on startup: %v", err))
+	} else {
+		logging.LogDebug(moduleName, "Runtime classes loaded successfully")
 	}
 
 	logging.LogDebug(moduleName, "Start Loading microservices...")
@@ -325,6 +346,15 @@ func parseMicroservice(data map[string]any) (*models.Microservice, error) {
 						volumeMapping.Type = models.VolumeMappingTypeBind
 					}
 				}
+				scopeStr := ""
+				if rawScope, ok := vmMap["scope"].(string); ok {
+					scopeStr = rawScope
+				}
+				if volumeMapping.Type == models.VolumeMappingTypeVolume {
+					volumeMapping.Scope = models.CanonicalVolumeScope(scopeStr)
+				} else {
+					volumeMapping.Scope = models.VolumeScopePrivate
+				}
 				microservice.VolumeMappings = append(microservice.VolumeMappings, volumeMapping)
 			}
 		}
@@ -350,21 +380,13 @@ func parseMicroservice(data map[string]any) (*models.Microservice, error) {
 		}
 	}
 
-	// Parse args
-	if args, ok := data["cmd"].([]any); ok {
-		microservice.Args = make([]string, 0, len(args))
-		for _, arg := range args {
-			if argStr, ok := arg.(string); ok {
-				microservice.Args = append(microservice.Args, argStr)
-			}
-		}
+	// Parse memory limit (Pot wire format: MiB; stored on Microservice as bytes).
+	if memoryLimit, ok := jsonInt64(data["memoryLimit"]); ok {
+		microservice.SetMemoryLimitMB(&memoryLimit)
 	}
 
-	// Parse memory limit (Pot wire format: MiB; stored on Microservice as bytes).
-	if memoryLimit, ok := data["memoryLimit"].(float64); ok {
-		limitMiB := int64(memoryLimit)
-		microservice.SetMemoryLimitMB(&limitMiB)
-	}
+	applyMicroserviceProcessArgv(microservice, data)
+	applyMicroserviceContainerExtras(microservice, data)
 
 	// Parse cdiDevices
 	if cdiDevices, ok := data["cdiDevices"].([]any); ok {
@@ -602,8 +624,8 @@ func parseRegistry(data map[string]any) *models.Registry {
 	var isPublic bool
 	var userName, password, userEmail string
 
-	if idVal, ok := data["id"].(float64); ok {
-		id = int(idVal)
+	if idVal, ok := jsonInt(data["id"]); ok {
+		id = idVal
 	}
 	if urlVal, ok := data["url"].(string); ok {
 		url = urlVal
@@ -624,8 +646,21 @@ func parseRegistry(data map[string]any) *models.Registry {
 		}
 	}
 
+	var regType, caB64 string
+	var insecure bool
+	if typeVal, ok := data["type"].(string); ok {
+		regType = typeVal
+	}
+	if caVal, ok := data["ca"].(string); ok {
+		caB64 = caVal
+	}
+	if insecureVal, ok := data["insecure"].(bool); ok {
+		insecure = insecureVal
+	}
+
 	return builder.SetID(id).SetURL(url).SetIsPublic(isPublic).
-		SetUserName(userName).SetPassword(password).SetUserEmail(userEmail).Build()
+		SetUserName(userName).SetPassword(password).SetUserEmail(userEmail).
+		SetType(regType).SetCAB64(caB64).SetInsecure(insecure).Build()
 }
 
 // processMicroserviceConfig processes microservice configurations

@@ -45,11 +45,13 @@ This document tracks implemented Edgelet capabilities for the v1.0.0-beta.2 rele
 - [x] Message endpoints
 - [x] Configuration endpoints
 
-### Resource Manager
+### Resource Consumption
 - [x] CPU monitoring
 - [x] Memory monitoring
 - [x] Disk monitoring
 - [x] Network statistics
+
+Host hardware/USB inventory posting (former Resource Manager / HAL) has been **removed**. Edge Guard attestation remains.
 
 ### Status Reporter
 - [x] Module status tracking
@@ -69,7 +71,7 @@ This document tracks implemented Edgelet capabilities for the v1.0.0-beta.2 rele
 - [x] Network interface detection
 - [x] Interface status monitoring
 
-### Docker Pruning Manager
+### Edgelet Pruning Manager
 - [x] Automatic Docker cleanup
 - [x] Image pruning
 - [x] Container pruning

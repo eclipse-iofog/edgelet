@@ -49,13 +49,15 @@ Install uses **`packaging/init/` only** — there is no `packaging/systemd/` ins
 |--------|----------------|------|
 | **Preflight** | `edgelet cgroup-preflight` | `start_pre` (openrc), sysv/s6/runit/upstart start, before daemon |
 | **Shutdown** | `/usr/libexec/edgelet/edgelet-shutdown` → `edgelet shutdown` | systemd `ExecStop`, all init `stop` paths |
-| **Data-plane orphan reap** | `edgelet runtime reap-orphans` | systemd `ExecStopPost` on `edgelet-containerd`; openrc `stop` post-hook (last resort after Go teardown) |
+| **Data-plane orphan reap** | `edgelet runtime reap-orphans` | systemd `ExecStopPost` on `edgelet-containerd`; OpenRC `stop` hook. Runs only after `/run/edgelet/drain-verified` exists |
 
 Preflight on the **thin** `/usr/local/bin/edgelet` uses a procfs/cgroupfs-only probe (`DetectPreflight`); full cgroup subtree setup stays in the **fat** runtime (`Detect` / `Bootstrap` with `containerd/cgroups`).
 
 `edgelet shutdown` tries EdgeletAPI graceful stop, then SIGTERM/SIGKILL fallback. **Drain / leave-running policy** is defined in [workload-continuity.md](workload-continuity.md); init templates only define the stop entry.
 
-`TimeoutStopSec=120` on systemd equals default `shutdownGracePeriodSeconds` (90) + 30s buffer for shim reap and orphan cleanup. The data-plane unit uses the same 120s budget; `edgelet-containerd.service` runs `ExecStopPost=-/usr/local/bin/edgelet runtime reap-orphans` as a last-resort sweep for edgelet-managed shims and `--edgelet-containerd-child` processes. Embedded engine uses `edgelet.service.d/edgelet.conf` drop-in with `EDGELET_RUNTIME_SPLIT=1`.
+`TimeoutStopSec=120` on systemd is `shutdownGracePeriodSeconds` (90) plus a 30 second buffer. The data-plane unit uses the same 120 second budget for CRI drain and, after verify, stopping containerd and shim reap. `systemctl stop edgelet-containerd` and `rc-service edgelet-containerd stop` send SIGTERM to `edgelet runtime-bootstrap`. That process drains labeled workloads through CRI and verifies before it stops containerd. Verify failure leaves containerd running and does not reap shims. procd, sysvinit, s6, runit, and upstart have no separate containerd unit; `install.sh` signals the same `runtime-bootstrap` process when a fat upgrade must stop the data plane.
+
+`edgelet-containerd` runs `edgelet runtime reap-orphans` after stop (systemd `ExecStopPost`, OpenRC stop hook). Reap runs only when `/run/edgelet/drain-verified` exists — an incomplete drain does not reap shims. Embedded engine uses `edgelet.service.d/edgelet.conf` drop-in with `EDGELET_RUNTIME_SPLIT=1`.
 
 ---
 
@@ -65,7 +67,7 @@ Preflight on the **thin** `/usr/local/bin/edgelet` uses a procfs/cgroupfs-only p
 |---------|--------|
 | `Delegate` | `yes` |
 | `DelegateSubgroup` | `supervisor` (avoids cgroup v2 EBUSY on restart) |
-| `KillMode` | `process` |
+| `KillMode` | `process` on `edgelet` and `edgelet-containerd`. systemd does not kill the cgroup |
 | `ExecStop` | `/usr/libexec/edgelet/edgelet-shutdown` |
 | Engine ordering | Install selects `edgelet.service.d/docker.conf` or `podman.conf` — not `sed` on the base unit |
 
@@ -75,6 +77,10 @@ systemctl show edgelet -p DelegateSubgroup,TimeoutStopSec
 ```
 
 Enable `edgelet-containerd.service` before `edgelet.service` for embedded split.
+
+**Data-plane stop:** `KillMode=process` stays on `edgelet-containerd.service`. Stopping that unit signals `runtime-bootstrap`, which drains and verifies before containerd stops. A failed verify does not reap shims and does not exit the parent (containerd keeps serving). See [workload-continuity.md](workload-continuity.md#embedded-engine-runtime-split).
+
+**Unexpected containerd child exit:** if the embedded containerd process dies while `runtime-bootstrap` is running, the parent logs the exit and exits with status 1. systemd `Restart=always` on `edgelet-containerd.service` starts a new data plane. That path is separate from a failed drain verify (which leaves the unit running).
 
 **Data-plane crash-loop guard:** `edgelet-containerd.service` uses `StartLimitIntervalSec=300`, `StartLimitBurst=5`, and `RestartSec=5s`. After five rapid failures within 300s, systemd stops auto-restarting until `systemctl reset-failed edgelet-containerd`. OpenRC stub uses `respawn_max=5`, `respawn_period=300`, `respawn_delay=5` (parity).
 

@@ -25,6 +25,13 @@ var reservedRuntimeClassNames = map[string]struct{}{
 	"crun": {},
 }
 
+// IsReservedRuntimeClassName reports whether name is reserved and cannot be
+// applied or deleted as a RuntimeClass (for example the default crun handler).
+func IsReservedRuntimeClassName(name string) bool {
+	_, reserved := reservedRuntimeClassNames[strings.TrimSpace(strings.ToLower(name))]
+	return reserved
+}
+
 func (m *LocalRuntimeClassManifest) Validate() error {
 	if m == nil {
 		return errors.New("manifest is nil")

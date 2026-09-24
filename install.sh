@@ -232,6 +232,7 @@ StartLimitBurst=5
 Type=simple
 ExecStartPre=/bin/sh -c 'mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true'
 ExecStart=/usr/local/bin/edgelet runtime-bootstrap
+# Reap only after a verified data-plane drain (receipt under /run/edgelet).
 ExecStopPost=-/usr/local/bin/edgelet runtime reap-orphans
 Restart=always
 RestartSec=5s
@@ -453,6 +454,7 @@ stop() {
         fi
     fi
     rm -f "${pidfile}" 2>/dev/null || true
+    # Reap only after a verified data-plane drain (receipt under /run/edgelet).
     /usr/local/bin/edgelet runtime reap-orphans || ewarn "orphan reap exited non-zero"
     eend 0
 }
@@ -687,11 +689,44 @@ install_init_helpers() {
     install_shutdown_helper
 }
 
-# installed_embed_hash returns the basename of data/current (embed SHA256 prefix), or empty.
+edgelet_data_root() {
+    if [ -n "${EDGELET_DATA_DIR:-}" ]; then
+        echo "${EDGELET_DATA_DIR}"
+        return 0
+    fi
+    echo "/var/lib/edgelet"
+}
+
+# embed_bundle_ready is true when dir has an executable fat runtime and the
+# same companion files the extract path requires before it will run.
+embed_bundle_ready() {
+    _dir="$1"
+    [ -n "$_dir" ] || return 1
+    _fat="${_dir}/bin/edgelet"
+    [ -f "$_fat" ] && [ -x "$_fat" ] || return 1
+    _magic=$(od -An -tx1 -N 4 "$_fat" 2>/dev/null | tr -d ' \n' || true)
+    [ "$_magic" = "7f454c46" ] || return 1
+    [ -f "${_dir}/bin/containerd-shim-runc-v2" ] || return 1
+    [ -f "${_dir}/bin/aux/xtables-legacy-multi" ] || return 1
+    [ -f "${_dir}/bin/ip" ] || return 1
+    [ -f "${_dir}/bin/busybox" ] || return 1
+    [ -L "${_dir}/bin/aux/iptables" ] || return 1
+    [ "$(readlink "${_dir}/bin/aux/iptables" 2>/dev/null || true)" = "xtables-legacy-multi" ]
+}
+
+# installed_embed_hash prints the ready data/current bundle hash, or nothing
+# when the symlink is missing or the fat runtime is not ready.
 installed_embed_hash() {
-    _link="/var/lib/edgelet/data/current"
+    _link="$(edgelet_data_root)/data/current"
     [ -L "$_link" ] || return 0
-    basename "$(readlink -f "$_link" 2>/dev/null || readlink "$_link")"
+    _target=$(readlink "$_link" 2>/dev/null || true)
+    [ -n "$_target" ] || return 0
+    case "$_target" in
+        /*) ;;
+        *) _target="$(CDPATH= cd -- "$(dirname "$_link")" && pwd)/${_target}" ;;
+    esac
+    embed_bundle_ready "$_target" || return 0
+    basename "$_target"
 }
 
 # binary_embed_hash reads embed hash from a linux thin binary (edgelet version --verbose).
@@ -703,8 +738,9 @@ binary_embed_hash() {
         | head -1
 }
 
-# should_restart_data_plane is true when containerEngine=edgelet and the embed hash changed
-# (or data/current is not yet set). Returns false for docker/podman or lite builds without embed.
+# should_restart_data_plane is true when containerEngine=edgelet, the new embed
+# hash is set, and the ready current bundle is missing or different.
+# Returns false for docker/podman or a thin binary with no embed hash.
 should_restart_data_plane() {
     _eng="$1"
     _old="$2"
@@ -715,6 +751,64 @@ should_restart_data_plane() {
     [ "$_old" != "$_new" ]
 }
 
+# quiesce_data_plane_for_replace drains labeled workloads, force-stops leftovers,
+# and verifies before an embed replace. Control stays up. Non-zero leaves the
+# installed binary in place.
+quiesce_data_plane_for_replace() {
+    _bin="$1"
+    if [ -z "$_bin" ] || [ ! -x "$_bin" ]; then
+        _bin="${EDGELET_BIN:-/usr/local/bin/edgelet}"
+    fi
+    [ -x "$_bin" ] || return 1
+    info "Draining data plane before embed replace"
+    "$_bin" --quiet runtime drain --direct
+}
+
+stop_edgelet_containerd_unit() {
+    _init="$1"
+    info "Stopping edgelet-containerd (data plane)"
+    case "${_init}" in
+        systemd)
+            systemctl stop edgelet-containerd 2>/dev/null || true
+            systemctl reset-failed edgelet-containerd 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service edgelet-containerd stop 2>/dev/null || true
+            ;;
+        *)
+            stop_edgelet_dataplane_processes
+            ;;
+    esac
+}
+
+# stop_edgelet_dataplane_processes stops runtime-bootstrap and its containerd
+# child. It does not stop the control daemon.
+stop_edgelet_dataplane_processes() {
+    _pids=$(pgrep -f '[e]dgelet runtime-bootstrap' 2>/dev/null || true)
+    _pids="${_pids} $(pgrep -f '[e]dgelet-containerd-child' 2>/dev/null || true)"
+    _pids=$(echo "${_pids}" | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+    [ -n "${_pids}" ] || return 0
+    for _p in ${_pids}; do
+        kill -TERM "${_p}" 2>/dev/null || true
+    done
+    sleep 1
+    for _p in ${_pids}; do
+        kill -0 "${_p}" 2>/dev/null || continue
+        kill -KILL "${_p}" 2>/dev/null || true
+    done
+}
+
+start_edgelet_dataplane_process() {
+    if pgrep -f '[e]dgelet runtime-bootstrap' >/dev/null 2>&1; then
+        return 0
+    fi
+    if pgrep -f '[e]dgelet-containerd-child' >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p /var/log/edgelet
+    /usr/local/bin/edgelet runtime-bootstrap >>/var/log/edgelet/containerd.log 2>&1 &
+}
+
 start_edgelet_containerd_unit() {
     _init="$1"
     _restart="$2"
@@ -723,8 +817,7 @@ start_edgelet_containerd_unit() {
             systemctl enable edgelet-containerd 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                systemctl stop edgelet-containerd 2>/dev/null || true
-                systemctl reset-failed edgelet-containerd 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 systemctl start edgelet-containerd
             else
                 systemctl start edgelet-containerd 2>/dev/null || true
@@ -734,10 +827,17 @@ start_edgelet_containerd_unit() {
             rc-update add edgelet-containerd default 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                rc-service edgelet-containerd stop 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 rc-service edgelet-containerd start 2>/dev/null || true
             else
                 rc-service edgelet-containerd start 2>/dev/null || true
+            fi
+            ;;
+        *)
+            if [ "$_restart" = true ]; then
+                info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
+                stop_edgelet_containerd_unit "${_init}"
+                start_edgelet_dataplane_process
             fi
             ;;
     esac
@@ -841,6 +941,9 @@ install_init_unit() {
                 write_procd_edgelet
             fi
             /etc/init.d/edgelet enable 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet stop 2>/dev/null || true
             /etc/init.d/edgelet start
             info "procd init script edgelet installed (engine=${_eng})."
@@ -856,6 +959,9 @@ install_init_unit() {
             elif command -v chkconfig >/dev/null 2>&1; then
                 chkconfig --add edgelet 2>/dev/null || true
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet restart 2>/dev/null || /etc/init.d/edgelet start
             info "SysV init script edgelet installed."
             ;;
@@ -866,6 +972,9 @@ install_init_unit() {
                 write_upstart_edgelet
             fi
             initctl reload-configuration 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             initctl restart edgelet 2>/dev/null || initctl start edgelet
             info "Upstart job edgelet installed."
             ;;
@@ -878,9 +987,13 @@ install_init_unit() {
                 write_s6_run
                 write_s6_finish
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             if command -v s6-svc >/dev/null 2>&1 && [ -d /var/run/s6/services ]; then
                 mkdir -p /var/run/s6/services/edgelet
                 ln -sf /etc/s6/edgelet /var/run/s6/services/edgelet/supervise 2>/dev/null || true
+                s6-svc -d /var/run/s6/services/edgelet 2>/dev/null || true
                 s6-svc -u /var/run/s6/services/edgelet 2>/dev/null || true
             fi
             info "s6 service installed under /etc/s6/edgelet (start via your s6 scan)."
@@ -895,6 +1008,9 @@ install_init_unit() {
             else
                 write_runit_run
                 write_runit_finish
+            fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
             fi
             if [ -d /etc/runit ]; then
                 ln -sf /etc/runit/edgelet /etc/service/edgelet 2>/dev/null || \
@@ -1487,6 +1603,7 @@ StartLimitBurst=5
 Type=simple
 ExecStartPre=/bin/sh -c 'mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true'
 ExecStart=/usr/local/bin/edgelet runtime-bootstrap
+# Reap only after a verified data-plane drain (receipt under /run/edgelet).
 ExecStopPost=-/usr/local/bin/edgelet runtime reap-orphans
 Restart=always
 RestartSec=5s
@@ -1708,6 +1825,7 @@ stop() {
         fi
     fi
     rm -f "${pidfile}" 2>/dev/null || true
+    # Reap only after a verified data-plane drain (receipt under /run/edgelet).
     /usr/local/bin/edgelet runtime reap-orphans || ewarn "orphan reap exited non-zero"
     eend 0
 }
@@ -1942,11 +2060,44 @@ install_init_helpers() {
     install_shutdown_helper
 }
 
-# installed_embed_hash returns the basename of data/current (embed SHA256 prefix), or empty.
+edgelet_data_root() {
+    if [ -n "${EDGELET_DATA_DIR:-}" ]; then
+        echo "${EDGELET_DATA_DIR}"
+        return 0
+    fi
+    echo "/var/lib/edgelet"
+}
+
+# embed_bundle_ready is true when dir has an executable fat runtime and the
+# same companion files the extract path requires before it will run.
+embed_bundle_ready() {
+    _dir="$1"
+    [ -n "$_dir" ] || return 1
+    _fat="${_dir}/bin/edgelet"
+    [ -f "$_fat" ] && [ -x "$_fat" ] || return 1
+    _magic=$(od -An -tx1 -N 4 "$_fat" 2>/dev/null | tr -d ' \n' || true)
+    [ "$_magic" = "7f454c46" ] || return 1
+    [ -f "${_dir}/bin/containerd-shim-runc-v2" ] || return 1
+    [ -f "${_dir}/bin/aux/xtables-legacy-multi" ] || return 1
+    [ -f "${_dir}/bin/ip" ] || return 1
+    [ -f "${_dir}/bin/busybox" ] || return 1
+    [ -L "${_dir}/bin/aux/iptables" ] || return 1
+    [ "$(readlink "${_dir}/bin/aux/iptables" 2>/dev/null || true)" = "xtables-legacy-multi" ]
+}
+
+# installed_embed_hash prints the ready data/current bundle hash, or nothing
+# when the symlink is missing or the fat runtime is not ready.
 installed_embed_hash() {
-    _link="/var/lib/edgelet/data/current"
+    _link="$(edgelet_data_root)/data/current"
     [ -L "$_link" ] || return 0
-    basename "$(readlink -f "$_link" 2>/dev/null || readlink "$_link")"
+    _target=$(readlink "$_link" 2>/dev/null || true)
+    [ -n "$_target" ] || return 0
+    case "$_target" in
+        /*) ;;
+        *) _target="$(CDPATH= cd -- "$(dirname "$_link")" && pwd)/${_target}" ;;
+    esac
+    embed_bundle_ready "$_target" || return 0
+    basename "$_target"
 }
 
 # binary_embed_hash reads embed hash from a linux thin binary (edgelet version --verbose).
@@ -1958,8 +2109,9 @@ binary_embed_hash() {
         | head -1
 }
 
-# should_restart_data_plane is true when containerEngine=edgelet and the embed hash changed
-# (or data/current is not yet set). Returns false for docker/podman or lite builds without embed.
+# should_restart_data_plane is true when containerEngine=edgelet, the new embed
+# hash is set, and the ready current bundle is missing or different.
+# Returns false for docker/podman or a thin binary with no embed hash.
 should_restart_data_plane() {
     _eng="$1"
     _old="$2"
@@ -1970,6 +2122,64 @@ should_restart_data_plane() {
     [ "$_old" != "$_new" ]
 }
 
+# quiesce_data_plane_for_replace drains labeled workloads, force-stops leftovers,
+# and verifies before an embed replace. Control stays up. Non-zero leaves the
+# installed binary in place.
+quiesce_data_plane_for_replace() {
+    _bin="$1"
+    if [ -z "$_bin" ] || [ ! -x "$_bin" ]; then
+        _bin="${EDGELET_BIN:-/usr/local/bin/edgelet}"
+    fi
+    [ -x "$_bin" ] || return 1
+    info "Draining data plane before embed replace"
+    "$_bin" --quiet runtime drain --direct
+}
+
+stop_edgelet_containerd_unit() {
+    _init="$1"
+    info "Stopping edgelet-containerd (data plane)"
+    case "${_init}" in
+        systemd)
+            systemctl stop edgelet-containerd 2>/dev/null || true
+            systemctl reset-failed edgelet-containerd 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service edgelet-containerd stop 2>/dev/null || true
+            ;;
+        *)
+            stop_edgelet_dataplane_processes
+            ;;
+    esac
+}
+
+# stop_edgelet_dataplane_processes stops runtime-bootstrap and its containerd
+# child. It does not stop the control daemon.
+stop_edgelet_dataplane_processes() {
+    _pids=$(pgrep -f '[e]dgelet runtime-bootstrap' 2>/dev/null || true)
+    _pids="${_pids} $(pgrep -f '[e]dgelet-containerd-child' 2>/dev/null || true)"
+    _pids=$(echo "${_pids}" | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+    [ -n "${_pids}" ] || return 0
+    for _p in ${_pids}; do
+        kill -TERM "${_p}" 2>/dev/null || true
+    done
+    sleep 1
+    for _p in ${_pids}; do
+        kill -0 "${_p}" 2>/dev/null || continue
+        kill -KILL "${_p}" 2>/dev/null || true
+    done
+}
+
+start_edgelet_dataplane_process() {
+    if pgrep -f '[e]dgelet runtime-bootstrap' >/dev/null 2>&1; then
+        return 0
+    fi
+    if pgrep -f '[e]dgelet-containerd-child' >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p /var/log/edgelet
+    /usr/local/bin/edgelet runtime-bootstrap >>/var/log/edgelet/containerd.log 2>&1 &
+}
+
 start_edgelet_containerd_unit() {
     _init="$1"
     _restart="$2"
@@ -1978,8 +2188,7 @@ start_edgelet_containerd_unit() {
             systemctl enable edgelet-containerd 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                systemctl stop edgelet-containerd 2>/dev/null || true
-                systemctl reset-failed edgelet-containerd 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 systemctl start edgelet-containerd
             else
                 systemctl start edgelet-containerd 2>/dev/null || true
@@ -1989,10 +2198,17 @@ start_edgelet_containerd_unit() {
             rc-update add edgelet-containerd default 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                rc-service edgelet-containerd stop 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 rc-service edgelet-containerd start 2>/dev/null || true
             else
                 rc-service edgelet-containerd start 2>/dev/null || true
+            fi
+            ;;
+        *)
+            if [ "$_restart" = true ]; then
+                info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
+                stop_edgelet_containerd_unit "${_init}"
+                start_edgelet_dataplane_process
             fi
             ;;
     esac
@@ -2096,6 +2312,9 @@ install_init_unit() {
                 write_procd_edgelet
             fi
             /etc/init.d/edgelet enable 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet stop 2>/dev/null || true
             /etc/init.d/edgelet start
             info "procd init script edgelet installed (engine=${_eng})."
@@ -2111,6 +2330,9 @@ install_init_unit() {
             elif command -v chkconfig >/dev/null 2>&1; then
                 chkconfig --add edgelet 2>/dev/null || true
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet restart 2>/dev/null || /etc/init.d/edgelet start
             info "SysV init script edgelet installed."
             ;;
@@ -2121,6 +2343,9 @@ install_init_unit() {
                 write_upstart_edgelet
             fi
             initctl reload-configuration 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             initctl restart edgelet 2>/dev/null || initctl start edgelet
             info "Upstart job edgelet installed."
             ;;
@@ -2133,9 +2358,13 @@ install_init_unit() {
                 write_s6_run
                 write_s6_finish
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             if command -v s6-svc >/dev/null 2>&1 && [ -d /var/run/s6/services ]; then
                 mkdir -p /var/run/s6/services/edgelet
                 ln -sf /etc/s6/edgelet /var/run/s6/services/edgelet/supervise 2>/dev/null || true
+                s6-svc -d /var/run/s6/services/edgelet 2>/dev/null || true
                 s6-svc -u /var/run/s6/services/edgelet 2>/dev/null || true
             fi
             info "s6 service installed under /etc/s6/edgelet (start via your s6 scan)."
@@ -2150,6 +2379,9 @@ install_init_unit() {
             else
                 write_runit_run
                 write_runit_finish
+            fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
             fi
             if [ -d /etc/runit ]; then
                 ln -sf /etc/runit/edgelet /etc/service/edgelet 2>/dev/null || \
@@ -3009,6 +3241,34 @@ fi
 
 info "Version: ${EDGELET_VERSION}"
 
+# replace_staged_edgelet_binary installs a staged thin binary.
+# When the ready embed hash requires a data-plane restart, drain and verify
+# while control is still up, stop the data plane, then replace the binary.
+# A matching ready hash restarts control only and does not stop containerd.
+# Verify failure exits non-zero and does not replace the binary.
+# Sets OTA_RESTART_DATA_PLANE=true or false.
+replace_staged_edgelet_binary() {
+    _staged="$1"
+    OTA_RESTART_DATA_PLANE=false
+    [ -f "$_staged" ] || die "Staged binary missing: ${_staged}"
+    chmod 755 "$_staged" || die "Cannot prepare staged binary: ${_staged}"
+    if [ "$OS" = "linux" ]; then
+        _old_embed=$(installed_embed_hash)
+        _new_embed=$(binary_embed_hash "$_staged")
+        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
+            OTA_RESTART_DATA_PLANE=true
+            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
+            quiesce_data_plane_for_replace "$_staged" || die "Data-plane drain did not verify; binary was not replaced"
+            stop_edgelet_containerd_unit "$INIT"
+        else
+            stop_edgelet_service "$INIT"
+        fi
+    else
+        stop_edgelet_daemon_desktop "$OS"
+    fi
+    install_binary_file "$_staged" "$BINARY_PATH"
+}
+
 # ── rollback ──────────────────────────────────────────────────────────────────
 if [ "$ACTION" = "rollback" ]; then
     [ -f "$PREVIOUS_FILE" ] || die "No ${PREVIOUS_FILE} found."
@@ -3035,26 +3295,13 @@ if [ "$ACTION" = "rollback" ]; then
     else
         curl -fsSL -o "$_staged" "$_purl" || die "Failed to download rollback binary"
     fi
-    _old_embed=""
-    if [ "$OS" = "linux" ]; then
-        _old_embed=$(installed_embed_hash)
-    fi
-    [ "$OS" = "linux" ] && stop_edgelet_service "$INIT"
-    install_binary_file "$_staged" "$BINARY_PATH"
+    replace_staged_edgelet_binary "$_staged"
     install_dirs "$OS"
     if [ "$FORCE_CONFIG" != true ] && [ -f "$_cfgbak" ]; then
         install -m 640 "$_cfgbak" "$CONFIG_FILE"
     fi
-    _restart_dp=false
     if [ "$OS" = "linux" ]; then
-        _new_embed=$(binary_embed_hash "$BINARY_PATH")
-        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
-            _restart_dp=true
-            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
-        fi
-    fi
-    if [ "$OS" = "linux" ]; then
-        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$_restart_dp"
+        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$OTA_RESTART_DATA_PLANE"
     fi
     _sha=$(sha256_file "$BINARY_PATH")
     write_install_receipt "$EDGELET_VERSION" "$_pos" "$_parch" "$CONTAINER_ENGINE" "$_purl" "$_sha" "rollback"
@@ -3081,42 +3328,28 @@ if [ "$ACTION" = "upgrade" ]; then
     fi
     _cfg_backup="${BACKUP_DIR}/config.yaml.$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
     cp "$CONFIG_FILE" "$_cfg_backup" 2>/dev/null || true
-    _old_embed=""
-    if [ "$OS" = "linux" ]; then
-        _old_embed=$(installed_embed_hash)
-    fi
     cache_binary "$_cur_ver" "$_cur_os" "$_cur_arch" "$BINARY_PATH"
-    write_previous_release "$_cur_ver" "$_cur_os" "$_cur_arch" "$_cur_eng" "$_cur_src" "$_cur_sha" "$_cfg_backup"
-    [ "$OS" = "linux" ] && stop_edgelet_service "$INIT"
-    stop_edgelet_daemon_desktop "$OS"
     _staged="${TMPDIR}/edgelet-bin"
     download_or_stage_binary "$_staged"
     verify_binary_checksum "$_staged"
-    install_binary_file "$_staged" "$BINARY_PATH"
+    replace_staged_edgelet_binary "$_staged"
+    write_previous_release "$_cur_ver" "$_cur_os" "$_cur_arch" "$_cur_eng" "$_cur_src" "$_cur_sha" "$_cfg_backup"
     install_dirs "$OS"
     if [ "$FORCE_CONFIG" = true ]; then
         rm -f "$CONFIG_FILE"
         install_config_samples
     fi
     apply_container_engine_to_config
+    copy_bundled_scripts "$OS"
+    if [ "$OS" = "linux" ]; then
+        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$OTA_RESTART_DATA_PLANE"
+    else
+        start_edgelet_daemon_desktop "$OS"
+    fi
     _sha=$(sha256_file "$BINARY_PATH")
     _method="upgrade"
     [ "$AIRGAP" = true ] && _method="upgrade-airgap"
     write_install_receipt "$EDGELET_VERSION" "$OS" "$ARCH" "$CONTAINER_ENGINE" "$(compute_source_url)" "$_sha" "$_method"
-    copy_bundled_scripts "$OS"
-    _restart_dp=false
-    if [ "$OS" = "linux" ]; then
-        _new_embed=$(binary_embed_hash "$BINARY_PATH")
-        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
-            _restart_dp=true
-            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
-        fi
-    fi
-    if [ "$OS" = "linux" ]; then
-        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$_restart_dp"
-    else
-        start_edgelet_daemon_desktop "$OS"
-    fi
     info "Upgrade to ${EDGELET_VERSION} complete."
     exit 0
 fi
@@ -3679,6 +3912,34 @@ fi
 
 info "Version: ${EDGELET_VERSION}"
 
+# replace_staged_edgelet_binary installs a staged thin binary.
+# When the ready embed hash requires a data-plane restart, drain and verify
+# while control is still up, stop the data plane, then replace the binary.
+# A matching ready hash restarts control only and does not stop containerd.
+# Verify failure exits non-zero and does not replace the binary.
+# Sets OTA_RESTART_DATA_PLANE=true or false.
+replace_staged_edgelet_binary() {
+    _staged="$1"
+    OTA_RESTART_DATA_PLANE=false
+    [ -f "$_staged" ] || die "Staged binary missing: ${_staged}"
+    chmod 755 "$_staged" || die "Cannot prepare staged binary: ${_staged}"
+    if [ "$OS" = "linux" ]; then
+        _old_embed=$(installed_embed_hash)
+        _new_embed=$(binary_embed_hash "$_staged")
+        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
+            OTA_RESTART_DATA_PLANE=true
+            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
+            quiesce_data_plane_for_replace "$_staged" || die "Data-plane drain did not verify; binary was not replaced"
+            stop_edgelet_containerd_unit "$INIT"
+        else
+            stop_edgelet_service "$INIT"
+        fi
+    else
+        stop_edgelet_daemon_desktop "$OS"
+    fi
+    install_binary_file "$_staged" "$BINARY_PATH"
+}
+
 # ── rollback ──────────────────────────────────────────────────────────────────
 if [ "$ACTION" = "rollback" ]; then
     [ -f "$PREVIOUS_FILE" ] || die "No ${PREVIOUS_FILE} found."
@@ -3705,26 +3966,13 @@ if [ "$ACTION" = "rollback" ]; then
     else
         curl -fsSL -o "$_staged" "$_purl" || die "Failed to download rollback binary"
     fi
-    _old_embed=""
-    if [ "$OS" = "linux" ]; then
-        _old_embed=$(installed_embed_hash)
-    fi
-    [ "$OS" = "linux" ] && stop_edgelet_service "$INIT"
-    install_binary_file "$_staged" "$BINARY_PATH"
+    replace_staged_edgelet_binary "$_staged"
     install_dirs "$OS"
     if [ "$FORCE_CONFIG" != true ] && [ -f "$_cfgbak" ]; then
         install -m 640 "$_cfgbak" "$CONFIG_FILE"
     fi
-    _restart_dp=false
     if [ "$OS" = "linux" ]; then
-        _new_embed=$(binary_embed_hash "$BINARY_PATH")
-        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
-            _restart_dp=true
-            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
-        fi
-    fi
-    if [ "$OS" = "linux" ]; then
-        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$_restart_dp"
+        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$OTA_RESTART_DATA_PLANE"
     fi
     _sha=$(sha256_file "$BINARY_PATH")
     write_install_receipt "$EDGELET_VERSION" "$_pos" "$_parch" "$CONTAINER_ENGINE" "$_purl" "$_sha" "rollback"
@@ -3751,42 +3999,28 @@ if [ "$ACTION" = "upgrade" ]; then
     fi
     _cfg_backup="${BACKUP_DIR}/config.yaml.$(date +%Y%m%d%H%M%S 2>/dev/null || date +%s)"
     cp "$CONFIG_FILE" "$_cfg_backup" 2>/dev/null || true
-    _old_embed=""
-    if [ "$OS" = "linux" ]; then
-        _old_embed=$(installed_embed_hash)
-    fi
     cache_binary "$_cur_ver" "$_cur_os" "$_cur_arch" "$BINARY_PATH"
-    write_previous_release "$_cur_ver" "$_cur_os" "$_cur_arch" "$_cur_eng" "$_cur_src" "$_cur_sha" "$_cfg_backup"
-    [ "$OS" = "linux" ] && stop_edgelet_service "$INIT"
-    stop_edgelet_daemon_desktop "$OS"
     _staged="${TMPDIR}/edgelet-bin"
     download_or_stage_binary "$_staged"
     verify_binary_checksum "$_staged"
-    install_binary_file "$_staged" "$BINARY_PATH"
+    replace_staged_edgelet_binary "$_staged"
+    write_previous_release "$_cur_ver" "$_cur_os" "$_cur_arch" "$_cur_eng" "$_cur_src" "$_cur_sha" "$_cfg_backup"
     install_dirs "$OS"
     if [ "$FORCE_CONFIG" = true ]; then
         rm -f "$CONFIG_FILE"
         install_config_samples
     fi
     apply_container_engine_to_config
+    copy_bundled_scripts "$OS"
+    if [ "$OS" = "linux" ]; then
+        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$OTA_RESTART_DATA_PLANE"
+    else
+        start_edgelet_daemon_desktop "$OS"
+    fi
     _sha=$(sha256_file "$BINARY_PATH")
     _method="upgrade"
     [ "$AIRGAP" = true ] && _method="upgrade-airgap"
     write_install_receipt "$EDGELET_VERSION" "$OS" "$ARCH" "$CONTAINER_ENGINE" "$(compute_source_url)" "$_sha" "$_method"
-    copy_bundled_scripts "$OS"
-    _restart_dp=false
-    if [ "$OS" = "linux" ]; then
-        _new_embed=$(binary_embed_hash "$BINARY_PATH")
-        if should_restart_data_plane "$CONTAINER_ENGINE" "$_old_embed" "$_new_embed"; then
-            _restart_dp=true
-            info "Embed hash: ${_old_embed:-<none>} -> ${_new_embed}; data-plane restart required"
-        fi
-    fi
-    if [ "$OS" = "linux" ]; then
-        install_init_unit "$INIT" "$CONTAINER_ENGINE" "$_restart_dp"
-    else
-        start_edgelet_daemon_desktop "$OS"
-    fi
     info "Upgrade to ${EDGELET_VERSION} complete."
     exit 0
 fi

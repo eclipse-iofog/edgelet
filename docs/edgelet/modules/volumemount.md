@@ -39,6 +39,8 @@ volumes/
   serviceaccounts/...   # owned by serviceaccount manager (separate tree)
 ```
 
+Persistent `VOLUME` data under `volumes/data/` and `volumes/shared/` is **not** owned by this manager and is not deleted by `Clear()`. See [../volumes.md](../volumes.md).
+
 Internal dirs: mode **0750**. Bind-mount targets exposed to containers: **0755** dirs, **0644** files (non-root readable).
 
 Atomic update pattern uses `..data` symlink (see `dataSymlink` constant).
@@ -67,7 +69,7 @@ Triggered from Field Agent sync path (`fieldagent/sync.go`).
 
 ### Cleanup
 
-`CleanupMicroserviceVolumes(microserviceUUID)` when container removed — preserves shared secret/configmap data dirs where appropriate (see tests). Operator guide: [../volumes.md](../volumes.md).
+`CleanupMicroserviceVolumes(microserviceUUID)` when container removed — preserves shared secret/configmap data dirs where appropriate (see tests). `Clear()` (deprovision) does **not** walk `volumes/data/` or `volumes/shared/`; persistent `VOLUME` reclaim is `edgelet volume` / `--purge-volumes`. Operator guide: [../volumes.md](../volumes.md).
 
 ## Volume types
 

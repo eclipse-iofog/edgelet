@@ -146,3 +146,18 @@ func TestEmitEngineSuccess_StartFields(t *testing.T) {
 		t.Fatalf("durationMs=%d", ev.DurationMs)
 	}
 }
+
+func TestContainerGone(t *testing.T) {
+	if !containerGone(nil) {
+		t.Fatal("nil error is gone")
+	}
+	if !containerGone(errors.New(`rpc error: code = Unknown desc = failed to set removing state for container "abc": container is already in removing state`)) {
+		t.Fatal("already removing must be treated as gone")
+	}
+	if !containerGone(errors.New("container abc: not found")) {
+		t.Fatal("not found must be treated as gone")
+	}
+	if containerGone(errors.New("permission denied")) {
+		t.Fatal("unrelated error must not be treated as gone")
+	}
+}

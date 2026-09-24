@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/cli/client"
+	"github.com/eclipse-iofog/edgelet/internal/cli/domain/knowledge"
+	"github.com/eclipse-iofog/edgelet/internal/cli/domain/model"
 	"github.com/eclipse-iofog/edgelet/internal/cli/output"
 	"github.com/eclipse-iofog/edgelet/internal/cli/run"
 	"github.com/eclipse-iofog/edgelet/internal/cli/ui"
@@ -46,6 +49,16 @@ func Execute(ctx context.Context, api run.EdgeletAPIClient, uiProgress *ui.UI, r
 	}
 	if strings.TrimSpace(req.ManifestPath) == "" {
 		return nil, run.NewCLIError(run.CodeInvalidArgument, "usage: edgelet deploy -f <manifest.yaml>", nil)
+	}
+
+	docs, err := splitManifestDocuments(req.ManifestPath)
+	if err != nil {
+		return nil, run.NewCLIError(run.CodeInvalidArgument, err.Error(), err)
+	}
+	if mixed, mixedErr := modelThenMicroserviceDocs(docs); mixedErr != nil {
+		return nil, run.NewCLIError(run.CodeInvalidArgument, mixedErr.Error(), mixedErr)
+	} else if mixed != nil {
+		return executeModelThenMicroservice(ctx, api, uiProgress, req, mixed.models, mixed.microservices)
 	}
 
 	target, err := DetectTargetFromManifest(req.ManifestPath)
@@ -97,9 +110,142 @@ func Execute(ctx context.Context, api run.EdgeletAPIClient, uiProgress *ui.UI, r
 			return nil, run.MapAPIError(err)
 		}
 		return &Result{Data: data, Human: FormatApplyHuman(data)}, nil
+	case TargetModels:
+		var spin *ui.Spinner
+		if uiProgress != nil {
+			spin = uiProgress.StartSpinner(applySpinnerMessage(target))
+		}
+		data, err := api.RequestMultipartFile("POST", target.applyPath(), "manifest", req.ManifestPath, fields)
+		if spin != nil {
+			spin.Stop()
+		}
+		if err != nil {
+			return nil, run.MapAPIError(err)
+		}
+		result := &Result{Data: data, Human: FormatApplyHuman(data)}
+		if req.DryRun {
+			return result, nil
+		}
+		for _, name := range modelNamesFromApply(data) {
+			if _, pullErr := model.Pull(ctx, api, uiProgress, model.PullRequest{Name: name}); pullErr != nil {
+				return nil, pullErr
+			}
+		}
+		return result, nil
+	case TargetKnowledge:
+		var spin *ui.Spinner
+		if uiProgress != nil {
+			spin = uiProgress.StartSpinner(applySpinnerMessage(target))
+		}
+		data, err := api.RequestMultipartFile("POST", target.applyPath(), "manifest", req.ManifestPath, fields)
+		if spin != nil {
+			spin.Stop()
+		}
+		if err != nil {
+			return nil, run.MapAPIError(err)
+		}
+		result := &Result{Data: data, Human: FormatApplyHuman(data)}
+		if req.DryRun {
+			return result, nil
+		}
+		for _, name := range knowledgeNamesFromApply(data) {
+			if _, pullErr := knowledge.Pull(ctx, api, uiProgress, knowledge.PullRequest{Name: name}); pullErr != nil {
+				return nil, pullErr
+			}
+		}
+		return result, nil
 	default:
 		return nil, run.NewCLIError(run.CodeInternal, "unsupported deploy target", nil)
 	}
+}
+
+type modelThenMicroserviceSplit struct {
+	models        []manifestDocument
+	microservices []manifestDocument
+}
+
+func modelThenMicroserviceDocs(docs []manifestDocument) (*modelThenMicroserviceSplit, error) {
+	hasModel := false
+	hasMS := false
+	for _, doc := range docs {
+		switch {
+		case strings.EqualFold(doc.Kind, "Model"):
+			hasModel = true
+		case strings.EqualFold(doc.Kind, "Microservice"):
+			hasMS = true
+		}
+	}
+	if !hasModel || !hasMS {
+		return nil, nil
+	}
+	models, microservices, err := partitionManifestDocuments(docs)
+	if err != nil {
+		return nil, err
+	}
+	if len(models) == 0 || len(microservices) == 0 {
+		return nil, nil
+	}
+	return &modelThenMicroserviceSplit{models: models, microservices: microservices}, nil
+}
+
+func executeModelThenMicroservice(ctx context.Context, api run.EdgeletAPIClient, uiProgress *ui.UI, req Request, modelDocs, msDocs []manifestDocument) (*Result, error) {
+	modelPath, modelCleanup, err := writeTempManifest(joinManifestDocuments(modelDocs))
+	if err != nil {
+		return nil, run.NewCLIError(run.CodeInternal, err.Error(), err)
+	}
+	defer modelCleanup()
+	msPath, msCleanup, err := writeTempManifest(joinManifestDocuments(msDocs))
+	if err != nil {
+		return nil, run.NewCLIError(run.CodeInternal, err.Error(), err)
+	}
+	defer msCleanup()
+
+	modelResult, err := Execute(ctx, api, uiProgress, Request{
+		ManifestPath: modelPath,
+		SourceName:   req.SourceName,
+		DryRun:       req.DryRun,
+	})
+	if err != nil {
+		return nil, err
+	}
+	msReq := Request{
+		ManifestPath: msPath,
+		SourceName:   req.SourceName,
+		DryRun:       req.DryRun,
+	}
+	msResult, err := Execute(ctx, api, uiProgress, msReq)
+	if err != nil {
+		return nil, err
+	}
+	human := strings.TrimSpace(strings.TrimSpace(modelResult.Human) + "\n" + strings.TrimSpace(msResult.Human))
+	stages := append(append([]string{}, modelResult.Stages...), msResult.Stages...)
+	return &Result{
+		Data: map[string]any{
+			"models":        modelResult.Data,
+			"microservices": msResult.Data,
+		},
+		Stages: stages,
+		Human:  human,
+	}, nil
+}
+
+func writeTempManifest(content string) (string, func(), error) {
+	f, err := os.CreateTemp("", "edgelet-deploy-*.yaml")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return path, cleanup, nil
 }
 
 func verifyControlPlaneRunning(api run.EdgeletAPIClient) error {
@@ -134,6 +280,10 @@ func applySpinnerMessage(target Target) string {
 		return "Applying control plane manifest..."
 	case TargetRegistries:
 		return "Applying registry manifest..."
+	case TargetModels:
+		return "Applying model manifest..."
+	case TargetKnowledge:
+		return "Applying knowledge manifest..."
 	default:
 		return "Applying manifest..."
 	}
@@ -222,6 +372,70 @@ func lastStageFrom(stages []string) string {
 		return ""
 	}
 	return stages[len(stages)-1]
+}
+
+func modelNamesFromApply(data map[string]any) []string {
+	if data == nil {
+		return nil
+	}
+	var names []string
+	seen := map[string]bool{}
+	appendName := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || name == "<unknown>" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	switch items := data["models"].(type) {
+	case []any:
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				appendName(output.MapValueAsString(m, "name"))
+			}
+		}
+	case []map[string]any:
+		for _, m := range items {
+			appendName(output.MapValueAsString(m, "name"))
+		}
+	}
+	if len(names) == 0 {
+		appendName(output.MapValueAsString(data, "name"))
+	}
+	return names
+}
+
+func knowledgeNamesFromApply(data map[string]any) []string {
+	if data == nil {
+		return nil
+	}
+	var names []string
+	seen := map[string]bool{}
+	appendName := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" || name == "<unknown>" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	switch items := data["knowledge"].(type) {
+	case []any:
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				appendName(output.MapValueAsString(m, "name"))
+			}
+		}
+	case []map[string]any:
+		for _, m := range items {
+			appendName(output.MapValueAsString(m, "name"))
+		}
+	}
+	if len(names) == 0 {
+		appendName(output.MapValueAsString(data, "name"))
+	}
+	return names
 }
 
 func finalizeApply(data map[string]any, stages []string) (*Result, error) {

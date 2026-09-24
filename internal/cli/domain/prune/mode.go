@@ -55,3 +55,33 @@ func ParseImageMode(args []string, usage string) (mode string, err error) {
 	}
 	return mode, nil
 }
+
+// ParseModelMode parses model prune mode (dangling only).
+func ParseModelMode(args []string, usage string) (mode string, err error) {
+	mode, err = ParseMode(args, usage)
+	if err != nil {
+		return "", err
+	}
+	if mode == "" {
+		return "", nil
+	}
+	if mode != "dangling" {
+		return "", run.NewCLIError(run.CodeInvalidArgument, "model prune supports only dangling mode", nil)
+	}
+	return mode, nil
+}
+
+// ParseKnowledgeMode parses knowledge prune mode (dangling only).
+func ParseKnowledgeMode(args []string, usage string) (mode string, err error) {
+	mode, err = ParseMode(args, usage)
+	if err != nil {
+		return "", err
+	}
+	if mode == "" {
+		return "", nil
+	}
+	if mode != "dangling" {
+		return "", run.NewCLIError(run.CodeInvalidArgument, "knowledge prune supports only dangling mode", nil)
+	}
+	return mode, nil
+}

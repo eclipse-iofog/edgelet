@@ -29,5 +29,9 @@ WARNING: kill sends SIGKILL-equivalent termination; in-flight work may be lost.`
 func RemoveCommandLong() string {
 	return strings.TrimSpace(`Remove a microservice and its local deployment state.
 
+Persistent VOLUME directories are retained. Shared claims drop this consumer only.
+--cleanup records a reserved bit for a later explicit volume prune; it does not
+delete data now and does not start a sweeper.
+
 WARNING: This deletes the microservice record and associated container resources.`)
 }

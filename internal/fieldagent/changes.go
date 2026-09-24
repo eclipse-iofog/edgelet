@@ -73,12 +73,24 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 		}
 
-		// Process prune change
+		// Process prune change (images + unused local models + unused local
+		// Knowledge). Persistent VOLUME data is reclaimed only by explicit
+		// volume commands.
 		if prune, ok := changes["prune"].(bool); ok && prune && !initialization {
 			logging.LogDebug(moduleName, "Processing prune change")
-			// DockerPruningManager would be called here
-			// For now, just log
-			logging.LogDebug(moduleName, "Docker prune requested")
+			if err := fa.pruneDanglingImages(); err != nil {
+				logging.LogError(moduleName, "Unable to prune dangling images", err)
+				resetChanges = false
+			}
+			if err := fa.pruneUnusedLocalModels(); err != nil {
+				logging.LogError(moduleName, "Unable to prune unused local models", err)
+				resetChanges = false
+			}
+			if err := fa.pruneUnusedLocalKnowledge(); err != nil {
+				logging.LogError(moduleName, "Unable to prune unused local knowledge", err)
+				resetChanges = false
+			}
+			_ = fa.pruneVolumesFn
 		}
 
 		// Process volumeMounts change
@@ -94,6 +106,45 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 			}
 		}
 
+		// Process models change
+		if modelsFlag, ok := changes["models"].(bool); ok && (modelsFlag || initialization) {
+			if initialization && fa.shouldSkipInitReload() {
+				logging.LogDebug(moduleName, "skipping init models reload; reconnect reconcile already completed")
+			} else {
+				logging.LogDebug(moduleName, "Processing models change")
+				if err := fa.loadModels(false); err != nil {
+					logging.LogError(moduleName, "Unable to update models", err)
+					resetChanges = false
+				}
+			}
+		}
+
+		// Process knowledge change
+		if knowledgeFlag, ok := changes["knowledge"].(bool); ok && (knowledgeFlag || initialization) {
+			if initialization && fa.shouldSkipInitReload() {
+				logging.LogDebug(moduleName, "skipping init knowledge reload; reconnect reconcile already completed")
+			} else {
+				logging.LogDebug(moduleName, "Processing knowledge change")
+				if err := fa.loadKnowledge(false); err != nil {
+					logging.LogError(moduleName, "Unable to update knowledge", err)
+					resetChanges = false
+				}
+			}
+		}
+
+		// Process runtimeClasses change
+		if runtimeClassesFlag, ok := changes["runtimeClasses"].(bool); ok && (runtimeClassesFlag || initialization) {
+			if initialization && fa.shouldSkipInitReload() {
+				logging.LogDebug(moduleName, "skipping init runtime classes reload; reconnect reconcile already completed")
+			} else {
+				logging.LogDebug(moduleName, "Processing runtimeClasses change")
+				if err := fa.loadRuntimeClasses(false); err != nil {
+					logging.LogError(moduleName, "Unable to update runtime classes", err)
+					resetChanges = false
+				}
+			}
+		}
+
 		// Process microservice-related changes
 		microserviceConfig, ok := changes["microserviceConfig"].(bool)
 		if !ok {
@@ -103,19 +154,27 @@ func (fa *FieldAgent) processChanges(changes map[string]any) bool {
 		if !ok {
 			microserviceList = false
 		}
+		microserviceModels, ok := changes["microserviceModels"].(bool)
+		if !ok {
+			microserviceModels = false
+		}
+		microserviceKnowledge, ok := changes["microserviceKnowledge"].(bool)
+		if !ok {
+			microserviceKnowledge = false
+		}
 		execSessions, ok := changes["execSessions"].(bool)
 		if !ok {
 			execSessions = false
 		}
 
-		if microserviceConfig || microserviceList || initialization {
+		if microserviceConfig || microserviceList || microserviceModels || microserviceKnowledge || initialization {
 			if initialization && fa.shouldSkipInitReload() {
 				logging.LogDebug(moduleName, "skipping init microservices reload; reconnect reconcile already completed")
 			} else {
-				logging.LogDebug(moduleName, fmt.Sprintf("Processing microservice related changes - microserviceConfig: %v, microserviceList: %v",
-					microserviceConfig, microserviceList))
+				logging.LogDebug(moduleName, fmt.Sprintf("Processing microservice related changes - microserviceConfig: %v, microserviceList: %v, microserviceModels: %v, microserviceKnowledge: %v",
+					microserviceConfig, microserviceList, microserviceModels, microserviceKnowledge))
 
-				// Load microservices
+				// One GET microservices for list and/or catalog-only flags.
 				microservices, err := fa.loadMicroservices(false)
 				if err != nil {
 					logging.LogError(moduleName, "Unable to get microservices list", err)
@@ -373,7 +432,6 @@ func (fa *FieldAgent) getFogConfig() error {
 		"logLevel":               "ll",
 		"statusFrequency":        "sf",
 		"changeFrequency":        "cf",
-		"deviceScanFrequency":    "sd",
 		"watchdogEnabled":        "wd",
 		"edgeGuardFrequency":     "egf",
 		"gpsMode":                "gps",
@@ -463,7 +521,6 @@ func (fa *FieldAgent) postFogConfig() error {
 		"logFileCount":           cfg.LogFileCount,
 		"statusFrequency":        cfg.StatusFrequency,
 		"changeFrequency":        cfg.ChangeFrequency,
-		"deviceScanFrequency":    cfg.DeviceScanFrequency,
 		"watchdogEnabled":        cfg.WatchdogEnabled,
 		"edgeGuardFrequency":     cfg.EdgeGuardFrequency,
 		"gpsDevice":              cfg.GPSDevice,

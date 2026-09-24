@@ -175,6 +175,7 @@ func TestReconcileLocalDesiredRunning_CreatedNonRestartableRecreates(t *testing.
 		ManifestYAML: minimalLocalManifestYAML(),
 		Generation:   1,
 		FailureCount: 2,
+		LastError:    "previous crash",
 		RuntimeState: "created",
 		State:        "created",
 		ContainerID:  "old-container",
@@ -198,7 +199,6 @@ func TestReconcileLocalDesiredRunning_CreatedNonRestartableRecreates(t *testing.
 		target.ContainerID = "new-container"
 		target.RuntimeState = "running"
 		target.State = "running"
-		target.LastError = ""
 		target.FailureCount = 0
 		return nil
 	}
@@ -217,8 +217,8 @@ func TestReconcileLocalDesiredRunning_CreatedNonRestartableRecreates(t *testing.
 	if item.FailureCount != 0 {
 		t.Fatalf("expected failure count reset after recreate, got %d", item.FailureCount)
 	}
-	if item.LastError != "" {
-		t.Fatalf("expected last error cleared after recreate, got %q", item.LastError)
+	if item.LastError != "previous crash" {
+		t.Fatalf("expected last error kept after recreate, got %q", item.LastError)
 	}
 }
 
@@ -416,7 +416,6 @@ func TestReconcileLocalDesiredRunning_ExitingNonRestartableRecreates(t *testing.
 		target.ContainerID = "new-container"
 		target.RuntimeState = "running"
 		target.State = "running"
-		target.LastError = ""
 		target.FailureCount = 0
 		return nil
 	}
@@ -438,6 +437,114 @@ func TestReconcileLocalDesiredRunning_ExitingNonRestartableRecreates(t *testing.
 	}
 	if item.FailureCount != 0 {
 		t.Fatalf("expected failure count reset after recreate, got %d", item.FailureCount)
+	}
+}
+
+func TestReconcileLocalDesiredDeleted_DeletesRowWhenContainerGone(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-gc",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "gc-ms",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "deleted",
+		RuntimeState:     "deleting",
+		ImageName:        "busybox:latest",
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.reconcileLocalDesiredDeleted(item, nil, time.Now().Unix())
+	got, err := store.GetInstance().GetLocalWorkload("local-gc")
+	if err == nil && got != nil {
+		t.Fatalf("expected local row deleted, got %+v", got)
+	}
+}
+
+func TestReconcileLocalDesiredDeleted_DoesNotReinsertMissingRow(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	stale := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-missing",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "missing",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "deleted",
+		RuntimeState:     "deleted",
+	}
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.reconcileLocalDesiredDeleted(stale, nil, time.Now().Unix())
+	got, err := store.GetInstance().GetLocalWorkload("local-missing")
+	if err == nil && got != nil {
+		t.Fatal("expected stale deleted reconcile not to insert a tombstone")
+	}
+}
+
+func TestReconcileOneLocalDeployment_StaleRunningSnapshotAfterDeleteIsNoop(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	stale := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-stale",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "stale",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		DesiredState:     "running",
+		RuntimeState:     "running",
+	}
+	launchCalled := false
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.launchLocalDeploymentFn = func(*models.LocalDeployedMicroservice, int64) {
+		launchCalled = true
+	}
+	pm.reconcileOneLocalDeployment(stale)
+	if launchCalled {
+		t.Fatal("expected missing row not to launch from stale running snapshot")
+	}
+	got, err := store.GetInstance().GetLocalWorkload("local-stale")
+	if err == nil && got != nil {
+		t.Fatal("expected stale running snapshot not to upsert a row")
+	}
+}
+
+func TestReconcileLocalDesiredRunning_KeepsLastErrorOnFirstRunning(t *testing.T) {
+	openLocalReconcileTestDB(t)
+
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-keep-err",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "keep-err",
+		ManifestYAML:     minimalLocalManifestYAML(),
+		ImageName:        "busybox:latest",
+		Generation:       1,
+		DesiredState:     "running",
+		RuntimeState:     "exiting",
+		State:            "exiting",
+		ContainerID:      "cid-keep",
+		LastError:        "previous crash",
+		RestartCount:     2,
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	pm.getContainerStatusFn = func(_, _ string) (*models.MicroserviceStatus, error) {
+		return &models.MicroserviceStatus{Status: models.MicroserviceStateRunning}, nil
+	}
+
+	pm.reconcileLocalDesiredRunning(item, &engine.Container{ID: "cid-keep"}, 123)
+
+	if item.LastError != "previous crash" {
+		t.Fatalf("expected last_error kept on first running, got %q", item.LastError)
+	}
+	got, err := store.GetInstance().GetLocalWorkload("local-keep-err")
+	if err != nil || got == nil {
+		t.Fatalf("get workload: err=%v item=%v", err, got)
+	}
+	if got.LastError != "previous crash" {
+		t.Fatalf("expected sqlite last_error kept, got %q", got.LastError)
+	}
+	if got.RestartCount != 2 {
+		t.Fatalf("expected restart_count kept, got %d", got.RestartCount)
 	}
 }
 

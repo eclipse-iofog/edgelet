@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eclipse-iofog/edgelet/internal/controlplane"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 )
 
@@ -75,6 +76,15 @@ func (d *DB) UpsertSystemControlPlane(dep *models.ControlPlaneDeployment) error 
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert system control plane: %w", err)
+	}
+	return d.upsertControlPlanePersistentVolumes(dep.ControllerUUID)
+}
+
+func (d *DB) upsertControlPlanePersistentVolumes(uuid string) error {
+	for _, name := range []string{controlplane.VolumeDBName, controlplane.VolumeLogName} {
+		if err := d.UpsertPersistentVolume(uuid, name, PersistentVolumeKindControlPlane, models.VolumeScopePrivate, ""); err != nil {
+			return err
+		}
 	}
 	return nil
 }

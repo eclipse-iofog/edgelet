@@ -14,7 +14,6 @@ graph TD
     RC["Resource Consumption"]
     FA["Field Agent"]
     PM["Process Manager"]
-    RM["Resource Manager"]
     GPS["GPS Manager"]
     API["EdgeletAPI"]
     PR["Pruning Manager"]
@@ -25,8 +24,7 @@ graph TD
     NET --> RC
     RC --> FA
     FA --> PM
-    PM --> RM
-    RM --> GPS
+    PM --> GPS
     GPS --> API
     API --> PR
     PR --> EG
@@ -40,11 +38,12 @@ Approximate sequence in `internal/supervisor/supervisor.go`:
 4. `resourceconsumption` — host resource sampling
 5. `fieldagent` — Controller REST client and sync workers
 6. `processmanager` — container reconcile (after engine wired)
-7. `resourcemanager` — edge resource bookkeeping
-8. `gps` — NMEA/device integration
-9. `edgeletapi` — HTTPS + Unix `/v1/...`
-10. `pruning` — scheduled/threshold image prune
-11. `edgeguard` — hardware attestation loop
+7. `gps` — NMEA/device integration
+8. `edgeletapi` — HTTPS + Unix `/v1/...`
+9. `pruning` — scheduled/threshold image + unused-local-model prune (not persistent VOLUME data)
+10. `edgeguard` — hardware attestation loop
+
+Host hardware/USB inventory posting (formerly Resource Manager) is **removed**. Edge Guard stays.
 
 Shutdown reverses the order; `store.Close()` runs last (WAL checkpoint).
 
@@ -56,6 +55,7 @@ Lazy or engine-bound components (not separate Supervisor `Start()` modules):
 - `proxy` — updated from Controller change feed
 - `runtimeapi` — library facade for EdgeletAPI handlers
 - `serviceaccount` — reconciled from Process Manager / Field Agent
+- `modelmanager` — model artifact reconcile (wired from Supervisor / EdgeletAPI)
 
 ## StatusReporter module indices
 
@@ -68,7 +68,7 @@ Lazy or engine-bound components (not separate Supervisor `Start()` modules):
 | 2 | Status Reporter |
 | 3 | EdgeletAPI |
 | 4 | Field Agent |
-| 5 | Resource Manager |
+| 5 | *(unused — former Resource Manager; indexes are not reshuffled)* |
 | 6 | GPS Manager |
 
 Edge Guard, Pruning, Volume Mount, and SSH Proxy are not in this fixed array; their health surfaces via logs and dedicated status objects.
@@ -109,7 +109,7 @@ Edge Guard, Pruning, Volume Mount, and SSH Proxy are not in this fixed array; th
 | Module | Document |
 |--------|----------|
 | Status Reporter | [statusreporter.md](statusreporter.md) |
-| Resource Manager | [resourcemanager.md](resourcemanager.md) |
+| Resource Manager (removed) | [resourcemanager.md](resourcemanager.md) |
 | Resource Consumption | [resourceconsumption.md](resourceconsumption.md) |
 | Network Manager | [network.md](network.md) |
 | GPS Manager | [gps.md](gps.md) |
@@ -128,3 +128,6 @@ Edge Guard, Pruning, Volume Mount, and SSH Proxy are not in this fixed array; th
 | DNS | [../dns.md](../dns.md) |
 | Workload labels/env | [../workload-metadata.md](../workload-metadata.md) |
 | Manifest YAML | [../manifest-reference.md](../manifest-reference.md) |
+| Model artifacts | [../models.md](../models.md) |
+| Knowledge artifacts | [../knowledge.md](../knowledge.md) |
+| Crash / last-error inspect | [../troubleshooting.md](../troubleshooting.md#microservice-crash--restart-loop) |

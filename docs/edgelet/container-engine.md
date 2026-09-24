@@ -46,8 +46,8 @@ Isolated from host Docker/Podman installations:
 | `/usr/local/bin/edgelet` | **Thin** download binary (linux): CLI + embed; systemd entry |
 | `/var/lib/edgelet/data/current/bin/edgelet` | **Fat** runtime ELF (linux): daemon + in-process containerd |
 | `/var/lib/edgelet/data/current/bin/` | Shim (`containerd-shim-runc-v2`), `crun`, CNI multicall + symlinks |
-| `/var/lib/edgelet/data/current` / `previous` | Symlinks to active / prior extracted bundle directories |
-| `/var/lib/edgelet/` | User data (`diskDirectory`); workload volume data under `volumes/data/` — see [volumes.md](volumes.md) |
+| `/var/lib/edgelet/data/current` / `previous` | Symlinks to active / prior extracted bundle directories. Older hash trees are removed after a successful extract |
+| `/var/lib/edgelet/` | User data (`diskDirectory`); persistent `VOLUME` data under `volumes/data/` (private) and `volumes/shared/` (shared) — see [volumes.md](volumes.md) |
 | `/var/lib/edgelet-containerd/` | Containerd images, snapshots, CNI state |
 | `/run/edgelet/containerd.sock` | Containerd API socket |
 | `/run/edgelet/edgelet.sock` | EdgeletAPI Unix socket |
@@ -146,6 +146,15 @@ imports = ["/var/lib/edgelet-containerd/config.d/*.toml"]
    ```
    Restart the data plane after changing containerd CDI settings.
 
+**Host discovery vs per-microservice injection:**
+
+| Surface | Meaning |
+|---------|---------|
+| Fog / local status `availableCdiDevices` | Unique sorted **fully-qualified** names found on the host (`nvidia.com/gpu=0`). Linux `edgelet` engine scans `/etc/cdi`, `/var/run/cdi`, plus extra `cdi_spec_dirs` from containerd `config.d`. Docker, podman, and desktop: `[]` |
+| `cdiDevices` on the microservice | Which of those names to inject into **this** workload |
+
+Discovery does not attach a device. Listing a name in `cdiDevices` does.
+
 **Per-microservice devices:** request fully-qualified CDI device names on the microservice spec. Controller (Pot) and local deploy use the same field:
 
 ```yaml
@@ -157,6 +166,16 @@ spec:
 ```
 
 Edgelet maps `cdiDevices` → CRI `CDIDevices` on the embedded engine and to Docker `DeviceRequest` (`driver: cdi`) when `containerEngine: docker`. **Podman** does not wire `cdiDevices` today.
+
+### Podman field coverage
+
+Podman create reuses the Docker HostConfig mapping (catalog bind, entrypoint/commands/workingDir, runAsGroup, read-only root, tmpfs, shm, cpus, memory reservation/swap, sysctls, ulimits, and `/dev` devices). Inspect shows whatever the Podman API stored; Edgelet does not invent applied state that inspect omitted.
+
+| Field | Podman |
+|-------|--------|
+| Catalog bind, process, resources, sysctls, ulimits, devices | Sent as Docker HostConfig (same as `containerEngine: docker`) |
+| `cdiDevices` | Not wired |
+| Engine recreate | Uses the stored apply snapshot (bindPath and catalog permissions, not catalog item membership) |
 
 | Mechanism | Purpose |
 |-----------|---------|
@@ -181,17 +200,34 @@ On linux, use systemd `After=docker.service` (or podman) when relying on an exte
 
 Manual lifecycle (`edgelet ms start`, `stop`, `restart`) behavior may differ per engine — see OpenAPI notes for engine-specific semantics.
 
+When a Docker or Podman container is not healthily running, inspect status includes crash text of the form `exitCode=N oomKilled=true|false` (and `error=<engine error>` when that string is set). The embedded engine keeps `CRI reason=… exitCode=… message=…`. That text is the current `errorMessage` until **30 seconds** of continuous RUNNING, then it remains on `lastError` only. Crash-loop recreate backs off (10s … 5 minutes); `STUCK_IN_RESTART` still means too many **restarts** in 10 minutes. See [troubleshooting.md](troubleshooting.md#microservice-crash--restart-loop).
+
+### Registry TLS on image pull
+
+The **edgelet** engine applies registry `ca` (extra PEM, in addition to system CAs) and `insecure` (`http://` and skip TLS verify) when pulling container images — the same rules as model artifact pull.
+
+**Docker** and **Podman** image pull use daemon credentials only. Per-registry `ca` and `insecure` are not applied by those engines.
+
 ---
 
 ## RuntimeClass (edgelet engine only)
 
-Runtime extensions use EdgeletAPI deploy manifests:
+Runtime extensions use EdgeletAPI deploy manifests **or** fleet attach from the controller:
 
 - `apiVersion: edgelet.iofog.org/v1`
 - `kind: RuntimeClass`
 - fields: `metadata.name`, `handler`
 
-Each `metadata.name` registers one canonical runtime handler. Network scope (`managed` vs `local`) is selected via workload CNI policy, not by synthesizing handler variants.
+Each `metadata.name` registers one canonical runtime handler. Provenance is `source`: `local` (CLI/API apply) or `managed` (controller). While the node is provisioned, a **managed** class **wins** that name — local apply of a managed name is rejected. Docker and podman ignore fleet RuntimeClass rows; status `runtimeClasses` is `[]`.
+
+Catalog handlers (`spin`, `edgelet-wasmtime`, `wasmtime`, `wasmedge`, `nvidia-cdi`, …) apply **without** bouncing the data plane. A non-catalog handler **may** restart the data plane. Delete is refused while any microservice still uses the class.
+
+Fog and local status:
+
+- `availableRuntimes` — discovered host handlers (names only), including catalog handlers that are not applied
+- `runtimeClasses` — **applied** classes only: `{ name, handler, source }`, sorted by name
+
+Network scope (`managed` vs `local`) for CNI is selected via workload policy, not by synthesizing handler variants.
 
 Built-in catalog handlers include `spin`, `edgelet-wasmtime` (Datasance WASM shim), and upstream `wasmtime` / `wasmedge` when the matching shim binary is on `PATH`. Shim binaries are discovered from `PATH` (for example `containerd-shim-edgelet-v2` for handler `edgelet-wasmtime`).
 

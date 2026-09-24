@@ -168,6 +168,17 @@ func TestHandleSystemProvisionDelete_RejectsInvalidScope(t *testing.T) {
 	}
 }
 
+func TestHandleSystemProvisionDelete_RejectsInvalidPurgeVolumes(t *testing.T) {
+	handler := NewEdgeletAPIHandler()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/system/provision?purgeVolumes=maybe", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleSystemProvision(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleSystemPrune_RejectsInvalidMode(t *testing.T) {
 	handler := NewEdgeletAPIHandler()
 	req := httptest.NewRequest(http.MethodPost, "/v1/system/prune?mode=bad", nil)

@@ -6,7 +6,7 @@ import "strings"
 func CommandLong() string {
 	return strings.TrimSpace(`Apply or validate a local manifest via EdgeletAPI v1.
 
-Supported kinds: Microservice, Registry, RuntimeClass, and ControlPlane (singleton controller per node).
+Supported kinds: Microservice, Registry, Model, Knowledge, RuntimeClass, and ControlPlane (singleton controller per node).
 Manifest kind is auto-detected from the YAML file.`)
 }
 
@@ -16,6 +16,8 @@ func CommandExamples() string {
   edgelet deploy -f microservice.yaml --dry-run
   edgelet deploy -f microservice.yaml --sourceName my-app
   edgelet deploy -f registry.yaml
+  edgelet deploy -f model.yaml
+  edgelet deploy -f knowledge.yaml
   edgelet deploy -f controlplane.yaml
   edgelet deploy -f controlplane.yaml --dry-run
   edgelet -o json deploy -f microservice.yaml --dry-run`)

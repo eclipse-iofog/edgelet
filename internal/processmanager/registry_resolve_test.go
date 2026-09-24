@@ -1,6 +1,7 @@
 package processmanager
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -38,5 +39,33 @@ func TestResolveRegistryForMicroservice_InvalidID(t *testing.T) {
 
 	if _, err := resolveRegistryForMicroservice(nil, ms); err == nil {
 		t.Fatal("expected error for invalid registry id")
+	}
+}
+
+func TestPullImage_RejectsNonOCIRegistry(t *testing.T) {
+	hf := models.NewRegistryBuilder().
+		SetID(5).
+		SetURL("https://huggingface.co").
+		SetType(models.RegistryTypeHF).
+		Build()
+	err := GetInstance().PullImage("org/app:v1", hf, "")
+	if err == nil || !strings.Contains(err.Error(), "type") || !strings.Contains(err.Error(), "oci") {
+		t.Fatalf("expected oci type requirement error, got: %v", err)
+	}
+}
+
+func TestResolveRegistryForMicroservice_RejectsNonOCI(t *testing.T) {
+	hf := models.NewRegistryBuilder().
+		SetID(5).
+		SetURL("https://huggingface.co").
+		SetType(models.RegistryTypeHF).
+		Build()
+	msm := &resolveRegistryMSM{registry: hf}
+	ms := models.NewMicroservice("uuid-1", "org/app:v1")
+	ms.RegistryID = 5
+
+	_, err := resolveRegistryForMicroservice(msm, ms)
+	if err == nil || !strings.Contains(err.Error(), "type") || !strings.Contains(err.Error(), "oci") {
+		t.Fatalf("expected oci type requirement error, got: %v", err)
 	}
 }

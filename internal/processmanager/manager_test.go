@@ -2,6 +2,7 @@ package processmanager
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -157,5 +158,20 @@ func TestAddMicroservice_QueuesTaskAndMarksUpdating(t *testing.T) {
 	}
 	if !ms.GetIsUpdating() {
 		t.Fatal("expected microservice marked updating after enqueue")
+	}
+}
+
+func TestContainerAlreadyRemoved(t *testing.T) {
+	if !containerAlreadyRemoved(nil) {
+		t.Fatal("nil error is already removed")
+	}
+	if !containerAlreadyRemoved(errors.New("container is already in removing state")) {
+		t.Fatal("already removing must be treated as success")
+	}
+	if !containerAlreadyRemoved(errors.New("No such container: abc")) {
+		t.Fatal("no such container must be treated as success")
+	}
+	if containerAlreadyRemoved(errors.New("permission denied")) {
+		t.Fatal("unrelated error must not be treated as success")
 	}
 }

@@ -34,12 +34,18 @@ func normalizeReportKey(raw string) string {
 
 func fixStatusReportKeyAcronyms(key string) string {
 	switch key {
+	case "agentCpuPercent":
+		return "agentCpu"
+	case "runtimeCpuPercent":
+		return "runtimeCpu"
 	case "agentMemoryMib":
-		return "agentMemoryMiB"
+		return "agentMemory"
 	case "runtimeMemoryMib":
-		return "runtimeMemoryMiB"
-	case "edgeletTotalMemoryMib":
-		return "edgeletTotalMemoryMiB"
+		return "runtimeMemory"
+	case "edgeletTotalCpuPercent":
+		return "edgeletStackCpu"
+	case "edgeletTotalMemoryMib", "edgeletStackMemoryMib":
+		return "edgeletStackMemory"
 	default:
 		return key
 	}

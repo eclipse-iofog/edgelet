@@ -1,6 +1,7 @@
 package statusreporter
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
+	"github.com/eclipse-iofog/edgelet/internal/cdidevices"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/constants"
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -32,7 +34,6 @@ type StatusReporter struct {
 	// Status objects for each module
 	supervisorStatus                 *models.SupervisorStatus
 	resourceConsumptionManagerStatus *models.ResourceConsumptionManagerStatus
-	resourceManagerStatus            *models.ResourceManagerStatus
 	fieldAgentStatus                 *models.FieldAgentStatus
 	statusReporterStatus             *models.StatusReporterStatus
 	processManagerStatus             *models.ProcessManagerStatus
@@ -66,7 +67,6 @@ func GetInstance() *StatusReporter {
 			config:                           config.GetInstance(),
 			supervisorStatus:                 models.NewSupervisorStatus(numberOfModules),
 			resourceConsumptionManagerStatus: models.NewResourceConsumptionManagerStatus(),
-			resourceManagerStatus:            models.NewResourceManagerStatus(),
 			fieldAgentStatus:                 models.NewFieldAgentStatus(),
 			statusReporterStatus:             models.NewStatusReporterStatus(),
 			processManagerStatus:             models.NewProcessManagerStatus(),
@@ -191,23 +191,23 @@ func (sr *StatusReporter) GetStatusReport() string {
 		daemonStatus = "RUNNING"
 	}
 	result += fmt.Sprintf("Edgelet daemon                : %s\n", daemonStatus)
-	result += fmt.Sprintf("Agent CPU percent             : about %.2f %%\n", rcs.AgentCPUPercent)
-	result += fmt.Sprintf("Agent memory MiB              : about %.2f\n", rcs.AgentMemoryMiB)
+	result += fmt.Sprintf("Agent CPU                     : %.6f\n", rcs.AgentCPUPercent/100.0)
+	result += fmt.Sprintf("Agent memory                  : %d\n", stackMemoryMiBToBytes(rcs.AgentMemoryMiB))
 	if rcs.RuntimeTracked {
-		result += fmt.Sprintf("Runtime CPU percent           : about %.2f %%\n", rcs.RuntimeCPUPercent)
-		result += fmt.Sprintf("Runtime memory MiB            : about %.2f\n", rcs.RuntimeMemoryMiB)
+		result += fmt.Sprintf("Runtime CPU                   : %.6f\n", rcs.RuntimeCPUPercent/100.0)
+		result += fmt.Sprintf("Runtime memory                : %d\n", stackMemoryMiBToBytes(rcs.RuntimeMemoryMiB))
 		result += fmt.Sprintf("Runtime available             : %t\n", rcs.RuntimeAvailable)
 		if rcs.RuntimeDegraded {
 			result += "Runtime degraded              : true\n"
 		}
 	}
-	result += fmt.Sprintf("Memory Usage                : about %.2f MiB\n", memoryUsage)
+	result += fmt.Sprintf("Memory Usage                : %.2f MiB\n", memoryUsage)
 	if diskUsage < 1 {
-		result += fmt.Sprintf("Disk Usage                  : about %.2f MiB\n", diskUsage*1024)
+		result += fmt.Sprintf("Disk Usage                  : %.2f MiB\n", diskUsage*1024)
 	} else {
-		result += fmt.Sprintf("Disk Usage                  : about %.2f GiB\n", diskUsage)
+		result += fmt.Sprintf("Disk Usage                  : %.2f GiB\n", diskUsage)
 	}
-	result += fmt.Sprintf("CPU Usage                   : about %.2f %%\n", cpuUsage)
+	result += fmt.Sprintf("CPU Usage                   : %.4f\n", cpuUsage)
 	result += fmt.Sprintf("Running Microservices       : %d\n", sr.processManagerStatus.RunningMicroservicesCount)
 	result += fmt.Sprintf("Connection to Controller    : %s\n", connectionStatus)
 	result += fmt.Sprintf("System Time                 : %s\n", dateFormat)
@@ -219,11 +219,21 @@ func (sr *StatusReporter) GetStatusReport() string {
 		diskPercent = (availableDisk / totalDisk) * 100.0
 	}
 
+	result += fmt.Sprintf("System CPUs                 : %d\n", rcs.SystemCpus)
+	result += fmt.Sprintf("System OS                   : %s\n", rcs.SystemOs)
+	if rcs.SystemOsVersion != "" {
+		result += fmt.Sprintf("System OS version           : %s\n", rcs.SystemOsVersion)
+	}
+	if rcs.SystemKernelVersion != "" {
+		result += fmt.Sprintf("System kernel version       : %s\n", rcs.SystemKernelVersion)
+	}
+	result += fmt.Sprintf("System Total Memory         : %d\n", rcs.SystemTotalMemory)
+	result += fmt.Sprintf("System Total Disk           : %d\n", rcs.TotalDiskSpace)
 	result += fmt.Sprintf("System Available Disk       : %.2f MB (%.2f %%)\n", availableDisk, diskPercent)
 	result += fmt.Sprintf("System Available Memory     : %.2f MB\n", availableMemory)
 	result += fmt.Sprintf("System Total CPU            : %.2f %%\n", hostCPU)
-	result += fmt.Sprintf("Edgelet total CPU percent   : %.2f\n", rcs.EdgeletTotalCPUPercent)
-	result += fmt.Sprintf("Edgelet total memory MiB    : %.2f\n", rcs.EdgeletTotalMemoryMiB)
+	result += fmt.Sprintf("Edgelet stack CPU             : %.6f\n", rcs.EdgeletTotalCPUPercent/100.0)
+	result += fmt.Sprintf("Edgelet stack memory          : %d\n", stackMemoryMiBToBytes(rcs.EdgeletTotalMemoryMiB))
 	availableInterfaces := getAvailableNetworkInterfaces()
 	availableInterfacesLine := "none"
 	if len(availableInterfaces) > 0 {
@@ -232,6 +242,8 @@ func (sr *StatusReporter) GetStatusReport() string {
 	result += fmt.Sprintf("Available Network Interfaces : %s\n", availableInterfacesLine)
 	availableRuntimesLine := strings.Join(GetAvailableRuntimes(), ", ")
 	result += fmt.Sprintf("Available Runtimes          : %s\n", availableRuntimesLine)
+	result += fmt.Sprintf("Runtime Classes             : %s\n", formatRuntimeClassesLine(GetAppliedRuntimeClasses()))
+	result += fmt.Sprintf("Available CDI Devices       : %s\n", strings.Join(GetAvailableCDIDevices(), ", "))
 
 	logging.LogDebug(moduleName, "Finished Getting Status Report")
 	return result
@@ -331,6 +343,83 @@ func sortedUniqueStrings(items []string) []string {
 	return out
 }
 
+// GetAppliedRuntimeClasses returns applied RuntimeClasses for status (sorted by name).
+// Docker and podman report an empty list.
+func GetAppliedRuntimeClasses() (out []models.RuntimeClassStatus) {
+	out = make([]models.RuntimeClassStatus, 0)
+	defer func() {
+		if r := recover(); r != nil {
+			logging.LogWarn(moduleName, fmt.Sprintf("applied runtime class status panicked: %v", r))
+			out = []models.RuntimeClassStatus{}
+		}
+	}()
+	cfg := config.GetInstance()
+	engineName := ""
+	if cfg != nil {
+		engineName = cfg.ContainerEngine
+	}
+	if !strings.EqualFold(strings.TrimSpace(engineName), constants.EngineEdgelet) {
+		return out
+	}
+	items, err := listRuntimeClassesForStatus()
+	if err != nil || len(items) == 0 {
+		return out
+	}
+	for _, rc := range items {
+		if rc == nil {
+			continue
+		}
+		rc.Normalize()
+		if rc.Name == "" {
+			continue
+		}
+		source := rc.Source
+		if source == "" {
+			source = models.RuntimeClassSourceLocal
+		}
+		out = append(out, models.RuntimeClassStatus{
+			Name:    rc.Name,
+			Handler: rc.Handler,
+			Source:  source,
+		})
+	}
+	slices.SortFunc(out, func(a, b models.RuntimeClassStatus) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	return out
+}
+
+// GetAvailableCDIDevices returns unique sorted fully-qualified CDI device names.
+func GetAvailableCDIDevices() (devices []string) {
+	devices = []string{}
+	defer func() {
+		if r := recover(); r != nil {
+			logging.LogWarn(moduleName, fmt.Sprintf("CDI device status panicked: %v", r))
+			devices = []string{}
+		}
+	}()
+	engineName := ""
+	if cfg := config.GetInstance(); cfg != nil {
+		engineName = cfg.ContainerEngine
+	}
+	listed := cdidevices.ListAvailable(engineName)
+	if listed == nil {
+		return devices
+	}
+	return listed
+}
+
+func formatRuntimeClassesLine(items []models.RuntimeClassStatus) string {
+	if len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, item.Display())
+	}
+	return strings.Join(parts, ", ")
+}
+
 // Status getters (thread-safe)
 
 // GetSupervisorStatus returns the supervisor status
@@ -360,13 +449,6 @@ func (sr *StatusReporter) GetResourceConsumptionManagerStatus() *models.Resource
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 	return sr.resourceConsumptionManagerStatus
-}
-
-// GetResourceManagerStatus returns the resource manager status
-func (sr *StatusReporter) GetResourceManagerStatus() *models.ResourceManagerStatus {
-	sr.mu.RLock()
-	defer sr.mu.RUnlock()
-	return sr.resourceManagerStatus
 }
 
 // GetFieldAgentStatus returns the field agent status
@@ -451,14 +533,6 @@ func (sr *StatusReporter) UpdateResourceConsumptionManagerStatus(fn func(*models
 	fn(sr.resourceConsumptionManagerStatus)
 }
 
-// UpdateResourceManagerStatus updates the resource manager status securely
-func (sr *StatusReporter) UpdateResourceManagerStatus(fn func(*models.ResourceManagerStatus)) {
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	sr.statusReporterStatus.SetLastUpdate(time.Now().UnixMilli())
-	fn(sr.resourceManagerStatus)
-}
-
 // UpdateFieldAgentStatus updates the field agent status securely
 func (sr *StatusReporter) UpdateFieldAgentStatus(fn func(*models.FieldAgentStatus)) {
 	sr.mu.Lock()
@@ -532,4 +606,11 @@ func (sr *StatusReporter) GetName() string {
 // GetModuleIndex returns the module index
 func (sr *StatusReporter) GetModuleIndex() int {
 	return utils.StatusReporter
+}
+
+func stackMemoryMiBToBytes(mib float64) int64 {
+	if mib <= 0 {
+		return 0
+	}
+	return int64(mib * 1024 * 1024) // #nosec G115 -- RSS MiB fits in int64
 }

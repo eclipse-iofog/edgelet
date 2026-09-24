@@ -61,7 +61,13 @@ func BeginQuiesceForDataPlaneDrain() {
 
 // TryResumeReconcileAfterDataPlaneEngineReady clears data-plane drain quiesce after the
 // runtime engine is healthy again (runtime split attach path).
+// A drain-active file keeps the pause until the data plane clears it.
 func TryResumeReconcileAfterDataPlaneEngineReady() {
+	if DataPlaneDrainHoldActive() {
+		BeginQuiesceForDataPlaneDrain()
+		runtimestate.GetState().SetEngineReady(false)
+		return
+	}
 	quiesceMu.Lock()
 	if !quiescedForDataPlaneDrain {
 		quiesceMu.Unlock()

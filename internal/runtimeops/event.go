@@ -63,6 +63,7 @@ const (
 	EventEngineContainerRemove     = "engine.container.remove"
 	EventEngineImagePulled         = "engine.image.pulled"
 	EventEnginePrune               = "engine.prune"
+	EventVolumeReclaim             = "volume.reclaim"
 
 	EventContainerRuntimeEvent = "container.runtime.event"
 )
@@ -88,6 +89,9 @@ const (
 	ReasonStuckInRestart       = "STUCK_IN_RESTART"
 	ReasonTaskExhaustedRetries = "TASK_EXHAUSTED_RETRIES"
 	ReasonShutdownDrainTimeout = "SHUTDOWN_DRAIN_TIMEOUT"
+	ReasonVolumeKeepSet        = "VOLUME_KEEP_SET"
+	ReasonVolumeInUse          = "VOLUME_IN_USE"
+	ReasonVolumePathJail       = "VOLUME_PATH_JAIL"
 )
 
 // Source identifies who initiated the operation.

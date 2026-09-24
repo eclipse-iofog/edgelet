@@ -1,0 +1,53 @@
+# =============================================================================
+# Edgelet Model manifest — annotated subset (edgelet.iofog.org/v1)
+#
+# Apply:  edgelet deploy -f model.yaml   (persists + downloads; CLI waits)
+# Pull:   edgelet model pull <metadata.name> [--repo … --registry …]
+# Prose:  docs/edgelet/models.md · docs/edgelet/manifest-reference.md
+#         docs/edgelet/oci-artifacts.md (how to push OCI / ORAS)
+#
+# Prerequisites:
+#   - OCI examples use built-in registry id 1 (docker.io).
+#   - Public Hub examples use built-in registry id 3 (https://huggingface.co).
+#   - Download is async on the daemon (Pending → Pulling → Ready / Failed).
+# =============================================================================
+
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: llama-2-7b-q2k           # required — DNS-1123 label; on-disk directory name
+spec:
+  repo: second-state/Llama-2-7B-Chat-GGUF   # required — upstream path, no host
+  revision: 064fe43ea8c1e1f93477ef4a170bdc2b244ef02c  # HF commit (pinned)
+  registry: 3                    # required — built-in Hugging Face Hub (type hf)
+  files:                         # HF only; ignored for oci
+    - llama-2-7b-chat.Q5_K_M.gguf
+  format: gguf                   # optional hint: gguf, safetensors, onnx, pytorch, tensorrt, unknown
+
+---
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: gemma3
+  labels:
+    family: gemma3
+spec:
+  repo: ai/gemma3                # OCI repository path (no registry host)
+  revision: 4b-q8_0              # OCI tag (floating — not a digest)
+  registry: 1                    # docker.io
+  files: []                      # ignored for oci — full artifact is always pulled
+  format: gguf
+
+---
+apiVersion: edgelet.iofog.org/v1
+kind: Model
+metadata:
+  name: gemma3-4b-q4-k-m
+  labels:
+    family: gemma3
+spec:
+  repo: ai/gemma3
+  revision: sha256:1eca257ec64d465cf38f766561e28eddb3b764adfba703288106a31cd2fe84a8
+  registry: 1
+  files: []
+  format: gguf

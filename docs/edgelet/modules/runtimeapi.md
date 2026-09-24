@@ -6,7 +6,7 @@
 
 ## Purpose
 
-- Implement operator actions: provision, deploy apply, MS lifecycle, images, prune, ControlPlane, RuntimeClass
+- Implement operator actions: provision, deploy apply, MS lifecycle, images, models, persistent volumes, prune, ControlPlane, RuntimeClass
 - Translate domain errors → `Err*` types with HTTP/code mapping in handlers
 - Keep container-engine and SQLite rules out of `internal/edgeletapi/handlers`
 - Async operation tracking for long-running applies (ControlPlane, RuntimeClass)
@@ -56,6 +56,7 @@ Entry: `runtimeapi.NewFacade()` — handlers hold a facade instance.
 | ControlPlane | `controlplane.go`, `controlplane_ms.go` | Async apply, env/port/volume mapping |
 | RuntimeClass | `facade.go` | Staged apply/delete with operation IDs |
 | Images | `facade.go` | Pull/load/remove/list |
+| Volumes | `facade_volumes.go` | List/remove/prune persistent VOLUME claims |
 
 ## RuntimeClass operations
 
@@ -77,7 +78,7 @@ Poll endpoints return terminal `failed` status in-band (HTTP 200).
 `controlplane` package builds `models.Microservice` from manifest:
 
 - Host ports 51121 / 80 → container API/viewer ports
-- Named volumes for DB and logs
+- Named volumes for DB and logs (always **private** under `volumes/data/{uuid}/`; destroyed only on `controlplane delete`)
 - Optional HTTPS cert bind mount
 
 Process Manager reconciles `system_control_plane` row separately (see [processmanager.md](processmanager.md)).
@@ -116,6 +117,7 @@ Handlers map facade errors to:
 | File | Role |
 |------|------|
 | `facade.go` | Core facade methods, MS/image/deploy |
+| `facade_volumes.go` | Persistent VOLUME list/remove/prune |
 | `controlplane.go` | CP apply/status/delete |
 | `controlplane_ms.go` | Manifest → microservice model, DNS FQDN helpers |
 

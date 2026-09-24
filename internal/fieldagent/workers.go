@@ -376,6 +376,12 @@ func (fa *FieldAgent) getFogStatus() map[string]any {
 		"cpuViolation":              resourceConsumptionStatus.CPUViolation,
 		"systemAvailableDisk":       float64(resourceConsumptionStatus.AvailableDisk),
 		"systemAvailableMemory":     float64(resourceConsumptionStatus.AvailableMemory),
+		"systemTotalDisk":           float64(resourceConsumptionStatus.TotalDiskSpace),
+		"systemTotalMemory":         float64(resourceConsumptionStatus.SystemTotalMemory),
+		"systemCpus":                resourceConsumptionStatus.SystemCpus,
+		"systemOs":                  resourceConsumptionStatus.SystemOs,
+		"systemOsVersion":           resourceConsumptionStatus.SystemOsVersion,
+		"systemKernelVersion":       resourceConsumptionStatus.SystemKernelVersion,
 		"systemTotalCpu":            resourceConsumptionStatus.TotalCPU,
 		"microserviceStatus":        microserviceStatusJSON,
 		"repositoryCount":           len(processManagerStatus.GetRegistriesStatus()),
@@ -394,7 +400,19 @@ func (fa *FieldAgent) getFogStatus() map[string]any {
 		"volumeMountLastUpdate":     volumeMountStatus.LastUpdate,
 		"gpsStatus":                 string(gps.GetInstance().GetStatus().GetHealthStatus()), // Get from GpsManager
 		"availableRuntimes":         controllerRuntimes,
+		"runtimeClasses":            statusreporter.GetAppliedRuntimeClasses(),
+		"availableCdiDevices":       statusreporter.GetAvailableCDIDevices(),
 	}
+
+	modelStatus, activeModels, modelLastUpdate := fa.fogModelStatus()
+	status["modelStatus"] = modelStatus
+	status["activeModels"] = activeModels
+	status["modelLastUpdate"] = modelLastUpdate
+
+	knowledgeStatus, activeKnowledge, knowledgeLastUpdate := fa.fogKnowledgeStatus()
+	status["knowledgeStatus"] = knowledgeStatus
+	status["activeKnowledge"] = activeKnowledge
+	status["knowledgeLastUpdate"] = knowledgeLastUpdate
 
 	if phase := runtimestate.GetState().AgentPhase(); phase != "" {
 		status["runtimeAgentPhase"] = phase

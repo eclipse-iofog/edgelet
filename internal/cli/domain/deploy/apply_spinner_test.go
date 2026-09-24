@@ -9,6 +9,8 @@ func TestApplySpinnerMessage(t *testing.T) {
 	}{
 		{TargetControlPlane, "Applying control plane manifest..."},
 		{TargetRegistries, "Applying registry manifest..."},
+		{TargetModels, "Applying model manifest..."},
+		{TargetKnowledge, "Applying knowledge manifest..."},
 		{TargetMicroservices, "Applying manifest..."},
 	}
 	for _, tt := range tests {

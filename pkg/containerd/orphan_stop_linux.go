@@ -7,14 +7,60 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/eclipse-iofog/edgelet/internal/constants"
 )
 
 const orphanStopGrace = 5 * time.Second
 
+// liveContainerdChildPID is the child started by the data-plane service.
+// Orphan reap and volume force-kill must not signal it.
+var liveContainerdChildPID atomic.Int64
+
+func setLiveContainerdChildPID(pid int) {
+	if pid <= 0 {
+		return
+	}
+	liveContainerdChildPID.Store(int64(pid))
+}
+
+func clearLiveContainerdChildPID(pid int) {
+	if pid <= 0 {
+		return
+	}
+	liveContainerdChildPID.CompareAndSwap(int64(pid), 0)
+}
+
+func currentLiveContainerdChildPID() int {
+	return int(liveContainerdChildPID.Load())
+}
+
+// IsDataPlaneProtectedPID reports processes force-kill must leave alone: the
+// data-plane parent, the live containerd child, and shims still attached to
+// the edgelet containerd socket.
+func IsDataPlaneProtectedPID(pid int) bool {
+	if pid <= 1 || pid == os.Getpid() {
+		return true
+	}
+	if pid == currentLiveContainerdChildPID() {
+		return true
+	}
+	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	if managedShimCmdlineMatch(cmdline, constants.EdgeletContainerdSocket) {
+		return true
+	}
+	text := strings.ReplaceAll(string(cmdline), "\x00", " ")
+	return strings.Contains(text, "runtime-bootstrap") && !strings.Contains(text, containerdChildArg)
+}
+
 func stopOrphanedEmbeddedContainerdFromProc() error {
-	pids, err := findContainerdChildPIDs()
+	pids, err := orphanContainerdChildPIDs()
 	if err != nil {
 		return err
 	}
@@ -26,7 +72,7 @@ func stopOrphanedEmbeddedContainerdFromProc() error {
 	}
 	deadline := time.Now().Add(orphanStopGrace)
 	for time.Now().Before(deadline) {
-		remaining, err := findContainerdChildPIDs()
+		remaining, err := orphanContainerdChildPIDs()
 		if err != nil {
 			return err
 		}
@@ -39,6 +85,25 @@ func stopOrphanedEmbeddedContainerdFromProc() error {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 	return nil
+}
+
+func orphanContainerdChildPIDs() ([]int, error) {
+	pids, err := findContainerdChildPIDs()
+	if err != nil {
+		return nil, err
+	}
+	live := currentLiveContainerdChildPID()
+	if live <= 0 || len(pids) == 0 {
+		return pids, nil
+	}
+	out := make([]int, 0, len(pids))
+	for _, pid := range pids {
+		if pid == live {
+			continue
+		}
+		out = append(out, pid)
+	}
+	return out, nil
 }
 
 func findContainerdChildPIDs() ([]int, error) {

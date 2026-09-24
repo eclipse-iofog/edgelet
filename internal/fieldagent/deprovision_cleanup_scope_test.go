@@ -158,15 +158,11 @@ func TestClearLiteRuntimeArtifactsOnDeprovision_LocalScopeSkipsPrune(t *testing.
 	GetInstance().config.ContainerEngine = constants.EngineDocker
 
 	containersCalled := false
-	volumesCalled := false
 	GetInstance().clearLiteRuntimeArtifactsOnDeprovision(true, func() error {
 		containersCalled = true
 		return nil
-	}, func() error {
-		volumesCalled = true
-		return nil
 	})
-	if containersCalled || volumesCalled {
+	if containersCalled {
 		t.Fatal("expected prune steps to be skipped for preserveLocal=true")
 	}
 }
@@ -178,15 +174,11 @@ func TestClearLiteRuntimeArtifactsOnDeprovision_EmbeddedEdgeletEngineSkipsPrune(
 	GetInstance().config.ContainerEngine = constants.EngineEdgelet
 
 	containersCalled := false
-	volumesCalled := false
 	GetInstance().clearLiteRuntimeArtifactsOnDeprovision(false, func() error {
 		containersCalled = true
 		return nil
-	}, func() error {
-		volumesCalled = true
-		return nil
 	})
-	if containersCalled || volumesCalled {
+	if containersCalled {
 		t.Fatal("expected prune steps to be skipped for embedded edgelet engine")
 	}
 }
@@ -201,7 +193,7 @@ func TestClearLiteRuntimeArtifactsOnDeprovision_ExternalEngineOnLinuxStillPrunes
 	GetInstance().clearLiteRuntimeArtifactsOnDeprovision(false, func() error {
 		containersCalled = true
 		return nil
-	}, nil)
+	})
 	if !containersCalled {
 		t.Fatal("expected container prune for docker engine on embedded-capable platform")
 	}
@@ -217,27 +209,24 @@ func TestClearLiteRuntimeArtifactsOnDeprovision_OnlyDockerPodmanEngines(t *testi
 	GetInstance().clearLiteRuntimeArtifactsOnDeprovision(false, func() error {
 		called = true
 		return nil
-	}, nil)
+	})
 	if called {
 		t.Fatal("expected prune steps skipped for non-docker/podman engine")
 	}
 }
 
-func TestClearLiteRuntimeArtifactsOnDeprovision_OrderAndResilience(t *testing.T) {
+func TestClearLiteRuntimeArtifactsOnDeprovision_DoesNotPruneVolumes(t *testing.T) {
 	embedded := true
 	buildmeta.SetHasEmbeddedEngineForTest(&embedded)
 	t.Cleanup(func() { buildmeta.SetHasEmbeddedEngineForTest(nil) })
 	GetInstance().config.ContainerEngine = constants.EnginePodman
 
-	order := make([]string, 0, 2)
+	order := make([]string, 0, 1)
 	GetInstance().clearLiteRuntimeArtifactsOnDeprovision(false, func() error {
 		order = append(order, "containers")
 		return errors.New("container prune failed")
-	}, func() error {
-		order = append(order, "volumes")
-		return nil
 	})
-	if len(order) != 2 || order[0] != "containers" || order[1] != "volumes" {
-		t.Fatalf("expected prune order containers->volumes, got %v", order)
+	if len(order) != 1 || order[0] != "containers" {
+		t.Fatalf("expected only container prune on deprovision, got %v", order)
 	}
 }

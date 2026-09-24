@@ -40,3 +40,14 @@ func TestShouldForceRecreateFromStatus_NonTerminalReason(t *testing.T) {
 		t.Fatalf("did not expect force recreate for reason=%q code=%d", reason, code)
 	}
 }
+
+func TestShouldForceRecreateFromStatus_DockerInspectText(t *testing.T) {
+	msg := "exitCode=1 oomKilled=false error=config missing"
+	status := models.NewMicroserviceStatusWithState(models.MicroserviceStateExiting)
+	status.ErrorMessage = &msg
+
+	force, reason, code := shouldForceRecreateFromStatus(status)
+	if force {
+		t.Fatalf("docker inspect text must not force CRI recreate, reason=%q code=%d", reason, code)
+	}
+}

@@ -68,7 +68,7 @@ For **docker** or **podman**, systemd installs a drop-in `After=docker.service` 
 |------|------|
 | `/var/lib/edgelet/data/<hash>/` | Content-addressed fat bundle extract |
 | `data/current` | Symlink to active hash |
-| `data/previous` | Last `current` before rotation (manual / coordinated rollback) |
+| `data/previous` | Last `current` before rotation (manual / coordinated rollback). Older hash directories are pruned after a successful extract |
 
 Operator CLI (`edgelet ms`, `edgelet deploy`, …) runs in the **thin** process and does not trigger extract.
 
@@ -83,8 +83,8 @@ profiles:
   production:
     containerEngine: edgelet   # linux default
     containerEngineUrl: unix:///run/edgelet/containerd.sock
-    pruningFrequency: 24       # hours between image prune cycles
-    watchdogEnabled: true      # orphan container cleanup
+    pruningFrequency: 24       # hours between image + unused-local-model prune cycles (not persistent VOLUME data)
+    watchdogEnabled: true      # orphan container cleanup; also disables local models
     arch: auto
     upgradeScanFrequency: 24   # hours between OTA readiness scans
 ```

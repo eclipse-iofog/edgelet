@@ -11,10 +11,12 @@ import (
 )
 
 type fakeClient struct {
-	running   bool
-	gets      map[string]map[string]any
-	errs      map[string]error
-	applyPoll int
+	running    bool
+	gets       map[string]map[string]any
+	errs       map[string]error
+	applyPoll  int
+	lastMethod string
+	lastPath   string
 }
 
 func (f *fakeClient) IsDaemonRunning() bool {
@@ -22,6 +24,8 @@ func (f *fakeClient) IsDaemonRunning() bool {
 }
 
 func (f *fakeClient) Request(method, path string, _ any) (map[string]any, error) {
+	f.lastMethod = method
+	f.lastPath = path
 	key := method + " " + path
 	if strings.Contains(path, ":apply/op-1") {
 		f.applyPoll++
@@ -50,6 +54,28 @@ func (f *fakeClient) Request(method, path string, _ any) (map[string]any, error)
 			"engine":        "edgelet",
 			"platform":      "linux/amd64",
 			"operationId":   "pull-1",
+		}, nil
+	}
+	if method == "POST" && path == "/v1/models:pull" {
+		return map[string]any{"status": "running", "operationId": "model-pull-1", "name": "llama-2-7b-q2k"}, nil
+	}
+	if method == "GET" && strings.HasPrefix(path, "/v1/models:pull/") {
+		return map[string]any{
+			"status":      "succeeded",
+			"name":        "llama-2-7b-q2k",
+			"operationId": "model-pull-1",
+			"progress":    100,
+		}, nil
+	}
+	if method == "POST" && path == "/v1/knowledge:pull" {
+		return map[string]any{"status": "running", "operationId": "knowledge-pull-1", "name": "product-docs"}, nil
+	}
+	if method == "GET" && strings.HasPrefix(path, "/v1/knowledge:pull/") {
+		return map[string]any{
+			"status":      "succeeded",
+			"name":        "product-docs",
+			"operationId": "knowledge-pull-1",
+			"progress":    100,
 		}, nil
 	}
 	return map[string]any{}, nil

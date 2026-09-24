@@ -1,15 +1,17 @@
 package processmanager
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/controlplane"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/store"
+	"github.com/eclipse-iofog/edgelet/internal/volumereclaim"
 	"github.com/eclipse-iofog/edgelet/pkg/engine"
 )
 
@@ -126,7 +128,6 @@ func (pm *ProcessManager) RestartControlPlaneDeployment(item *models.ControlPlan
 
 	item.RuntimeState = "running"
 	item.State = item.RuntimeState
-	item.LastError = ""
 	item.LastTransitionAt = nowSec
 	if err := store.GetInstance().UpsertSystemControlPlane(item); err != nil {
 		return err
@@ -163,19 +164,38 @@ func (pm *ProcessManager) DeleteControlPlane() error {
 
 	pm.removeControlPlaneDNS(item.ControllerUUID)
 
-	pm.removeControlPlaneVolumes()
+	pm.removeControlPlaneVolumes(item.ControllerUUID)
 
 	return store.GetInstance().DeleteSystemControlPlane()
 }
 
-func (pm *ProcessManager) removeControlPlaneVolumes() {
-	if pm.engine == nil {
+func (pm *ProcessManager) removeControlPlaneVolumes(uuid string) {
+	uuid = strings.TrimSpace(uuid)
+	if uuid == "" {
 		return
 	}
-	ctx := context.Background()
+	db := store.GetInstance()
+	disk := ""
+	if db != nil {
+		disk = strings.TrimSpace(db.DiskDirectory())
+	}
+	if disk == "" {
+		if cfg := config.GetInstance(); cfg != nil {
+			disk = strings.TrimSpace(cfg.DiskDirectory)
+		}
+	}
+	if disk == "" {
+		return
+	}
+	r := volumereclaim.New(db, disk)
+	if err := r.DeleteControlPlane(uuid); err != nil {
+		pm.logger.Warnf("control plane volume cleanup failed uuid=%s err=%v", uuid, err)
+		return
+	}
 	for _, name := range []string{controlplane.VolumeDBName, controlplane.VolumeLogName} {
-		if err := pm.engine.RemoveNamedVolume(ctx, name); err != nil {
-			pm.logger.Warnf("control plane volume cleanup failed name=%s err=%v", name, err)
+		path := store.PersistentVolumeHostPath(disk, uuid, name, models.VolumeScopePrivate)
+		if err := os.RemoveAll(path); err != nil {
+			pm.logger.Warnf("control plane volume path cleanup failed path=%s err=%v", path, err)
 		}
 	}
 }

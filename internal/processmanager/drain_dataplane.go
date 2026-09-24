@@ -34,6 +34,7 @@ func (pm *ProcessManager) ensureContainerManagerForDrain() {
 		return
 	}
 	pm.containerManager = NewContainerManager(pm.engine, pm.microserviceManager, pm.engineName)
+	pm.containerManager.catalogDiskDirectory = pm.catalogDiskDirectory
 }
 
 func (pm *ProcessManager) teardownRuntimeWorkloadForDataPlaneShutdown(initialRuntimeIDs []string, timeout time.Duration) error {

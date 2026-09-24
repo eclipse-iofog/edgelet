@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
@@ -125,6 +126,28 @@ func TestFacadePullImage_ResolvesRegistryHostWithRegistryID(t *testing.T) {
 	}
 	if !strings.HasPrefix(resolved, "quay.io/") {
 		t.Fatalf("expected resolved image ref with quay.io host, got: %q (err=%v)", resolved, err)
+	}
+}
+
+func TestFacadePullImage_RejectsNonOCIRegistry(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	hf := models.NewRegistryBuilder().
+		SetID(5).
+		SetURL("https://huggingface.co").
+		SetType(models.RegistryTypeHF).
+		SetPassword("hf_token").
+		Build()
+	if err := f.db.UpsertLocalRegistry(hf); err != nil {
+		t.Fatalf("failed to upsert hf registry: %v", err)
+	}
+	registryID := 5
+	_, err := f.PullImage("org/weights:latest", &registryID, "")
+	if err == nil || !strings.Contains(err.Error(), "type") || !strings.Contains(err.Error(), "oci") {
+		t.Fatalf("expected oci type requirement error, got: %v", err)
 	}
 }
 
@@ -497,6 +520,125 @@ func TestFacadeApplyLocalManifest_IdempotentPatchReusesUUID(t *testing.T) {
 	}
 }
 
+func TestFacadeApplyLocalManifest_RejectsManagedCatalogName(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	row := &models.LocalModel{
+		Name:       "fleet-model",
+		Source:     models.ModelSourceManaged,
+		Repo:       "org/model",
+		RegistryID: 1,
+		State:      models.ModelStateReady,
+	}
+	if err := f.db.UpsertLocalModel(row); err != nil {
+		t.Fatalf("seed managed model: %v", err)
+	}
+	manifest := strings.TrimSpace(`
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: infer
+spec:
+  image: nginx:latest
+  models:
+    bindPath: /models
+    items:
+      - name: fleet-model
+`) + "\n"
+	_, _, err := f.ApplyLocalManifest(manifest, "cli", true, nil)
+	if err == nil {
+		t.Fatal("expected catalog source error")
+	}
+	if !strings.Contains(err.Error(), "managed") && !strings.Contains(err.Error(), "local") {
+		t.Fatalf("expected local-only bind error, got %v", err)
+	}
+}
+
+func TestFacadeApplyLocalManifest_CatalogItemChangeKeepsContainer(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	for _, name := range []string{"test-model", "qwen3-8-27b"} {
+		row := &models.LocalModel{
+			Name:        name,
+			Source:      models.ModelSourceLocal,
+			Repo:        "org/" + name,
+			RegistryID:  1,
+			State:       models.ModelStateReady,
+			ContentPath: t.TempDir(),
+		}
+		if err := f.db.UpsertLocalModel(row); err != nil {
+			t.Fatalf("seed model %s: %v", name, err)
+		}
+	}
+	existingYAML := strings.TrimSpace(`
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: router
+spec:
+  image: nginx:latest
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: test-model
+`) + "\n"
+	existing := &models.LocalDeployedMicroservice{
+		LocalUUID:          "local-keep-1",
+		ApplicationName:    "edgelet",
+		MicroserviceName:   "router",
+		SourceName:         "local-cli",
+		ManifestYAML:       existingYAML,
+		ImageName:          "nginx:latest",
+		ContainerID:        "ctr-keep-1",
+		State:              "running",
+		DesiredState:       "running",
+		RuntimeState:       "running",
+		Generation:         1,
+		ObservedGeneration: 1,
+	}
+	if err := f.db.UpsertLocalWorkload(existing); err != nil {
+		t.Fatalf("seed local workload: %v", err)
+	}
+	nextYAML := strings.TrimSpace(`
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: router
+spec:
+  image: nginx:latest
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: test-model
+      - name: qwen3-8-27b
+`) + "\n"
+	id, _, err := f.ApplyLocalManifest(nextYAML, "cli", false, nil)
+	if err != nil {
+		t.Fatalf("expected in-place catalog update, got: %v", err)
+	}
+	if id != "local-keep-1" {
+		t.Fatalf("expected reused uuid, got %q", id)
+	}
+	got, err := f.db.GetLocalWorkload("local-keep-1")
+	if err != nil {
+		t.Fatalf("load workload: %v", err)
+	}
+	if got.ContainerID != "ctr-keep-1" {
+		t.Fatalf("container must be kept, got %q", got.ContainerID)
+	}
+	if got.RuntimeState != "running" {
+		t.Fatalf("expected running, got %q", got.RuntimeState)
+	}
+}
+
 func TestFacadeStartRuntimeMicroservice_LocalPersistsDesiredState(t *testing.T) {
 	f := NewFacade()
 	if err := f.db.Open(t.TempDir()); err != nil {
@@ -579,7 +721,7 @@ func TestFacadeStopRuntimeMicroservice_LocalPersistsDesiredState(t *testing.T) {
 
 func TestFacadeDeprovision_RejectsInvalidScope(t *testing.T) {
 	f := NewFacade()
-	err := f.Deprovision("bad")
+	err := f.Deprovision("bad", false)
 	if err == nil {
 		t.Fatal("expected invalid scope error")
 	}
@@ -627,6 +769,23 @@ func TestFacadePrune_AllModeReturnsPartialOnStepFailures(t *testing.T) {
 	}
 	if len(rawErrors) == 0 {
 		t.Fatal("expected partial error details, got none")
+	}
+	if _, ok := result["modelsRemoved"]; !ok {
+		t.Fatalf("expected unused local model prune in all mode, got %#v", result)
+	}
+	if _, ok := result["knowledgeRemoved"]; ok {
+		t.Fatalf("system prune must not delete knowledge, got %#v", result)
+	}
+	if fmt.Sprintf("%v", result["volumesDeletedCount"]) != "0" {
+		t.Fatalf("expected no persistent VOLUME destroy, got %#v", result)
+	}
+}
+
+func TestFacadePrune_VolumesModeRefusesPersistentData(t *testing.T) {
+	f := NewFacade()
+	_, err := f.Prune("volumes")
+	if err == nil || !errors.Is(err, ErrSystemPruneVolumes) {
+		t.Fatalf("expected volumes mode refusal, got %v", err)
 	}
 }
 
@@ -786,5 +945,146 @@ func TestNormalizeRuntimeClassOperationStage(t *testing.T) {
 		if got := NormalizeRuntimeClassOperationStage(input); got != expected {
 			t.Fatalf("NormalizeRuntimeClassOperationStage(%q) = %q, expected %q", input, got, expected)
 		}
+	}
+}
+
+func TestRemoveRuntimeMicroservice_LocalRowGoneAndIdempotent(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-rm-1",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "rm-target",
+		SourceName:       "local-cli",
+		ManifestYAML:     "kind: Microservice",
+		ImageName:        "nginx:latest",
+		DesiredState:     "running",
+		RuntimeState:     "running",
+		State:            "running",
+	}
+	if err := f.db.UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := f.RemoveRuntimeMicroservice("local-rm-1"); err != nil {
+		t.Fatalf("first rm: %v", err)
+	}
+	got, err := f.db.GetLocalWorkload("local-rm-1")
+	if err == nil && got != nil {
+		t.Fatalf("expected local row deleted after rm, got %+v", got)
+	}
+	if _, err := f.RemoveRuntimeMicroservice("local-rm-1"); err != nil {
+		t.Fatalf("second rm should be idempotent, got: %v", err)
+	}
+}
+
+func TestListRuntimeMicroservices_HidesLocalTombstone(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = f.db.Close()
+		f.sr.ResetProcessManagerStatus()
+	})
+	f.fa.Clear()
+	deletedAtSec := time.Now().Unix()
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "local-tombstone",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "gone",
+		SourceName:       "local-cli",
+		ManifestYAML:     "kind: Microservice",
+		ImageName:        "nginx:latest",
+		DesiredState:     "deleted",
+		RuntimeState:     "deleted",
+		State:            "deleted",
+		DeletedAt:        &deletedAtSec,
+	}
+	if err := f.db.UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	items := f.ListRuntimeMicroservices()
+	for _, entry := range items {
+		if entry["uuid"] == "local-tombstone" {
+			t.Fatalf("expected tombstone hidden from ms ls, got %#v", items)
+		}
+	}
+}
+
+func TestApplyLocalManifest_SkipsGoneTombstoneAndAllocatesNewUUID(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	deletedAtSec := time.Now().Unix()
+	tombstone := &models.LocalDeployedMicroservice{
+		LocalUUID:        "old-router-uuid",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "router",
+		SourceName:       "local-cli",
+		ManifestYAML:     testLocalManifestYAML(),
+		ImageName:        "nginx:latest",
+		DesiredState:     "deleted",
+		RuntimeState:     "deleted",
+		State:            "deleted",
+		DeletedAt:        &deletedAtSec,
+	}
+	if err := f.db.UpsertLocalWorkload(tombstone); err != nil {
+		t.Fatalf("upsert tombstone: %v", err)
+	}
+	_, _, applyErr := f.ApplyLocalManifest(testLocalManifestYAML(), "cli", false, nil)
+	if applyErr == nil {
+		t.Fatal("expected runtime failure in unit test")
+	}
+	items, err := f.ListLocalDeployments()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var live *models.LocalDeployedMicroservice
+	for _, item := range items {
+		if item != nil && !item.IsGone() {
+			live = item
+			break
+		}
+	}
+	if live == nil {
+		t.Fatal("expected a new live local row after apply over tombstone")
+	}
+	if live.LocalUUID == "old-router-uuid" {
+		t.Fatal("expected apply to allocate a new uuid instead of patching the tombstone")
+	}
+}
+
+func TestApplyLocalManifest_RejectsDeletingName(t *testing.T) {
+	f := NewFacade()
+	if err := f.db.Open(t.TempDir()); err != nil {
+		t.Fatalf("failed to open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = f.db.Close() })
+	deletedAtSec := time.Now().Unix()
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:        "deleting-router",
+		ApplicationName:  "edgelet",
+		MicroserviceName: "router",
+		SourceName:       "local-cli",
+		ManifestYAML:     testLocalManifestYAML(),
+		ImageName:        "nginx:latest",
+		DesiredState:     "deleted",
+		RuntimeState:     "deleting",
+		State:            "deleting",
+		ContainerID:      "still-here",
+		DeletedAt:        &deletedAtSec,
+	}
+	if err := f.db.UpsertLocalWorkload(item); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	_, _, err := f.ApplyLocalManifest(testLocalManifestYAML(), "cli", true, nil)
+	if err == nil || !strings.Contains(err.Error(), "is deleting") {
+		t.Fatalf("expected deleting name to be rejected, got: %v", err)
 	}
 }

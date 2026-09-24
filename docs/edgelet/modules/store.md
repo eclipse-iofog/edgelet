@@ -25,7 +25,8 @@ Operator backup/wipe guidance: [../persistence.md](../persistence.md). This docu
 | `supervisor` | Opens/closes DB around module lifetime |
 | `fieldagent` | Controller cache, credentials, Edge Guard |
 | `processmanager` | Local workloads, runtime refs, control plane row |
-| `runtimeapi` / EdgeletAPI | Deploy apply, auth tokens, provision |
+| `runtimeapi` / EdgeletAPI | Deploy apply, auth tokens, provision, models |
+| `modelmanager` | Local model rows and prune refs |
 | `edgeguard` | Attestation signature row |
 | `serviceaccount` | Projected token persistence |
 
@@ -47,7 +48,7 @@ Operator backup/wipe guidance: [../persistence.md](../persistence.md). This docu
 
 ## Schema v1
 
-Current migration: `migrations/001_edgelet_schema_v1.sql`. `schema_versions` tracks applied version; **wipe-only** upgrades from pre-v1 agents — no in-place legacy migration.
+Baseline migration: `migrations/001_edgelet_schema_v1.sql`. `schema_versions` tracks applied version; **wipe-only** upgrades from pre-v1 agents — no in-place legacy migration.
 
 ### Controller cache (Field Agent writers)
 
@@ -70,7 +71,7 @@ Current migration: `migrations/001_edgelet_schema_v1.sql`. `schema_versions` tra
 |-------|---------|
 | `local_workloads` | CLI/applied Microservice manifests |
 | `local_registries` | Local registry credentials |
-| `local_runtime_classes` | RuntimeClass handler map |
+| `local_runtime_classes` | Applied RuntimeClass handler map (`source` `local` \| `managed`) |
 | `system_control_plane` | Singleton ControlPlane deployment |
 | `local_service_account_tokens` | Issued SA JWT metadata |
 
@@ -79,6 +80,45 @@ Current migration: `migrations/001_edgelet_schema_v1.sql`. `schema_versions` tra
 | Table | Purpose |
 |-------|---------|
 | `runtime_container_refs` | Maps MS UUID + scope → containerd workload/sandbox IDs |
+
+## Schema v2
+
+In-place migration `migrations/002_edgelet_schema_v2.sql` (v1 → v2). No wipe.
+
+| Table / column | Purpose |
+|----------------|---------|
+| `local_registries.type`, `ca_b64`, `insecure` | Registry kind (`oci` \| `hf`) and TLS |
+| `controller_registries.type`, `ca_b64`, `insecure` | Same on controller snapshot |
+| `local_models` | Local Model deploy + pull state |
+| `controller_models` | Controller model snapshot |
+| `controller_runtime_classes` | Fleet RuntimeClass snapshot (`name` PK + `handler`, replace-all) |
+| `local_runtime_classes.source` | Applied class provenance `local` \| `managed` |
+| `model_refs` | Keep-alive refs for dangling prune |
+
+Operator backup of `{diskDirectory}/models/`: [../persistence.md](../persistence.md), [../models.md](../models.md).
+
+## Schema v3
+
+In-place migration `migrations/003_edgelet_schema_v3.sql` (v2 → v3). No wipe.
+
+| Table / column | Purpose |
+|----------------|---------|
+| `persistent_volumes` | Ownership ledger for persistent `VOLUME` claims (`scope` `private` \| `shared`, `kind` `workload` \| `controlplane`). Local and controller consumers share this table. |
+
+Operator backup of `{diskDirectory}/volumes/data/` and `{diskDirectory}/volumes/shared/`: [../persistence.md](../persistence.md), [../volumes.md](../volumes.md).
+
+## Schema v4
+
+In-place migration `migrations/004_edgelet_schema_v4.sql` (v3 → v4). No wipe.
+
+| Table / column | Purpose |
+|----------------|---------|
+| `local_knowledge` | Local Knowledge deploy + pull state (`source` `local` \| `managed`) |
+| `controller_knowledge` | Controller Knowledge snapshot (`uuid` PK, unique `name`) |
+| `knowledge_refs` | Keep-alive refs for dangling prune |
+| `controller_microservices.knowledge` | Catalog JSON (`bindPath`, `permissions`, `items[].name`) |
+
+Operator backup of `{diskDirectory}/knowledge/`: [../persistence.md](../persistence.md), [../knowledge.md](../knowledge.md).
 
 ## Access patterns
 
@@ -89,9 +129,16 @@ Store exposes methods on `*DB` split by domain file:
 | `microservices.go` | Save/load/clear controller microservices |
 | `registries.go` | Controller registries |
 | `volumes.go` | Volume mount upsert/replace |
+| `persistent_volumes.go` | Persistent VOLUME ledger |
 | `local_deployed_microservices.go` | Local workload CRUD |
 | `local_registries.go` | Local registry CRUD |
-| `local_runtime_classes.go` | RuntimeClass CRUD |
+| `local_models.go` | Local model CRUD |
+| `local_knowledge.go` | Local Knowledge CRUD |
+| `controller_models.go` | Controller model rows |
+| `controller_knowledge.go` | Controller Knowledge rows |
+| `knowledge_refs.go` | Knowledge catalog bind refs |
+| `controller_runtime_classes.go` | Fleet RuntimeClass replace-all |
+| `local_runtime_classes.go` | Applied RuntimeClass CRUD |
 | `control_plane_deployments.go` | ControlPlane singleton |
 | `service_account_tokens.go` | SA token upsert/revoke/list |
 | `edgeguard_credentials.go` | Edge Guard signature |
@@ -132,7 +179,7 @@ Restore procedure: [../persistence.md](../persistence.md).
 |------|------|
 | `db.go` | Singleton, open/close, integrity |
 | `schema.go` | Migration runner |
-| `migrations/*.sql` | Embedded DDL |
-| `*_test.go`, `schema_v1_contract_test.go` | Contract tests |
+| `migrations/*.sql` | Embedded DDL (v1, v2, v3) |
+| `*_test.go`, `schema_v1_contract_test.go`, `schema_v2_test.go`, `persistent_volumes_test.go` | Contract tests |
 
 Related: [fieldagent.md](fieldagent.md), [processmanager.md](processmanager.md), [edgeletapi.md](edgeletapi.md).

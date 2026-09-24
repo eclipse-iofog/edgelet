@@ -9,25 +9,36 @@ Route: `GET /v1/system/status`
 | Field | Type | Description |
 |-------|------|-------------|
 | `connectionToController` | string | Controller connectivity summary |
-| `agentCpuPercent` | number | Control-plane CPU percent |
-| `agentMemoryMiB` | number | Control-plane RSS in MiB |
-| `runtimeCpuPercent` | number | Embedded containerd child CPU (embedded engine only) |
-| `runtimeMemoryMiB` | number | Embedded containerd child RSS in MiB |
+| `agentCpu` | number | Control-plane CPU in **cores** (float) |
+| `agentMemory` | number | Control-plane RSS in **bytes** |
+| `runtimeCpu` | number | Embedded containerd child CPU in **cores** (embedded engine only) |
+| `runtimeMemory` | number | Embedded containerd child RSS in **bytes** |
 | `runtimeAvailable` | boolean | Embedded runtime process present |
 | `runtimeDegraded` | boolean | Embedded engine configured but runtime child missing |
-| `edgeletTotalCpuPercent` | number | Edgelet stack CPU total |
-| `edgeletTotalMemoryMiB` | number | Edgelet stack memory total in MiB |
-| `cpuUsage` | number | Edgelet stack CPU total (controller alias) |
+| `runtimeTracked` | boolean | Embedded runtime metrics are tracked |
+| `edgeletStackCpu` | number | Edgelet stack CPU total in **cores** |
+| `edgeletStackMemory` | number | Edgelet stack memory total in **bytes** |
+| `cpuUsage` | number | Controller alias: stack CPU **per-core scale** (`100` = one logical CPU) |
 | `edgeletDaemon` | string | Daemon lifecycle state (e.g. `running`) |
-| `memoryUsage` | number | Edgelet stack memory total in MiB (controller alias) |
-| `diskUsage` | string | Optional disk summary |
+| `memoryUsage` | number | Controller alias: stack memory in **MiB** |
+| `diskUsage` | number | Edgelet data usage under `diskDirectory` in **GiB** |
 | `runningMicroservices` | number | Optional running MS count |
-| `systemAvailableDisk` | string | Optional free disk |
-| `systemAvailableMemory` | string | Optional free memory |
+| `systemCpus` | number | Logical CPU count |
+| `systemOs` | string | Host OS family (`linux`, `darwin`, `windows`, …) |
+| `systemOsVersion` | string | Distro/release display (`PRETTY_NAME` on Linux when available; may be empty) |
+| `systemKernelVersion` | string | Linux kernel version; `""` on non-Linux |
+| `systemTotalMemory` | number | Host RAM capacity (bytes) |
+| `systemTotalDisk` | number | `diskDirectory` filesystem size (bytes) |
+| `systemAvailableDisk` | number | Free space on that filesystem (bytes) |
+| `systemAvailableMemory` | number | Host available RAM (bytes) |
 | `systemTime` | string | Optional agent time |
-| `systemTotalCpu` | string | Host CPU usage percent |
+| `systemTotalCpu` | number | Host CPU usage 0–100% (not core count) |
 | `availableNetworkInterfaces` | string | Comma-separated interfaces |
-| `availableRuntimes` | string | Comma-separated runtime handlers |
+| `availableRuntimes` | string or string[] | Discovered runtime handler names |
+| `runtimeClasses` | object[] | Applied classes `{ name, handler, source }` (`local` \| `managed`), sorted by name. Empty on docker/podman |
+| `availableCdiDevices` | string[] | Unique sorted fully-qualified CDI names. Empty on docker/podman/desktop |
+
+Human **`edgelet system status`** (no `-o json`) formats stack and host memory/disk with **GiB/MiB**, stack CPU with **cores**, and hides duplicate **`cpuUsage`** / **`memoryUsage`** when stack totals are present.
 
 Golden fixture (minimal subset):
 
@@ -56,6 +67,7 @@ Each `items[]` element:
 | `name` | string | Microservice name |
 | `state` | string | Runtime state |
 | `containerId` | string | Container identifier |
+| `podId` | string | Pause/sandbox id on the edgelet engine; same as `containerId` on docker/podman; omitted when unknown |
 | `image` | string | Image reference |
 | `type` | string | Source/type label |
 
@@ -76,33 +88,6 @@ Combined CLI + daemon payload:
 
 ## `edgelet deploy -f FILE -o json`
 
-Apply response includes async poll metadata:
+Route: `POST /v1/deploy`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | Terminal or in-progress status |
-| `deploymentId` | string | Deployment identifier on success |
-| `operationId` | string | Async operation id when polling |
-| `stage` | string | Latest apply stage |
-| `stages` | array | Observed stage sequence (CLI augmentation) |
-
-Dry-run (`--dry-run`) returns validate payload:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `valid` | boolean | Manifest validity |
-| `kind` | string | Detected manifest kind |
-| `name` | string | Manifest name |
-| `apiVersion` | string | Manifest apiVersion |
-
-## Streaming commands (no JSON)
-
-These reject or ignore `-o json|yaml`:
-
-- `edgelet ms logs --follow`
-- `edgelet ms exec`
-- `edgelet system logs --follow`
-
-## Error shape (stderr, human)
-
-Human mode prints `Error[CODE]: message` on stderr. There is no structured error JSON on stdout today; non-zero exit codes follow [README.md](README.md#exit-codes).
+Returns the deploy result object from the daemon (status, applied resources, errors).

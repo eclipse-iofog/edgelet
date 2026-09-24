@@ -38,7 +38,7 @@ flowchart LR
   thin -->|"edgelet daemon\n(docker/podman)"| ext["external engine\n(no extract)"]
 ```
 
-**Lazy extract:** On first `edgelet daemon` with `containerEngine: edgelet` after the thin binary is replaced (upgrade), the new embed hash unpacks to `/var/lib/edgelet/data/<hash>/`, verifies `bin/edgelet` (fat) and auxiliaries, then rotates `data/current` and `data/previous` symlinks.
+**Lazy extract:** On first `edgelet daemon` with `containerEngine: edgelet` after the thin binary is replaced (upgrade), the new embed hash unpacks to `/var/lib/edgelet/data/<hash>/`, verifies `bin/edgelet` (fat) and auxiliaries, then rotates `data/current` and `data/previous` symlinks. After a successful extract, hash directories other than `current`, `previous`, and the running fat binary’s tree are removed.
 
 **External engines:** When `containerEngine` is `docker` or `podman`, the thin daemon does **not** extract the bundle; it connects to the host engine socket with boot-time retries.
 
@@ -59,6 +59,8 @@ flowchart LR
 │   ├── config/               # YAML config load/save, SIGHUP reload
 │   ├── edgeletapi/           # EdgeletAPI HTTP/WebSocket server (:54321)
 │   ├── fieldagent/           # Controller communication and sync
+│   ├── modelmanager/         # Model artifact reconcile, async pull, prune
+│   ├── modelpull/            # OCI + Hugging Face adapters and on-disk store
 │   ├── processmanager/       # Container reconciliation loop
 │   ├── statusreporter/       # Status aggregation
 │   ├── store/                # SQLite persistence
@@ -134,7 +136,7 @@ Route groups include `/v1/system/*`, `/v1/ms/*`, `/v1/deploy/*`, `/v1/auth/*`, a
 
 The **Field Agent** talks to the remote ioFog Controller over HTTPS. Controller REST paths remain under `/api/v3/...` (Pot-compatible). This is separate from EdgeletAPI `/v1/...` on localhost.
 
-The field agent polls for configuration changes, loads microservices/registries/volume mounts into SQLite, and posts aggregated status back to the controller.
+The field agent polls for configuration changes, loads microservices, registries, volume mounts, models, and RuntimeClasses into SQLite, and posts aggregated status back to the controller. Host hardware/USB inventory posting has been removed.
 
 ---
 
@@ -164,15 +166,15 @@ Agent DNS name: `edgelet.default.svc.bridge.local`.
 | `/etc/edgelet/config.yaml` | Active configuration |
 | `/etc/edgelet/edgelet-api` | EdgeletAPI CLI bearer token (auto-created) |
 | `/etc/edgelet/edgeletapi-*.crt/key` | EdgeletAPI TLS PKI |
-| `/var/lib/edgelet/` | User data, volume mounts, SQLite |
-| `/var/lib/edgelet/data/<hash>/` | Extracted zstd bundle (fat `bin/edgelet`, shim, crun, CNI, pause image) |
+| `/var/lib/edgelet/` | User data, volume mounts, SQLite, persistent `VOLUME` trees (`volumes/data/`, `volumes/shared/`) |
+| `/var/lib/edgelet/data/<hash>/` | Extracted zstd bundle (fat `bin/edgelet`, shim, crun, CNI, pause image). Only `current` and `previous` trees are kept after a successful extract |
 | `/var/lib/edgelet/data/current` | Symlink → active `<hash>/` directory |
 | `/var/lib/edgelet/data/previous` | Symlink → prior bundle (rollback reference) |
 | `/var/lib/edgelet-containerd/` | Containerd state (edgelet engine) |
 | `/var/run/edgelet/` | Runtime sockets and PID files |
 | `/var/log/edgelet/` | Rotated daemon logs |
 
-SQLite stores cached microservices, registries, and volume mount records. Schema migrations run idempotently on startup.
+SQLite stores cached microservices, registries, volume mount records, and the persistent-volume ledger. Schema migrations run idempotently on startup (current schema version **3**).
 
 ---
 

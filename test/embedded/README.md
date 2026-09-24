@@ -89,6 +89,21 @@ Separate from the default v2 embedded matrix. Uses **`iofog-test-v1`** and
 Both embedded suites use **`install.sh` split** install via `test/lima/lib/install-split.sh`.
 See [docs/edgelet/workload-continuity.md](../../docs/edgelet/workload-continuity.md).
 
+## Data-plane drain (fat embed change)
+
+Host checks (docs and `KillMode=process`) do not need a VM:
+
+```bash
+./test/embedded/ota-dataplane-drain.sh --docs
+```
+
+Live checks run inside the embedded Lima VM after `vm-install.sh`. They deploy a private volume workload, restart control while the ready embed hash matches (shim processes stay), then lock that volume and drain through CRI. Pass `--upgrade-bin` when a second thin binary has a different embed hash.
+
+```bash
+./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test
+./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test --upgrade-bin=build/edgelet-linux-arm64
+```
+
 Unified orchestrator:
 
 ```bash
@@ -131,6 +146,10 @@ Output: **`build/edgelet-linux-<arch>`** — unified linux thin binary (CLI + em
 | 6 | CLI: `version`, `info` shows engine=edgelet |
 | 7 | Chaos gates (restart storm + child crash recovery) |
 | 8 | RuntimeClass dual-shim flow (Spin + Edgelet), restart convergence, availableRuntimes, runtime-pinned workloads |
+| 9 | Built-in registries (ids 1–3 immutable); tiny HF pull (`hf-internal-testing/tiny-random-gpt2`); tiny OCI pull (`ai/smollm2` 135m, ~101 MiB) |
+| 10 | Catalog bind (`{bindPath}/{name}/`); unknown-name apply reject; `model rm` refuse while bound; in-place add item; bindPath recreate; container fields (cpus, memory, shm, tmpfs, sysctls, ulimits, devices, runAsGroup, read-only root) |
+| 11 | Persistent `VOLUME` retain: private vs shared vs BIND; restart + `pruningFrequency` + `system prune`; `ms rm` keep; in-use `volume rm` abort; explicit reclaim |
+| 12 | Knowledge HF dataset pull (`hf-internal-testing/dataset_with_data_files`); catalog bind (`{bindPath}/{name}/`); `knowledge rm` refuse while bound; in-place add; bindPath recreate; unknown-name reject; both catalogs Ready; `system prune` leaves Knowledge trees |
 
 ## RuntimeClass dual-shim coverage (Lima arm64)
 

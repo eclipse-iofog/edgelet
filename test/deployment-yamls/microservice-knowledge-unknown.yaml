@@ -1,0 +1,23 @@
+# Negative fixture: catalog item name that is not a local Knowledge.
+# Apply must fail. Requires no matching kind: Knowledge named missing-knowledge.
+#
+#   edgelet deploy -f test/deployment-yamls/microservice-knowledge-unknown.yaml
+
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: knowledge-unknown-test
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  knowledge:
+    bindPath: /knowledge
+    permissions: ro
+    items:
+      - name: missing-knowledge
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50

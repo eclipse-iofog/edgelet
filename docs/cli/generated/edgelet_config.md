@@ -44,9 +44,8 @@ edgelet config [flags]
       --container-engine-url string    runtime socket URL. Alias: --cu
       --controller-cert string         controller CA certificate file path. Alias: --ac
       --controller-url string          controller URL. Alias: --a
-      --cpu-limit-percent float        CPU limit (%). Alias: --p
+      --cpu-limit-percent float        Edgelet stack CPU alarm threshold (5–400; 100 = one logical CPU). Alias: --p
       --dev-mode                       developer mode. Alias: --dev
-      --device-scan-frequency int      device scan frequency (seconds). Alias: --sd
       --disk-directory string          disk directory. Alias: --dl
       --disk-limit-gib float           disk usage limit (GiB). Alias: --d
       --edge-guard-frequency int       edge guard frequency. Alias: --egf

@@ -1,0 +1,23 @@
+# Negative fixture: catalog item name that is not a local model.
+# Apply must fail. Requires no matching kind: Model named missing-model.
+#
+#   edgelet deploy -f test/deployment-yamls/microservice-catalog-unknown.yaml
+
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: catalog-unknown-test
+spec:
+  image: docker.io/library/alpine:3.19
+  registry: 1
+  models:
+    bindPath: /models
+    permissions: ro
+    items:
+      - name: missing-model
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 14000
+  schedule: 50

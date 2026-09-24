@@ -3,6 +3,7 @@ package supervisor
 import (
 	"testing"
 
+	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 )
 
@@ -25,15 +26,21 @@ func TestEnsureDefaultLocalRegistriesOnStartup_SeedsDefaults(t *testing.T) {
 	}
 	foundDockerIO := false
 	foundFromCache := false
+	foundHF := false
 	for _, reg := range registries {
-		if reg.ID == 1 && reg.URL == "docker.io" {
+		if reg.ID == models.BuiltInRegistryDockerIO && reg.URL == "docker.io" {
 			foundDockerIO = true
 		}
-		if reg.ID == 2 && reg.URL == "from_cache" {
+		if reg.ID == models.BuiltInRegistryFromCache && reg.URL == "from_cache" {
 			foundFromCache = true
 		}
+		if reg.ID == models.BuiltInRegistryHuggingFace &&
+			reg.URL == models.DefaultHuggingFaceHubURL &&
+			reg.Type == models.RegistryTypeHF {
+			foundHF = true
+		}
 	}
-	if !foundDockerIO || !foundFromCache {
+	if !foundDockerIO || !foundFromCache || !foundHF {
 		t.Fatalf("expected default local registries to exist, got %+v", registries)
 	}
 }

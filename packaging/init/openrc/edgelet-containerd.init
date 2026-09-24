@@ -70,6 +70,7 @@ stop() {
         fi
     fi
     rm -f "${pidfile}" 2>/dev/null || true
+    # Reap only after a verified data-plane drain (receipt under /run/edgelet).
     /usr/local/bin/edgelet runtime reap-orphans || ewarn "orphan reap exited non-zero"
     eend 0
 }

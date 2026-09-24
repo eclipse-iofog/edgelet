@@ -116,6 +116,8 @@ paths:
       description: >
         Optional scope controls cleanup behavior. Default scope is all.
         scope=local preserves local microservices while deprovisioning from controller.
+        purgeVolumes destroys workload persistent VOLUME data after deprovision. Control-plane
+        volumes are never purged. Shared names stay while any consumer remains. Local API only.
       parameters:
         - in: query
           name: scope
@@ -123,6 +125,12 @@ paths:
           schema:
             type: string
             enum: [all, local]
+        - in: query
+          name: purgeVolumes
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Deprovisioned successfully
@@ -150,6 +158,11 @@ paths:
     post:
       tags: [System]
       summary: Trigger prune operation
+      description: >
+        dangling prunes unused images (and unused local models). containers prunes stopped
+        containers. all prunes containers, dangling images, and unused local models.
+        volumes does not destroy persistent VOLUME data under volumes/data or volumes/shared;
+        use POST /v1/volumes:prune instead.
       parameters:
         - in: query
           name: mode
@@ -161,6 +174,8 @@ paths:
       responses:
         "200":
           description: Prune accepted
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /v1/system/logs:
@@ -353,6 +368,400 @@ paths:
           $ref: "#/components/responses/NotFound"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/models:
+    get:
+      tags: [Models]
+      summary: List local models
+      responses:
+        "200":
+          description: Model list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models/{name}:
+    get:
+      tags: [Models]
+      summary: Inspect a local model
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Model item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelItemResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Models]
+      summary: Remove a local model and on-disk artifacts
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:pull:
+    post:
+      tags: [Models]
+      summary: Pull model artifacts (async)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelPullRequest"
+      responses:
+        "202":
+          description: Pull accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPullOperationStatusResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:pull/{operationId}:
+    get:
+      tags: [Models]
+      summary: Get model pull operation status
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pull operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPullOperationStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/models:prune:
+    post:
+      tags: [Models]
+      summary: Prune dangling models
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum: [dangling]
+            default: dangling
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:
+    get:
+      tags: [Knowledge]
+      summary: List local knowledge
+      responses:
+        "200":
+          description: Knowledge list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge/{name}:
+    get:
+      tags: [Knowledge]
+      summary: Inspect a local knowledge
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Knowledge item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeItemResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Knowledge]
+      summary: Remove a local knowledge and on-disk artifacts
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:pull:
+    post:
+      tags: [Knowledge]
+      summary: Pull knowledge artifacts (async)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgePullRequest"
+      responses:
+        "202":
+          description: Pull accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePullOperationStatusResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:pull/{operationId}:
+    get:
+      tags: [Knowledge]
+      summary: Get knowledge pull operation status
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pull operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePullOperationStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/knowledge:prune:
+    post:
+      tags: [Knowledge]
+      summary: Prune dangling knowledge
+      parameters:
+        - in: query
+          name: mode
+          required: false
+          schema:
+            type: string
+            enum: [dangling]
+            default: dangling
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgePruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes:
+    get:
+      tags: [Volumes]
+      summary: List persistent VOLUME claims
+      description: >
+        One row per claim. Private claims set uuid and have a single consumer.
+        Shared claims set uuid to null and list every local and controller consumer.
+      responses:
+        "200":
+          description: Volume claim list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes/{uuid}:
+    delete:
+      tags: [Volumes]
+      summary: Destroy a private persistent VOLUME
+      description: >
+        Private claims only. Does not delete volumes/shared. Refuses if the UUID is still
+        desired or the path is mounted. force bypasses the desired-state gate when unmounted.
+      parameters:
+        - in: path
+          name: uuid
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: name
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes/shared/{name}:
+    get:
+      tags: [Volumes]
+      summary: Inspect a shared persistent VOLUME claim
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Shared volume claim
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumeClaim"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [Volumes]
+      summary: Destroy a shared persistent VOLUME
+      description: >
+        Shared claims only. Remaining consumers return 409. Mounted paths return 409 even with force.
+        Missing name returns 404.
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Removal result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/volumes:prune:
+    post:
+      tags: [Volumes]
+      summary: List or destroy unreferenced persistent VOLUME claims
+      description: >
+        Defaults to dry-run. Destroy requires yes=true. force bypasses the 24h grace window when
+        unmounted. Control-plane volumes are never pruned.
+      parameters:
+        - in: query
+          name: orphans
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - in: query
+          name: yes
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: force
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: dryRun
+          required: false
+          schema:
+            type: boolean
+            default: true
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumePruneRequest"
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VolumePruneResponse"
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /v1/system/gps:
     get:
       tags: [System]
@@ -651,6 +1060,10 @@ paths:
       description: >
         Selector supports UUID, container ID prefix, or dotted application/name.
         Local microservices can be resolved as edgelet.<name> (for example edgelet.router).
+        Crash fields: errorMessage (current; cleared after 30s continuous RUNNING),
+        lastError / lastErrorAt (last crash; not cleared on recovery; omitted when empty),
+        restartCount (omitted when 0). Docker/Podman text is exitCode=N oomKilled=…;
+        the embedded engine keeps CRI reason=….
       parameters:
         - in: path
           name: id
@@ -671,12 +1084,22 @@ paths:
     delete:
       tags: [Microservices]
       summary: Remove microservice
+      description: >
+        Persistent VOLUME directories are retained. Shared claims drop this consumer only.
+        cleanup=true records a reserved bit for later explicit volume prune and does not
+        delete data now.
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: string
+        - in: query
+          name: cleanup
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Remove result
@@ -1113,6 +1536,74 @@ paths:
           description: Deletion result
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/models:apply:
+    post:
+      tags: [Deploy]
+      summary: Apply local Model YAML (persist, then start pulls)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Apply result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/models:validate:
+    post:
+      tags: [Deploy]
+      summary: Validate local Model YAML
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Validation result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/knowledge:apply:
+    post:
+      tags: [Deploy]
+      summary: Apply local Knowledge YAML (persist, then start pulls)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Apply result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/deploy/knowledge:validate:
+    post:
+      tags: [Deploy]
+      summary: Validate local Knowledge YAML
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DeployManifestMultipartRequest"
+      responses:
+        "200":
+          description: Validation result
+        "400":
+          $ref: "#/components/responses/InvalidArgument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/deploy/controlplane:apply:
     post:
       tags: [Deploy]
@@ -1511,7 +2002,10 @@ components:
               type: string
     SystemStatus:
       type: object
-      required: [daemonStatus, controllerConnection, engine, runningMicroservices]
+      description: >
+        GET /v1/system/status is a JSON object. Existing scalars stay strings.
+        runtimeClasses and availableCdiDevices are typed arrays (not comma-joined strings).
+      additionalProperties: true
       properties:
         daemonStatus:
           type: string
@@ -1529,6 +2023,32 @@ components:
           type: number
         uptimeSeconds:
           type: integer
+        availableRuntimes:
+          type: array
+          description: Discovered host runtime handler names
+          items:
+            type: string
+        runtimeClasses:
+          type: array
+          description: Applied RuntimeClass rows only, sorted by name
+          items:
+            $ref: "#/components/schemas/RuntimeClassStatus"
+        availableCdiDevices:
+          type: array
+          description: Unique sorted fully-qualified CDI device names (linux edgelet engine); empty on docker/podman/desktop
+          items:
+            type: string
+    RuntimeClassStatus:
+      type: object
+      required: [name, handler, source]
+      properties:
+        name:
+          type: string
+        handler:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
     ControlPlaneStatus:
       type: object
       required: [controllerUuid, namespace, name, runtimeState, source, type]
@@ -1847,6 +2367,370 @@ components:
               type: string
             message:
               type: string
+    VolumeListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            volumes:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            count:
+              type: integer
+    VolumeClaim:
+      type: object
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [private, shared]
+        kind:
+          type: string
+          enum: [workload, controlplane]
+        uuid:
+          type: string
+          nullable: true
+        consumers:
+          type: array
+          items:
+            type: string
+        hostPath:
+          type: string
+        desired:
+          type: boolean
+        unreferencedAt:
+          type: string
+          format: date-time
+          nullable: true
+    VolumePruneRequest:
+      type: object
+      properties:
+        orphans:
+          type: boolean
+          default: true
+        yes:
+          type: boolean
+          default: false
+        force:
+          type: boolean
+          default: false
+        dryRun:
+          type: boolean
+          default: true
+    VolumePruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+            orphans:
+              type: boolean
+            yes:
+              type: boolean
+            force:
+              type: boolean
+            dryRun:
+              type: boolean
+            candidates:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            deleted:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+            skipped:
+              type: array
+              items:
+                $ref: "#/components/schemas/VolumeClaim"
+    ModelListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ModelItem"
+            count:
+              type: integer
+    ModelItemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/ModelItem"
+    ModelItem:
+      type: object
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
+          description: Provenance on this node. List and inspect both include source.
+        uuid:
+          type: string
+          description: Controller model uuid when source is managed (inspect only).
+        bindRefCount:
+          type: integer
+          description: Microservices that currently bind this name (inspect only).
+        repo:
+          type: string
+        revision:
+          type: string
+        registryId:
+          type: integer
+        files:
+          type: array
+          items:
+            type: string
+        format:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Pulling, Ready, Failed]
+        generation:
+          type: integer
+          format: int64
+        observedGeneration:
+          type: integer
+          format: int64
+        revisionFloating:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+        lastError:
+          type: string
+        resolvedRevision:
+          type: string
+        digest:
+          type: string
+    ModelPullRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        repo:
+          type: string
+          description: Repository path without host. Required with registryId when upserting.
+        revision:
+          type: string
+        registryId:
+          type: integer
+          description: Local registry id. Required with repo when upserting.
+        files:
+          type: array
+          items:
+            type: string
+          description: HF file paths or globs. Ignored for OCI.
+        format:
+          type: string
+          description: Hint only (gguf, safetensors, onnx, pytorch, tensorrt, unknown).
+    ModelPullOperationStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            operationId:
+              type: string
+            status:
+              type: string
+              enum: [running, succeeded, failed]
+            progress:
+              type: integer
+            name:
+              type: string
+            bytesDownloaded:
+              type: integer
+              format: int64
+            bytesTotal:
+              type: integer
+              format: int64
+            registryId:
+              type: integer
+            error:
+              type: string
+            startedAt:
+              type: string
+            endedAt:
+              type: string
+    ModelPruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [dangling]
+            removed:
+              type: array
+              items:
+                type: string
+            blobsRemoved:
+              type: integer
+            staleCleaned:
+              type: integer
+    KnowledgeListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/KnowledgeItem"
+            count:
+              type: integer
+    KnowledgeItemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/KnowledgeItem"
+    KnowledgeItem:
+      type: object
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+          enum: [local, managed]
+          description: Provenance on this node. List and inspect both include source.
+        uuid:
+          type: string
+          description: Controller knowledge uuid when source is managed (inspect only).
+        bindRefCount:
+          type: integer
+          description: Microservices that currently bind this name (inspect only).
+        repo:
+          type: string
+        revision:
+          type: string
+        registryId:
+          type: integer
+        files:
+          type: array
+          items:
+            type: string
+        format:
+          type: string
+        state:
+          type: string
+          enum: [Pending, Pulling, Ready, Failed]
+        generation:
+          type: integer
+          format: int64
+        revisionFloating:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+        lastError:
+          type: string
+        resolvedRevision:
+          type: string
+        digest:
+          type: string
+    KnowledgePullRequest:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        repo:
+          type: string
+          description: Repository path without host. Required with registryId when upserting.
+        revision:
+          type: string
+        registryId:
+          type: integer
+          description: Local registry id. Required with repo when upserting.
+        files:
+          type: array
+          items:
+            type: string
+          description: HF file paths or globs. Ignored for OCI. Hub dataset snapshot when omitted.
+        format:
+          type: string
+          description: Hint only (markdown, pdf, jsonl, parquet, arrow, sqlite, faiss, chroma, lance, unknown).
+    KnowledgePullOperationStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            operationId:
+              type: string
+            status:
+              type: string
+              enum: [running, succeeded, failed]
+            progress:
+              type: integer
+            name:
+              type: string
+            bytesDownloaded:
+              type: integer
+              format: int64
+            bytesTotal:
+              type: integer
+              format: int64
+            registryId:
+              type: integer
+            error:
+              type: string
+            startedAt:
+              type: string
+            endedAt:
+              type: string
+    KnowledgePruneResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [dangling]
+            removed:
+              type: array
+              items:
+                type: string
+            blobsRemoved:
+              type: integer
+            staleCleaned:
+              type: integer
     MicroserviceRef:
       type: object
       required: [uuid, name, source, state]
@@ -1865,6 +2749,11 @@ components:
           type: string
         containerId:
           type: string
+        podId:
+          type: string
+          description: >
+            Pause/sandbox id on the edgelet engine; same as containerId on docker/podman.
+            Omitted when unknown. Never an empty string.
     MicroserviceDetail:
       allOf:
         - $ref: "#/components/schemas/MicroserviceRef"
@@ -1894,6 +2783,43 @@ components:
             errorMessage:
               type: string
               nullable: true
+              description: >
+                Current failure. Kept while failing, restarting, or RUNNING for less
+                than 30 seconds after a crash. After 30 seconds of continuous RUNNING,
+                sent as an empty string so the current field clears.
+            lastError:
+              type: string
+              description: >
+                Last crash text. Not cleared on recovery or rebuild. Overwritten only
+                on a new failure. Omitted when empty.
+            lastErrorAt:
+              type: integer
+              format: int64
+              description: Unix milliseconds for lastError. Omitted when 0.
+            restartCount:
+              type: integer
+              description: >
+                Real restart events since the last operator rebuild. Omitted when 0.
+                Rebuild resets this to 0 and does not wipe lastError.
+            models:
+              type: object
+              description: Catalog bind when the microservice lists model items
+              properties:
+                bindPath:
+                  type: string
+                permissions:
+                  type: string
+                  enum: [ro, rw]
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+            statusText:
+              type: string
+              description: Wait or fail text when a bound model is still downloading or Failed
     LogsResponse:
       type: object
       required: [entries]
@@ -1992,9 +2918,26 @@ components:
             registry:
               type: integer
               description: Optional local registry id from /v1/deploy/registries
+            models:
+              type: object
+              description: Catalog bind of Ready local models at bindPath/{name}/
+              properties:
+                bindPath:
+                  type: string
+                permissions:
+                  type: string
+                  enum: [ro, rw]
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
             container:
               type: object
-              description: Container runtime options (volumes, ports, env, etc.)
+              description: Container runtime options (volumes, ports, env, catalog-related fields, healthCheck, annotations)
             schedule:
               type: integer
             config:

@@ -79,6 +79,35 @@ func TestSystemControlPlaneCRUD(t *testing.T) {
 	}
 }
 
+func TestSystemControlPlaneUpsertRecordsPrivateVolumes(t *testing.T) {
+	db := openFreshStoreDB(t)
+	dep := &models.ControlPlaneDeployment{
+		ControllerUUID: "cp-uuid-volumes",
+		Namespace:      "default",
+		Name:           "pot",
+		ManifestYAML:   "kind: ControlPlane",
+	}
+	if err := db.UpsertSystemControlPlane(dep); err != nil {
+		t.Fatalf("upsert system control plane: %v", err)
+	}
+	for _, name := range []string{"iofog-controller-db", "iofog-controller-log"} {
+		rec, err := db.GetPersistentVolume(dep.ControllerUUID, name)
+		if err != nil {
+			t.Fatalf("get persistent volume %s: %v", name, err)
+		}
+		if rec.Kind != PersistentVolumeKindControlPlane {
+			t.Fatalf("%s kind=%q want controlplane", name, rec.Kind)
+		}
+		if rec.Scope != models.VolumeScopePrivate {
+			t.Fatalf("%s scope=%q want private", name, rec.Scope)
+		}
+		want := PersistentVolumeHostPath(db.DiskDirectory(), dep.ControllerUUID, name, models.VolumeScopePrivate)
+		if rec.HostPath != want {
+			t.Fatalf("%s host_path=%q want %q", name, rec.HostPath, want)
+		}
+	}
+}
+
 func TestSystemControlPlaneSingletonConstraint(t *testing.T) {
 	db := openFreshStoreDB(t)
 

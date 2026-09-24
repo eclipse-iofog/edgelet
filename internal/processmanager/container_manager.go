@@ -26,10 +26,11 @@ const (
 
 // ContainerManager manages container operations via a ContainerEngine.
 type ContainerManager struct {
-	engine              engine.ContainerEngine
-	microserviceManager MicroserviceManagerInterface
-	engineName          string
-	logger              *logging.ModuleLogger
+	engine               engine.ContainerEngine
+	microserviceManager  MicroserviceManagerInterface
+	engineName           string
+	logger               *logging.ModuleLogger
+	catalogDiskDirectory string
 }
 
 // NewContainerManager creates a new ContainerManager
@@ -207,7 +208,8 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 }
 
 // RemoveContainerByMicroserviceUUID removes a container by microservice UUID.
-// withCleanup controls Docker named-volume removal (passed to engine.RemoveContainer).
+// withCleanup is passed to engine.RemoveContainer. Persistent VOLUME data is
+// bind-mounted and is not deleted when the container is removed.
 // removeImage controls whether the container image is also removed after container deletion —
 // set true for normal lifecycle deletions,
 // false for the deprovision path.
@@ -257,6 +259,7 @@ func (cm *ContainerManager) RemoveContainerByMicroserviceUUID(ctx context.Contex
 	}
 
 	volumemount.GetInstance().CleanupMicroserviceVolumes(microserviceUUID)
+	cm.releaseCatalog(microserviceUUID)
 	return nil
 }
 
@@ -298,6 +301,7 @@ func (cm *ContainerManager) RemoveContainerByID(ctx context.Context, containerID
 		_ = store.GetInstance().DeleteRuntimeContainerRef(msUUID, store.RuntimeScopeLocal)
 		_ = store.GetInstance().DeleteLocalWorkload(msUUID)
 		volumemount.GetInstance().CleanupMicroserviceVolumes(msUUID)
+		cm.releaseCatalog(msUUID)
 	}
 
 	return nil
@@ -549,6 +553,12 @@ func (cm *ContainerManager) createContainer(ctx context.Context, ms *models.Micr
 
 // createContainerWithPull creates a container, optionally pulling the image first
 func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *models.Microservice, pullImage bool) error {
+	if err := cm.applyCatalogStartGate(ms); err != nil {
+		return err
+	}
+	if cm.volumeHeld(ms) {
+		return errVolumeInUse
+	}
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStatePulling)
 	})
@@ -643,7 +653,6 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	})
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateStarting)
-		status.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, "")
 	})
 
 	cfg := config.GetInstance()
@@ -762,14 +771,15 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	// Clear rebuild flag after successful creation
 	ms.Rebuild = false
 
-	// Set status to RUNNING via status reporter
+	// Set status to RUNNING via status reporter. Keep the previous current error
+	// until the running grace window elapses.
 	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateRunning)
-		status.SetMicroservicesStatusErrorMessage(ms.MicroserviceUUID, "")
 		// Set start time
 		if msStatus := status.GetMicroserviceStatus(ms.MicroserviceUUID); msStatus != nil {
 			msStatus.StartTime = time.Now().UnixMilli()
 			msStatus.ContainerID = containerID
+			msStatus.ApplyPodID(cm.engineName, sandboxID)
 			if ms.ContainerIPAddress != nil {
 				msStatus.IPAddress = ms.ContainerIPAddress
 			}

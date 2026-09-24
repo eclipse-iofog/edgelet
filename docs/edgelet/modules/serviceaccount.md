@@ -7,7 +7,7 @@ The service account manager **mints, rotates, and projects** workload JWTs for C
 ## Purpose
 
 - Create Ed25519-signed JWTs with microservice-scoped RBAC rules
-- Project `token` + CA PEM atomically per microservice UUID
+- Project `token`, CA PEM, and public signing JWK atomically per microservice UUID
 - Rotate tokens before expiry; revoke on microservice removal
 - Reconcile projections when managed microservice set changes
 
@@ -34,9 +34,18 @@ Host staging root:
 {diskDirectory}/volumes/serviceaccounts/{microserviceUUID}/edgelet.iofog.org~serviceaccount/default/
   token
   ca.crt
+  edgelet.jwk
 ```
 
 In-container mount: **`/var/run/secrets/edgelet.iofog.org/serviceaccount`** (`MountPath` constant).
+
+| File | Contents |
+|------|----------|
+| `token` | Workload JWT (`tokenUse: serviceaccount`) |
+| `ca.crt` | EdgeletAPI HTTPS CA PEM |
+| `edgelet.jwk` | Public signing JWK (`kty=OKP`, `crv=Ed25519`, `alg=EdDSA`, `x`) — no private key |
+
+Workloads on the same node can verify another microservice's projected token with `edgelet.jwk` (Ed25519) and then authorize custom `rulesByGroup` API groups from the token claims. Do not parse the verifier's own `token` to obtain the node public key.
 
 Writes use atomic directory rename (`writeProjectionAtomic`) to avoid partial reads.
 
@@ -91,7 +100,7 @@ See [store.md](store.md).
 | Surface | Role |
 |---------|------|
 | EdgeletAPI `/v1/auth/tokens*` | List/revoke (admin) |
-| Workload mount | `token` file read by microservice |
+| Workload mount | `token`, `ca.crt`, and `edgelet.jwk` files read by microservice |
 | EdgeletAPI self routes | Bearer from projected token |
 
 ## Observability

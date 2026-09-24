@@ -162,6 +162,9 @@ func TestConfigHelpShowsFlagsNotSettingsTable(t *testing.T) {
 	if strings.Contains(stdout, "Settings:") {
 		t.Fatalf("expected Settings table removed from long help, got stdout=%q", stdout)
 	}
+	if strings.Contains(stdout, "--device-scan-frequency") || strings.Contains(stdout, "--sd") {
+		t.Fatalf("expected device scan flags removed from help, got stdout=%q", stdout)
+	}
 }
 
 func TestConfigLongHelpIsShortIntro(t *testing.T) {

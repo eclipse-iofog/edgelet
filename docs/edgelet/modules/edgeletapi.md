@@ -78,6 +78,7 @@ Handler packages:
 | Package | Role |
 |---------|------|
 | `handlers/api.go` | Bulk of REST handlers |
+| `handlers/api_volumes.go` | `/v1/volumes*` list, inspect, delete, prune |
 | `handlers/auth.go` | `whoami` |
 | `handlers/status.go`, `info.go`, `version.go` | System readouts |
 | `handlers/api_envelope.go` | Success/error JSON helpers |

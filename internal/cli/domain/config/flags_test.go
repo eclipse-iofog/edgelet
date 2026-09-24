@@ -71,6 +71,21 @@ func TestFlagSet_ShortAliasEquivalentToLong(t *testing.T) {
 	}
 }
 
+func TestFlagSetOmitsDeviceScanFrequency(t *testing.T) {
+	cmd := &cobra.Command{Use: "config"}
+	fs := NewFlagSet()
+	fs.Register(cmd)
+	if cmd.Flags().Lookup("device-scan-frequency") != nil {
+		t.Fatal("expected --device-scan-frequency to be removed")
+	}
+	if cmd.Flags().Lookup("sd") != nil {
+		t.Fatal("expected --sd to be removed")
+	}
+	if _, ok := configKeyRules["deviceScanFrequency"]; ok {
+		t.Fatal("configKeyRules must not include deviceScanFrequency")
+	}
+}
+
 func TestFlagSet_RequiresAtLeastOneFlag(t *testing.T) {
 	cmd := &cobra.Command{Use: "config"}
 	fs := NewFlagSet()

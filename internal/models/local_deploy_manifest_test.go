@@ -51,6 +51,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "/var/lib/data",
@@ -70,6 +71,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "nodered_data-1",
@@ -89,6 +91,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "/opt/agent/data",
@@ -111,6 +114,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "relative/path",
@@ -130,6 +134,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "/tmp/host-path",
@@ -153,6 +158,7 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
 			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
 			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
 		}{
 			{
 				HostDestination:      "router-secret",
@@ -166,6 +172,54 @@ func TestLocalDeployManifestValidate_LocalVolumePolicies(t *testing.T) {
 		}
 		if got := err.Error(); got == "" || !strings.Contains(got, "not supported for local manifests") {
 			t.Fatalf("unexpected error: %q", got)
+		}
+	})
+
+	t.Run("unknown volume scope does not fail apply", func(t *testing.T) {
+		doc := validLocalDeployManifestForTest("scope-unknown")
+		doc.Spec.Container.Volumes = []struct {
+			HostDestination      string `yaml:"hostDestination" json:"hostDestination"`
+			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
+			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
+			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
+		}{
+			{
+				HostDestination:      "nodered_data-1",
+				ContainerDestination: "/data",
+				Type:                 "VOLUME",
+				Scope:                "SHARED",
+			},
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("unknown scope must not fail apply, got: %v", err)
+		}
+		if got := doc.Spec.Container.Volumes[0].Scope; got != VolumeScopePrivate {
+			t.Fatalf("expected unknown scope stored private, got %q", got)
+		}
+	})
+
+	t.Run("bind ignores shared scope", func(t *testing.T) {
+		doc := validLocalDeployManifestForTest("bind-scope")
+		doc.Spec.Container.Volumes = []struct {
+			HostDestination      string `yaml:"hostDestination" json:"hostDestination"`
+			ContainerDestination string `yaml:"containerDestination" json:"containerDestination"`
+			AccessMode           string `yaml:"accessMode,omitempty" json:"accessMode,omitempty"`
+			Type                 string `yaml:"type,omitempty" json:"type,omitempty"`
+			Scope                string `yaml:"scope,omitempty" json:"scope,omitempty"`
+		}{
+			{
+				HostDestination:      "/var/lib/data",
+				ContainerDestination: "/data",
+				Type:                 "BIND",
+				Scope:                "shared",
+			},
+		}
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("BIND with scope must not fail apply, got: %v", err)
+		}
+		if got := doc.Spec.Container.Volumes[0].Scope; got != VolumeScopePrivate {
+			t.Fatalf("expected BIND scope ignored to private, got %q", got)
 		}
 	})
 }

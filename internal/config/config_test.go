@@ -59,7 +59,6 @@ func TestValidateConfig(t *testing.T) {
 	cfg.LogLevel = "INFO"
 	cfg.StatusFrequency = 10
 	cfg.ChangeFrequency = 20
-	cfg.DeviceScanFrequency = 60
 	cfg.EdgeGuardFrequency = 0
 	cfg.GPSScanFrequency = 60
 	if buildmeta.HasEmbeddedEngine() {

@@ -5,6 +5,116 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.5]
+
+### Changed
+
+- **Data-plane stop:** drains labeled workloads through CRI while containerd is still up, without the local API socket. After graceful stop, it removes labeled containers and pod sandboxes so containerd does not restore exited catalog workloads (for example WASM runtimes) before shim reap.
+- **Fat OTA:** drain and verify before replacing the binary or restarting the data plane, using `edgelet runtime drain --direct` on the staged thin binary while control is still up. Thin OTA (matching ready embed hash) leaves the data plane running.
+- **Ready embed:** current counts as installed only when the fat binary is present. An incomplete extract directory does not skip a data-plane restart.
+- **Linux thin binary:** `runtime drain --direct` execs the embedded fat runtime for quiesce so the thin wrapper stays within the existing size limit.
+- **Agent `cpuLimit`:** maximum raised from **100** to **400** (default **80** unchanged); limit is stack CPU in cores×100, same unit as **`cpuUsage`**.
+- **`edgelet system status` (human):** host memory and disk capacity fields print as **GiB/MiB**; **`systemTotalCpu`** prints two decimal places. Edgelet stack CPU prints as **core count** (not host `%`); stack memory as **MiB**; **`diskUsage`** as **MiB/GiB (edgelet data)**. Human output hides duplicate **`cpuUsage`** / **`memoryUsage`** when stack totals are present. **`PUT status`** and controller JSON keep numeric wire values (GiB for `diskUsage`, per-core scale for CPU).
+- **`GET /v1/system/status` (local JSON):** stack breakdown keys are **`agentCpu`**, **`runtimeCpu`**, **`edgeletStackCpu`** (float **cores**) and **`agentMemory`**, **`runtimeMemory`**, **`edgeletStackMemory`** (int **bytes**). Replaces local-only **`agentCpuPercent`**, **`*MemoryMiB`**, and **`edgeletTotal*`** names. **`cpuUsage`**, **`memoryUsage`**, and **`diskUsage`** remain controller-shaped aliases on the local route.
+
+### Added
+
+- **Host capacity on status:** `PUT status` and `GET /v1/system/status` include **`systemCpus`** (logical CPU count), **`systemTotalMemory`** and **`systemAvailableMemory`** (bytes), and **`systemTotalDisk`** and **`systemAvailableDisk`** (bytes for the filesystem containing configured **`diskDirectory`**). **`systemTotalCpu`** remains host CPU utilization 0–100%, not core count.
+- **Host OS on status:** **`systemOs`** (family, e.g. `linux`), **`systemOsVersion`** (distro/release display string), and **`systemKernelVersion`** (Linux kernel release; **`""`** on non-Linux). Sampled once at daemon start from host `os-release` / gopsutil; same keys on controller **`PUT status`** and local **`GET /v1/system/status`**. Controller handoff: [docs/edgelet/CONTROLLER-HANDOFF-STATUS-HOST.md](docs/edgelet/CONTROLLER-HANDOFF-STATUS-HOST.md).
+
+### Fixed
+
+- **Host OS status:** `systemOs` is GOOS family (`linux`, not distro `ID`); `systemOsVersion` prefers `/etc/os-release` **`PRETTY_NAME`**; `systemKernelVersion` is populated on all Linux distros (not only when `systemOs` was literally `linux`).
+- **Incomplete drain:** a drain that does not verify does not reap shims. Failed verify aborts the upgrade and leaves the installed binary in place.
+- **Volume in use:** reconcile will not start a second container on a volume still held by a host process. Volume data is not deleted to recover a leftover process.
+- **Catalog data-plane restart:** stopping or restarting `edgelet-containerd` no longer leaves Spin or Edgelet WASM workloads in a state where shim reap kills the runtime while containerd still owns the task.
+- **Labeled release order:** a pod sandbox is removed only after its container delete succeeds. An exited container is not stopped again through CRI, avoiding torn sandbox metadata on a later stop.
+- **Data-plane during drain:** volume force-kill and orphan shim reap skip the live containerd child, `runtime-bootstrap`, and shims still attached to the edgelet containerd socket.
+- **Data-plane self-heal:** if the embedded containerd child exits unexpectedly, `runtime-bootstrap` logs and exits with status 1 so systemd `Restart=always` starts a new data plane. A drain that does not verify clears the drain hold, leaves containerd running, and keeps the unit in its signal loop instead of exiting.
+
+## [v1.1.0-rc.4]
+
+### Added
+
+- **Knowledge artifacts:** first-class `kind: Knowledge` — deploy, async pull (Hugging Face Hub datasets and generic OCI/ORAS), inspect, remove, and prune. CLI `edgelet knowledge`. EdgeletAPI `/v1/knowledge*` (mass noun). Artifacts live under `{diskDirectory}/knowledge/`, not the Model store or the container-engine image store. Operator guide: [docs/edgelet/knowledge.md](docs/edgelet/knowledge.md).
+- **Hugging Face datasets:** Knowledge + registry `type: hf` always uses the Hub dataset API (`/api/datasets/…`). Model HF pull still uses `/api/models/…`.
+- **Schema v4:** in-place SQLite upgrade for knowledge tables (`local_knowledge`, `controller_knowledge`, `knowledge_refs`) and the microservice `knowledge` catalog column. Backup `edgelet.db` plus `{diskDirectory}/knowledge/` before upgrading from schema v3.
+- **Microservice knowledge catalog:** `spec.knowledge.bindPath` plus `items[].name` mounts Ready knowledge files at `{bindPath}/{name}/`. Start waits until every `spec.models` item **and** every `spec.knowledge` item is Ready. A microservice may bind both catalogs. `knowledge rm` is refused while a microservice still binds the name.
+- **Fleet knowledge:** controller `getChanges` `knowledge` plus `GET knowledge` (uuid + name). Fog status `knowledgeStatus` lists local and managed knowledge with `source`; local items omit `uuid`. `activeKnowledge` is the managed fleet count.
+- **Catalog-only updates:** `getChanges` `microserviceKnowledge` reuses `GET microservices` (one GET when `microserviceList` is also true). Item add/remove with the same bind path stays in-place; a not-Ready add keeps the running projection until Ready.
+
+### Changed
+
+- **Fog catalog clocks:** `modelLastUpdate` is Unix milliseconds, the same unit as `knowledgeLastUpdate` and the other fog status timestamps (`lastStatusTime`, `volumeMountLastUpdate`). Model row times in SQLite stay Unix seconds; the posted value is scaled.
+- **Scheduled prune:** `pruningFrequency`, disk-threshold ticks, `edgelet knowledge prune`, and controller `getChanges.prune` also delete unused unbound local Knowledge (plus unused local models and dangling images on the prune flag). Unbound managed Knowledge stays. `edgelet system prune` still does not prune Knowledge.
+- **Watchdog:** when `watchdogEnabled` is on, Edgelet deletes all local Knowledge and refuses local `kind: Knowledge` apply. Managed Knowledge is unchanged.
+
+## [v1.1.0-rc.3]
+
+### Added
+
+- **Persistent volume ledger:** SQLite schema v3 records `VOLUME` ownership. Default is **private** (per UUID under `{diskDirectory}/volumes/data/{uuid}/{name}/`). Opt-in `scope: shared` is a node-global name under `{diskDirectory}/volumes/shared/{name}/` for local and controller-managed microservices. Backup `edgelet.db` plus `volumes/data/` and `volumes/shared/` before upgrade. Existing on-disk trees seed as private.
+- **Volume reclaim:** `edgelet volume ls|rm|prune` and EdgeletAPI `/v1/volumes*` (`DELETE /v1/volumes/{uuid}` private; `DELETE /v1/volumes/shared/{name}` / `volume rm --shared`). Orphan prune is dry-run unless `--yes`; a 24h grace applies unless `--force`. Mounted paths refuse even with `--force`. Admin RBAC: `volumes` (`get` / `delete`), `volumes/prune` (`create`).
+- **Projected signing JWK:** managed microservice service-account mounts include `edgelet.jwk` (public Ed25519 JWK: `kty`, `crv`, `alg=EdDSA`, `x`) beside `token` and `ca.crt`, so on-node workloads can verify peer service-account JWTs without reading the key from their own token claims.
+
+### Changed
+
+- **VOLUME retain:** persistent `VOLUME` data is kept across OTA, drain, crash, recreate, microservice delete, and deprovision. `pruningFrequency`, disk-threshold prune, and start-up prune no longer delete `volumes/data/` or `volumes/shared/`.
+- **system prune:** `volumes` and `all` do not destroy persistent volume data; reclaim with `edgelet volume prune`.
+- **Deprovision:** default (including controller `delete-node`) preserves both volume trees. `deprovision --purge-volumes` destroys workload volumes only (shared only if no remaining consumers; never control-plane). `controlplane delete` removes controller DB/log volumes. `BIND` host paths are never deleted; `scope` on BIND is ignored.
+- **Pruning log module name:** structured logs and journald use module **`Edgelet Pruning Manager`** instead of **`Docker Pruning Manager`**. Behavior is unchanged (all container engines); only the log `module` field changed. Filter old entries with either name during upgrade.
+
+### Fixed
+
+- **Fat embed extract prune:** after a successful `edgelet daemon` extract, `/var/lib/edgelet/data/<hash>/` trees other than `current` and `previous` (and the running fat binary’s tree, if it still lives under `data/`) are removed. Coordinated rollback can still reuse `data/previous`. Older leftover extracts are no longer kept unbounded.
+- **Scheduled image prune keep-set:** `pruningFrequency` and disk-threshold prune keep images used by running workloads (including local deploys and CRI pause images still in use) and images listed for local-deployed microservices, not only controller-managed desired state.
+- **Frequency prune is ticker-only:** enabling or changing `pruningFrequency` (including daemon start with frequency already set) no longer runs an immediate image prune. The next automatic image prune is the frequency tick, disk-threshold prune, or an explicit `system prune` / controller prune.
+
+## [v1.1.0-rc.2]
+
+### Added
+
+- **Microservice last-error extras:** fog `PUT status`, local inspect, and `edgelet ms inspect` include `lastError`, `lastErrorAt` (unix ms), and `restartCount` when set. Older controllers ignore unknown keys. `lastError` is not cleared on recovery; `restartCount` resets on rebuild.
+
+### Changed
+
+- **Crash text durability:** microservice `errorMessage` stays populated through STARTING and brief RUNNING after a crash. Current `errorMessage` is sent as `""` only after 30 seconds of continuous RUNNING for the same container generation.
+- **Docker/Podman exit text:** when a container is not healthily running, status includes `exitCode=`, `oomKilled=`, and engine `error=` (OOM is reported even if the engine still maps the state as running). The embedded engine keeps `CRI reason=…`.
+- **Restart-loop detection:** `STUCK_IN_RESTART` counts actual restarts (RUNNING→EXITING, failed start, crash-driven recreate), not 5-second status polls. Threshold is still 10 restarts in 10 minutes.
+- **Crash recreate backoff:** crash-driven recreate and lifecycle task retries wait 10s, 20s, … up to 5 minutes. Operator `rebuild`, catalog becoming Ready, and one CRI non-restartable recreate skip the delay. During the wait, status stays the real runtime state.
+
+## [v1.1.0-rc.1]
+
+### Added
+
+- **Model artifacts:** first-class `kind: Model` — deploy, async pull (Hugging Face Hub and OCI), inspect, remove, and prune. CLI `edgelet model`. EdgeletAPI `/v1/models*`. Artifacts live under `{diskDirectory}/models/`, not the container-engine image store. Operator guide: [docs/edgelet/models.md](docs/edgelet/models.md).
+- **Registry `type`:** `oci` (default) or `hf`, plus optional `ca` and `insecure`. Image pull and microservice images accept `oci` only.
+- **Built-in Hugging Face Hub:** local registry id **3** (`https://huggingface.co`, `hf`). Built-in ids **1–3** cannot be edited or removed. First user-created registry id is **4**.
+- **Schema v2:** in-place SQLite upgrade for model tables, registry `type` / `ca` / `insecure`, catalog bind, expanded container columns, and fleet RuntimeClass rows (`controller_runtime_classes`, applied `source`). Backup `edgelet.db` before upgrading from schema v1.
+- **Microservice catalog bind:** `spec.models.bindPath` plus `items[].name` mounts Ready model files at `{bindPath}/{name}/`. Start waits until every item is Ready; add/remove/re-pull is in-place; `model rm` is refused while a microservice still binds the name.
+- **Container fields:** `entrypoint`/`commands` (omit or `[]` = image default), `cpus`, memory reservation/swap, `shmSize`, `tmpfs`, `sysctls`, `ulimits`, `devices`, `runAsGroup`, `workingDir`, `readOnlyRootFilesystem`. Local `healthCheck` and `annotations` are applied the same way as controller workloads.
+- **Fleet models:** controller `getChanges` `models` plus `GET models` (uuid + name). Fog status `modelStatus` lists local and managed models with `source`; local items omit `uuid`. `activeModels` is the managed fleet count. Registry sync reads `type`, `ca`, and `insecure`.
+- **Fleet RuntimeClass:** controller `getChanges` `runtimeClasses` plus `GET runtimeClasses` (`name` + `handler`). While provisioned, a managed class wins that name. Apply only when `containerEngine` is `edgelet`; docker and podman keep the desired list without applying.
+- **Status surfaces:** fog `PUT status` and `GET /v1/system/status` include applied `runtimeClasses` (`name`, `handler`, `source`) and `availableCdiDevices` (fully-qualified names; empty on docker/podman/desktop). Microservice status includes `podId` when known (edgelet = pause/sandbox; docker/podman = `containerId`).
+- **Catalog-only updates:** `getChanges` `microserviceModels` reuses `GET microservices` (one GET when `microserviceList` is also true). Item add/remove with the same bind path stays in-place; a not-Ready add keeps the running projection until Ready.
+
+### Changed
+
+- **Local registries:** next allocated id is after the three built-in rows (was after `docker.io` and `from_cache` only).
+- **Host inventory:** Edgelet no longer posts hardware or USB inventory. `deviceScanFrequency` is removed from YAML, CLI, and config GET/PATCH. Edge Guard host fingerprint is unchanged.
+- **Image pull TLS:** the edgelet engine applies registry `ca` (additional trust) and `insecure` (`http://` and skip TLS verify) on container image pull. Docker and Podman still use daemon credentials only.
+- **Scheduled prune:** `pruningFrequency`, disk-threshold ticks, `edgelet model prune`, and controller `getChanges.prune` delete unused unbound local models (and dangling images on the prune flag). Unbound managed models stay. `edgelet system prune` still does not prune models.
+- **Watchdog:** when `watchdogEnabled` is on, Edgelet deletes all local models and refuses local `kind: Model` apply.
+- **Security / vulncheck:** bump `google.golang.org/grpc` to **v1.83.2** (**GO-2026-6443** — server panic on requests missing both `:authority` and `Host`); `make vulncheck` passes with zero documented exceptions ([SECURITY.md](SECURITY.md)).
+- **Go dependencies:** patch/minor bumps — `github.com/moby/moby/client` **v0.6.0** (`github.com/moby/moby/api` **v1.56.0**), `github.com/shirou/gopsutil/v4` **v4.26.8**, `github.com/sirupsen/logrus` **v1.10.2**, `modernc.org/sqlite` **v1.58.0** (Dependabot; no edgelet API changes required).
+
+### Fixed
+
+- **Catalog projection:** reconcile no longer rewrites the per-microservice model bind when names and generations are unchanged; name symlinks are reused; the previous version directory is kept across a `..data` swing so in-container lookups stay valid.
+- **`edgelet ms inspect`:** default output is the full inspect JSON again (`raw.engineInspect` included). `--summary` remains the short card.
+- **Local recreate:** removing a previous container treats “already removing” / not found as success, and local deploy no longer publishes `starting` before that remove finishes.
+- **Local `ms rm`:** reconcile no longer re-inserts a `deleted` tombstone after the SQLite row is removed; `ms ls` omits gone local rows; apply of the same name allocates a new UUID.
+
 ## [1.0.3-rc.2] - September 2026
 
 ### Changed

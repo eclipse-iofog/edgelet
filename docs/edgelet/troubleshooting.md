@@ -37,7 +37,7 @@ Common issues when running Edgelet on edge nodes.
    df -h /var/lib/edgelet /var/lib/edgelet-containerd
    ```
 
-   If usage grows after deleting microservices, orphaned `VOLUME` data may remain under `/var/lib/edgelet/volumes/data/` until prune runs — see [volumes.md](volumes.md).
+   If usage grows after deleting microservices, private `VOLUME` data remains under `/var/lib/edgelet/volumes/data/` and shared names under `/var/lib/edgelet/volumes/shared/` until you reclaim with `edgelet volume` — see [volumes.md](volumes.md). Scheduled prune and `edgelet system prune` do not delete those trees.
 
 ---
 
@@ -196,7 +196,7 @@ ls -la /var/lib/edgelet/data/current /var/lib/edgelet/data/.lock
    sudo systemctl start edgelet
    ```
 
-   Replace `<hash-dir>` with the bundle directory name under `/var/lib/edgelet/data/` (not `current` or `previous` symlinks).
+   Replace `<hash-dir>` with the bundle directory name under `/var/lib/edgelet/data/` (not `current` or `previous` symlinks). After a healthy daemon start, only those two hash trees remain; leftover extracts from older upgrades are removed automatically.
 
 Prefer **`systemctl stop` then `systemctl start`** over blind `restart` during shim upgrades — see [container-engine.md](container-engine.md). After five rapid failures within 300s, systemd stops auto-restarting `edgelet-containerd` until `reset-failed` (openrc: `respawn_max=5` per 300s window).
 
@@ -359,6 +359,78 @@ grep containerEngineUrl /etc/edgelet/config.yaml
 ```
 
 Ensure the configured `containerEngineUrl` matches the running engine socket.
+
+---
+
+## Leftover process holding a volume
+
+**Symptoms:** microservice status or `errorMessage` is `volume in use by a leftover process`; a new container logs `Cannot lock file` or another exclusive-lock error and exits (databases that exclusive-lock a file often do this). Common after a fat OTA or a data-plane stop whose drain did not verify. The volume files are still on disk. A host process still has them open.
+
+Do **not** run `edgelet volume rm` (or delete `volumes/data/` / `volumes/shared/`) to clear the lock. That destroys retained data and does not stop the process that holds the file.
+
+**Checks:**
+
+1. Confirm the wait text:
+
+   ```bash
+   edgelet ms inspect <uuid|namespace.name> --summary
+   ```
+
+2. Read the data-plane journal and the upgrade log. Failed drain is `module=RUNTIME_BOOTSTRAP` with `drain_verify_failed`, `drain_timeout`, or `drain_degraded`, and `data-plane drain did not verify`. `install.sh` prints `Data-plane drain did not verify; binary was not replaced` and leaves the previous thin binary installed.
+
+   ```bash
+   sudo journalctl -u edgelet-containerd -n 200 --no-pager | grep RUNTIME_BOOTSTRAP
+   ```
+
+3. Find the process that still has the volume open (default `diskDirectory` is `/var/lib/edgelet`):
+
+   ```bash
+   sudo lsof +D /var/lib/edgelet/volumes/data /var/lib/edgelet/volumes/shared
+   sudo fuser -v /var/lib/edgelet/volumes/data /var/lib/edgelet/volumes/shared
+   ```
+
+**Recovery:** stop the process that holds the volume. Reconcile keeps the current runtime state and the text `volume in use by a leftover process` until that process is gone, including after an operator rebuild. The next cycle creates the container once the path is free.
+
+On a node that is already up, stopping the holder is enough. Do not restart the data plane unless you intend to stop every workload.
+
+When an upgrade or `stop edgelet-containerd` aborted, the journal line is `leaving containerd running`. Drain did not verify: `runtime-bootstrap` cleared the drain hold and stayed running with containerd still up (the unit did not exit, so systemd did not restart it). A leftover workload process may still hold the volume. `KillMode=process` means stop only signaled the parent; the containerd child can still be serving CRI. `edgelet runtime reap-orphans` does nothing until `/run/edgelet/drain-verified` exists. Stop the holder, then drain again while the CRI socket is up:
+
+```bash
+sudo edgelet runtime drain --direct
+```
+
+Exit 0 means verify passed. Re-run `install.sh` for an aborted upgrade, or stop and start the data plane only after that:
+
+```bash
+sudo systemctl stop edgelet-containerd
+sudo systemctl start edgelet-containerd
+```
+
+OpenRC: `rc-service edgelet-containerd stop`, then `start`, after `drain --direct` exits 0.
+
+---
+
+## Microservice crash / restart loop
+
+**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`. `Cannot lock file` on a persistent volume is a leftover process, not this crash loop — see [Leftover process holding a volume](#leftover-process-holding-a-volume).
+
+**Checks:**
+
+1. Inspect the workload. Crash fields are the same on `GET /v1/ms/{id}` and `edgelet ms inspect`:
+
+   ```bash
+   edgelet ms inspect <uuid|namespace.name> --summary
+   ```
+
+   - `errorMessage` is the **current** failure. It stays set while the workload is failing, restarting, or has been RUNNING for less than **30 seconds** after a crash. After 30 seconds of continuous RUNNING it is sent as `""`.
+   - `lastError` / `lastErrorAt` is the last crash text (unix ms). It is **not** cleared on recovery. Operator **rebuild** resets `restartCount` to 0 and keeps `lastError`.
+   - Docker/Podman text looks like `exitCode=N oomKilled=…` (plus `error=…` when the engine error is set). The embedded engine keeps `CRI reason=…`.
+
+2. Crash loops delay recreate (**10s, 20s, … up to 5 minutes**). Status stays the real runtime state (`EXITING`, and so on) — there is no extra “waiting” state. Operator rebuild, catalog becoming Ready, and a single non-restartable CRI recreate skip the delay.
+
+3. `STUCK_IN_RESTART` means **10 real restarts in 10 minutes**, not status-poll ticks. Use operator **rebuild** to retry.
+
+4. Last crash text for controller-managed workloads is in-memory. Restarting `edgelet` may drop it until the next failure.
 
 ---
 

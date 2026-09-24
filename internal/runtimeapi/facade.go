@@ -14,9 +14,15 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgecatalog"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgemanager"
+	"github.com/eclipse-iofog/edgelet/internal/modelcatalog"
+	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/network"
 	"github.com/eclipse-iofog/edgelet/internal/processmanager"
@@ -34,6 +40,31 @@ import (
 const runtimeAPIModuleName = "Runtime API Facade"
 
 var ErrRuntimeClassUnsupported = errors.New("runtimeclass is supported only when containerEngine=edgelet")
+
+// ErrRuntimeClassManagedName is returned when a local apply targets a name the
+// controller currently manages on this provisioned node.
+type ErrRuntimeClassManagedName struct {
+	Name string
+}
+
+func (e *ErrRuntimeClassManagedName) Error() string {
+	name := ""
+	if e != nil {
+		name = strings.TrimSpace(strings.ToLower(e.Name))
+	}
+	return fmt.Sprintf("cannot apply a local RuntimeClass named %q while a controller-managed runtime class occupies that name", name)
+}
+
+func (e *ErrRuntimeClassManagedName) Details() map[string]any {
+	name := ""
+	if e != nil {
+		name = strings.TrimSpace(strings.ToLower(e.Name))
+	}
+	return map[string]any{
+		"runtimeClassName": name,
+		"source":           models.RuntimeClassSourceManaged,
+	}
+}
 
 const (
 	RuntimeClassStageWriteConfig     = "write_config"
@@ -166,6 +197,12 @@ type Facade struct {
 	sr   *statusreporter.StatusReporter
 	db   *store.DB
 	prun *pruning.Manager
+
+	modelsMu sync.Mutex
+	models   *modelmanager.Manager
+
+	knowledgeMu sync.Mutex
+	knowledge   *knowledgemanager.Manager
 }
 
 // DeployProgressCallback reports deploy stage transitions from runtime flow.
@@ -215,14 +252,16 @@ func (f *Facade) Provision(provisioningKey string) error {
 }
 
 // Deprovision deprovisions the agent.
-func (f *Facade) Deprovision(scope string) error {
+// purgeVolumes destroys workload persistent VOLUME claims; control-plane
+// volumes are never purged. Shared names stay while any consumer remains.
+func (f *Facade) Deprovision(scope string, purgeVolumes bool) error {
 	normalized := strings.ToLower(strings.TrimSpace(scope))
 	if normalized == "" {
 		normalized = fieldagent.DeprovisionScopeAll
 	}
 	switch normalized {
 	case fieldagent.DeprovisionScopeAll, fieldagent.DeprovisionScopeLocal:
-		return f.fa.DeprovisionWithScope(false, normalized)
+		return f.fa.DeprovisionWithOptions(false, normalized, purgeVolumes)
 	default:
 		return fmt.Errorf("invalid deprovision scope %q (allowed: %s|%s)", scope, fieldagent.DeprovisionScopeAll, fieldagent.DeprovisionScopeLocal)
 	}
@@ -272,7 +311,10 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		result["deletedCount"] = deletedCount
 		result["spaceReclaimedBytes"] = reclaimed
 		result["spaceReclaimedHuman"] = humanBytes(reclaimed)
-		result["message"] = "pruned dangling images"
+		if err := f.attachUnusedLocalModelPrune(result); err != nil {
+			return nil, err
+		}
+		result["message"] = "pruned dangling images and unused local models"
 	case PruneModeContainers:
 		report, pruneErr := pm.PruneContainers()
 		if pruneErr != nil {
@@ -289,28 +331,10 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		result["deletedCount"] = deletedCount
 		result["message"] = "pruned containers"
 	case PruneModeVolumes:
-		report, pruneErr := pm.PruneVolumes()
-		if pruneErr != nil {
-			return nil, pruneErr
-		}
-		deleted := make([]string, 0)
-		deletedCount := 0
-		reclaimed := int64(0)
-		if report != nil {
-			deleted = append(deleted, report.Deleted...)
-			deletedCount = report.DeletedCount
-			reclaimed = report.SpaceReclaimedBytes
-		}
-		slices.Sort(deleted)
-		result["deleted"] = deleted
-		result["deletedCount"] = deletedCount
-		result["spaceReclaimedBytes"] = reclaimed
-		result["spaceReclaimedHuman"] = humanBytes(reclaimed)
-		result["message"] = "pruned volumes"
+		return nil, ErrSystemPruneVolumes
 	case PruneModeAll:
 		var (
 			containerReport *engine.ContainerPruneReport
-			volumeReport    *engine.VolumePruneReport
 			imageReport     *engine.ImagePruneReport
 			errorsByStep    = map[string]string{}
 		)
@@ -319,15 +343,14 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		} else {
 			containerReport = r
 		}
-		if r, pruneErr := pm.PruneVolumes(); pruneErr != nil {
-			errorsByStep["volumes"] = pruneErr.Error()
-		} else {
-			volumeReport = r
-		}
 		if r, pruneErr := pm.PruneDanglingImages(); pruneErr != nil {
 			errorsByStep["images"] = pruneErr.Error()
 		} else {
 			imageReport = r
+		}
+		modelReport, modelErr := f.pruneUnusedLocalModels()
+		if modelErr != nil {
+			errorsByStep["models"] = modelErr.Error()
 		}
 		containerDeleted := make([]string, 0)
 		containerDeletedCount := 0
@@ -336,15 +359,6 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 			containerDeletedCount = containerReport.DeletedCount
 		}
 		slices.Sort(containerDeleted)
-		volumeDeleted := make([]string, 0)
-		volumeDeletedCount := 0
-		volumeReclaimed := int64(0)
-		if volumeReport != nil {
-			volumeDeleted = append(volumeDeleted, volumeReport.Deleted...)
-			volumeDeletedCount = volumeReport.DeletedCount
-			volumeReclaimed = volumeReport.SpaceReclaimedBytes
-		}
-		slices.Sort(volumeDeleted)
 		imageDeleted := make([]string, 0)
 		imageDeletedCount := 0
 		imageReclaimed := int64(0)
@@ -356,24 +370,61 @@ func (f *Facade) Prune(mode string) (map[string]any, error) {
 		slices.Sort(imageDeleted)
 		result["containersDeleted"] = containerDeleted
 		result["containersDeletedCount"] = containerDeletedCount
-		result["volumesDeleted"] = volumeDeleted
-		result["volumesDeletedCount"] = volumeDeletedCount
+		result["volumesDeleted"] = []string{}
+		result["volumesDeletedCount"] = 0
 		result["imagesDeleted"] = imageDeleted
 		result["imagesDeletedCount"] = imageDeletedCount
-		result["deletedCount"] = containerDeletedCount + volumeDeletedCount + imageDeletedCount
-		result["spaceReclaimedBytes"] = volumeReclaimed + imageReclaimed
-		result["spaceReclaimedHuman"] = humanBytes(volumeReclaimed + imageReclaimed)
+		attachModelPruneReport(result, modelReport)
+		result["deletedCount"] = containerDeletedCount + imageDeletedCount + modelRemovedCount(modelReport)
+		result["spaceReclaimedBytes"] = imageReclaimed
+		result["spaceReclaimedHuman"] = humanBytes(imageReclaimed)
 		if len(errorsByStep) > 0 {
 			result["status"] = "partial"
 			result["errors"] = errorsByStep
-			result["message"] = "pruned containers, volumes, and dangling images with partial failures"
+			result["message"] = "pruned containers, dangling images, and unused local models with partial failures"
 		} else {
-			result["message"] = "pruned containers, volumes, and dangling images"
+			result["message"] = "pruned containers, dangling images, and unused local models"
 		}
 	default:
 		return nil, fmt.Errorf("unsupported prune mode %q", normalizedMode)
 	}
 	return result, nil
+}
+
+func (f *Facade) pruneUnusedLocalModels() (*modelmanager.PruneReport, error) {
+	if f == nil {
+		return nil, errors.New("runtime facade is not initialized")
+	}
+	return f.modelManager().PruneDangling()
+}
+
+func (f *Facade) attachUnusedLocalModelPrune(result map[string]any) error {
+	report, err := f.pruneUnusedLocalModels()
+	if err != nil {
+		return err
+	}
+	attachModelPruneReport(result, report)
+	return nil
+}
+
+func attachModelPruneReport(result map[string]any, report *modelmanager.PruneReport) {
+	if result == nil {
+		return
+	}
+	removed := make([]string, 0)
+	if report != nil {
+		removed = append(removed, report.Removed...)
+	}
+	slices.Sort(removed)
+	result["modelsRemoved"] = removed
+	result["modelsRemovedCount"] = len(removed)
+}
+
+func modelRemovedCount(report *modelmanager.PruneReport) int {
+	if report == nil {
+		return 0
+	}
+	return len(report.Removed)
 }
 
 // ListImages returns normalized image list for local runtime engine.
@@ -458,6 +509,9 @@ func (f *Facade) PullImage(imageRef string, registryID *int, platform string) (s
 		if strings.EqualFold(strings.TrimSpace(item.URL), "from_cache") {
 			return "", fmt.Errorf("registryId %d cannot be used for pull (from_cache)", *registryID)
 		}
+		if err := models.RequireOCIForImagePull(item); err != nil {
+			return "", err
+		}
 		reg = item
 		resolvedImage, _, _ = imageref.ResolveForRegistry(imageRef, item.URL)
 	}
@@ -490,6 +544,9 @@ func (f *Facade) PullImageWithProgress(imageRef string, registryID *int, platfor
 		}
 		if strings.EqualFold(strings.TrimSpace(item.URL), "from_cache") {
 			return "", fmt.Errorf("registryId %d cannot be used for pull (from_cache)", *registryID)
+		}
+		if err := models.RequireOCIForImagePull(item); err != nil {
+			return "", err
 		}
 		reg = item
 		resolvedImage, _, _ = imageref.ResolveForRegistry(imageRef, item.URL)
@@ -587,6 +644,7 @@ func (f *Facade) ListRuntimeMicroservices() []map[string]any {
 				"containerId": status.ContainerID,
 				"image":       image,
 			}
+			f.attachPodID(entry, status.ContainerID, status.PodID)
 			result = append(result, entry)
 		}
 	}
@@ -595,6 +653,9 @@ func (f *Facade) ListRuntimeMicroservices() []map[string]any {
 	}
 
 	for _, item := range localByUUID {
+		if item.IsGone() {
+			continue
+		}
 		state := strings.TrimSpace(item.RuntimeState)
 		if state == "" {
 			state = strings.TrimSpace(item.State)
@@ -612,6 +673,7 @@ func (f *Facade) ListRuntimeMicroservices() []map[string]any {
 		if entry["source"] == "" {
 			entry["source"] = "local-cli"
 		}
+		f.attachPodID(entry, item.ContainerID, "")
 		result = append(result, entry)
 	}
 
@@ -645,6 +707,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		if entry == nil {
 			return nil, errors.New("control plane deployment not found")
 		}
+		attachDurabilityInspect(entry, lookupReporterMicroserviceStatus(f.sr, uuid), item.LastError, item.RestartCount)
 		entry["raw"] = map[string]any{
 			"engineInspect":        f.engineInspectForMicroservice(uuid),
 			"engineType":           currentEngineName(f.cfg),
@@ -658,7 +721,7 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		if state == "" {
 			state = strings.TrimSpace(local.State)
 		}
-		return map[string]any{
+		item := map[string]any{
 			"uuid":         local.LocalUUID,
 			"name":         local.MicroserviceName,
 			"application":  local.ApplicationName,
@@ -669,8 +732,6 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 			"image":        local.ImageName,
 			"desiredState": local.DesiredState,
 			"runtimeState": local.RuntimeState,
-			"lastError":    local.LastError,
-			"restartCount": local.RestartCount,
 			"manifestYAML": local.ManifestYAML,
 			"raw": map[string]any{
 				"localDeployment":      local,
@@ -678,7 +739,12 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 				"engineType":           currentEngineName(f.cfg),
 				"inspectSchemaVersion": "v1",
 			},
-		}, nil
+		}
+		attachDurabilityInspect(item, lookupReporterMicroserviceStatus(f.sr, uuid), local.LastError, local.RestartCount)
+		f.attachPodID(item, local.ContainerID, "")
+		modelsCat, knowledgeCat := catalogsFromLocalManifestYAML(local.ManifestYAML)
+		attachWorkloadCatalogInspect(item, modelsCat, knowledgeCat, models.ModelSourceLocal, modelcatalog.LookupFromStore(f.db), knowledgecatalog.LookupFromStore(f.db), local.LastError)
+		return item, nil
 	}
 	pmStatus := f.sr.GetProcessManagerStatus()
 	if pmStatus == nil {
@@ -691,12 +757,20 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 	name := ""
 	application := ""
 	image := ""
+	var catalog *models.ModelCatalog
+	var knowledge *models.KnowledgeCatalog
 	if ms := f.fa.FindLatestMicroserviceByUUID(uuid); ms != nil {
 		name = ms.MicroserviceName
 		application = ms.ApplicationName
 		image = ms.ImageName
+		catalog = ms.Models
+		knowledge = ms.Knowledge
 	}
-	return map[string]any{
+	storedStatus := ""
+	if status.ErrorMessage != nil {
+		storedStatus = strings.TrimSpace(*status.ErrorMessage)
+	}
+	item := map[string]any{
 		"uuid":         uuid,
 		"name":         name,
 		"application":  application,
@@ -706,7 +780,6 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 		"containerId":  status.ContainerID,
 		"image":        image,
 		"percentage":   status.Percentage,
-		"errorMessage": status.ErrorMessage,
 		"healthStatus": status.HealthStatus,
 		"raw": map[string]any{
 			"processManager":       status,
@@ -714,7 +787,11 @@ func (f *Facade) GetRuntimeMicroservice(id string) (map[string]any, error) {
 			"engineType":           currentEngineName(f.cfg),
 			"inspectSchemaVersion": "v1",
 		},
-	}, nil
+	}
+	attachDurabilityInspect(item, status, "", 0)
+	f.attachPodID(item, status.ContainerID, status.PodID)
+	attachWorkloadCatalogInspect(item, catalog, knowledge, models.ModelSourceManaged, modelcatalog.LookupFromStore(f.db), knowledgecatalog.LookupFromStore(f.db), storedStatus)
+	return item, nil
 }
 
 func (f *Facade) engineInspectForMicroservice(microserviceUUID string) map[string]any {
@@ -743,6 +820,24 @@ func currentEngineName(cfg *config.Config) string {
 		engineName = "docker"
 	}
 	return engineName
+}
+
+func (f *Facade) attachPodID(entry map[string]any, containerID, statusPodID string) {
+	if entry == nil {
+		return
+	}
+	podID := strings.TrimSpace(statusPodID)
+	containerID = strings.TrimSpace(containerID)
+	if podID == "" {
+		sandboxID := ""
+		if id, err := processmanager.GetInstance().GetContainerSandboxID(containerID); err == nil {
+			sandboxID = id
+		}
+		podID = models.PodIDForEngine(currentEngineName(f.cfg), containerID, sandboxID)
+	}
+	if podID != "" {
+		entry["podId"] = podID
+	}
 }
 
 func shouldSuppressManagedRuntimeEntry(
@@ -864,6 +959,9 @@ func (f *Facade) ResolveMicroserviceID(selector string) (string, error) {
 		}
 		if locals, err := f.db.ListLocalWorkloads(); err == nil {
 			for _, item := range locals {
+				if item == nil || item.IsGone() {
+					continue
+				}
 				if !strings.EqualFold(strings.TrimSpace(item.ApplicationName), app) ||
 					!strings.EqualFold(strings.TrimSpace(item.MicroserviceName), name) {
 					continue
@@ -903,6 +1001,9 @@ func (f *Facade) ResolveMicroserviceID(selector string) (string, error) {
 
 	pm := processmanager.GetInstance()
 	if cont, matches, err := pm.GetContainerByIDPrefix(trimmed); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not initialized") {
+			return "", errors.New("microservice not found")
+		}
 		return "", err
 	} else if len(matches) > 1 {
 		return "", &ErrAmbiguousMicroserviceSelector{Matches: matches}
@@ -1024,32 +1125,79 @@ func (f *Facade) RestartRuntimeMicroservice(selector string) (string, error) {
 	return uuid, nil
 }
 
+func isMicroserviceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "microservice not found")
+}
+
+func (f *Facade) removeLocalWorkloadRecord(local *models.LocalDeployedMicroservice, cleanup bool) (string, error) {
+	uuid := strings.TrimSpace(local.LocalUUID)
+	nowSec := time.Now().Unix()
+	local.DesiredState = "deleted"
+	local.RuntimeState = "deleting"
+	local.State = local.RuntimeState
+	local.LastTransitionAt = nowSec
+	local.DeletedAt = &nowSec
+	_ = f.db.UpsertLocalWorkload(local)
+	if strings.TrimSpace(local.ContainerID) != "" {
+		_ = processmanager.GetInstance().RemoveContainerByContainerID(local.ContainerID)
+	}
+	disk := ""
+	if f.cfg != nil {
+		disk = f.cfg.DiskDirectory
+	}
+	_ = modelcatalog.Release(disk, f.db, uuid)
+	if err := f.db.DeleteLocalWorkload(uuid); err != nil {
+		return "", err
+	}
+	if cleanup {
+		if err := f.db.AddPersistentVolumeCleanupUUID(uuid); err != nil {
+			return "", err
+		}
+	}
+	return uuid, nil
+}
+
 func (f *Facade) RemoveRuntimeMicroservice(selector string) (string, error) {
+	return f.RemoveRuntimeMicroserviceWithCleanup(selector, false)
+}
+
+// RemoveRuntimeMicroserviceWithCleanup removes a microservice. Persistent
+// VOLUME data is retained. cleanup records a reserved bit for later explicit
+// orphan prune and does not delete files or start a sweeper.
+func (f *Facade) RemoveRuntimeMicroserviceWithCleanup(selector string, cleanup bool) (string, error) {
+	trimmed := strings.TrimSpace(selector)
+	if trimmed == "" {
+		return "", errors.New("microservice id is required")
+	}
+	if local, localErr := f.db.GetLocalWorkload(trimmed); localErr == nil && local != nil {
+		if err := f.guardControlPlaneMicroserviceMutation(trimmed, "rm"); err != nil {
+			return "", err
+		}
+		return f.removeLocalWorkloadRecord(local, cleanup)
+	}
 	uuid, err := f.ResolveMicroserviceID(selector)
 	if err != nil {
+		if isMicroserviceNotFound(err) {
+			return trimmed, nil
+		}
 		return "", err
 	}
 	if err := f.guardControlPlaneMicroserviceMutation(uuid, "rm"); err != nil {
 		return "", err
 	}
 	if local, localErr := f.db.GetLocalWorkload(uuid); localErr == nil && local != nil {
-		nowSec := time.Now().Unix()
-		local.DesiredState = "deleted"
-		local.RuntimeState = "deleting"
-		local.State = local.RuntimeState
-		local.LastTransitionAt = nowSec
-		local.DeletedAt = &nowSec
-		_ = f.db.UpsertLocalWorkload(local)
-		if strings.TrimSpace(local.ContainerID) != "" {
-			_ = processmanager.GetInstance().RemoveContainerByContainerID(local.ContainerID)
-		}
-		if err := f.db.DeleteLocalWorkload(uuid); err != nil {
-			return "", err
-		}
-		return uuid, nil
+		return f.removeLocalWorkloadRecord(local, cleanup)
 	}
 	if err := processmanager.GetInstance().RemoveMicroservice(uuid); err != nil {
 		return "", err
+	}
+	if cleanup {
+		if err := f.db.AddPersistentVolumeCleanupUUID(uuid); err != nil {
+			return "", err
+		}
 	}
 	return uuid, nil
 }
@@ -1115,6 +1263,9 @@ func (f *Facade) ParseAndValidateLocalRuntimeClassManifest(manifest string) (*mo
 	if err := doc.Validate(); err != nil {
 		return nil, err
 	}
+	if err := f.rejectLocalApplyForManagedRuntimeClass(doc.Metadata.Name); err != nil {
+		return nil, err
+	}
 	return doc, nil
 }
 
@@ -1127,9 +1278,10 @@ func (f *Facade) ApplyLocalRuntimeClassManifest(manifest string, dryRun bool) (*
 	item := &models.LocalRuntimeClass{
 		Name:    doc.Metadata.Name,
 		Handler: doc.Handler,
+		Source:  models.RuntimeClassSourceLocal,
 	}
+	item.Normalize()
 	if dryRun {
-		item.Normalize()
 		return item, nil
 	}
 	if _, getErr := f.db.GetLocalRuntimeClass(item.Name); getErr != nil && !errors.Is(getErr, sql.ErrNoRows) {
@@ -1138,8 +1290,44 @@ func (f *Facade) ApplyLocalRuntimeClassManifest(manifest string, dryRun bool) (*
 	if err := f.db.UpsertLocalRuntimeClass(item); err != nil {
 		return nil, wrapRuntimeClassOperationError(RuntimeClassStageWriteConfig, err)
 	}
-	item.Normalize()
 	return item, nil
+}
+
+// ApplyControllerRuntimeClasses replaces the fleet-desired RuntimeClass snapshot
+// and applies it on the edgelet engine. Catalog handlers stay on the existing
+// metadata persist path and do not bounce the data plane.
+func (f *Facade) ApplyControllerRuntimeClasses(items []*models.ControllerRuntimeClass) error {
+	if f == nil || f.db == nil {
+		return errors.New("runtime facade is not initialized")
+	}
+	if err := f.db.SaveControllerRuntimeClasses(items); err != nil {
+		return wrapRuntimeClassOperationError(RuntimeClassStageWriteConfig, err)
+	}
+	return fieldagent.ApplyDesiredRuntimeClasses(f.cfg, items)
+}
+
+func (f *Facade) rejectLocalApplyForManagedRuntimeClass(name string) error {
+	if f == nil || f.db == nil || strings.TrimSpace(name) == "" {
+		return nil
+	}
+	if strings.TrimSpace(config.GetInstance().IOFogUUID) == "" {
+		return nil
+	}
+	managed, err := f.db.IsManagedFleetRuntimeClass(name, true)
+	if err != nil {
+		return wrapRuntimeClassOperationError(RuntimeClassStageWriteConfig, err)
+	}
+	if managed {
+		return &ErrRuntimeClassManagedName{Name: name}
+	}
+	existing, err := f.db.GetLocalRuntimeClass(name)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return wrapRuntimeClassOperationError(RuntimeClassStageWriteConfig, err)
+	}
+	if existing != nil && existing.Source == models.RuntimeClassSourceManaged {
+		return &ErrRuntimeClassManagedName{Name: name}
+	}
+	return nil
 }
 
 // ListRuntimeClasses returns persisted RuntimeClass entries.
@@ -1190,85 +1378,31 @@ func (f *Facade) DeleteRuntimeClass(name string) error {
 }
 
 func isReservedRuntimeName(name string) bool {
-	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "crun":
-		return true
-	default:
-		return false
-	}
+	return models.IsReservedRuntimeClassName(name)
 }
 
 func (f *Facade) ensureRuntimeClassNotInUse(item *models.LocalRuntimeClass) error {
 	if item == nil {
 		return nil
 	}
-	items, err := f.db.ListLocalWorkloads()
+	locals, err := f.db.ListLocalWorkloads()
 	if err != nil {
 		return fmt.Errorf("failed to list local deployments while checking runtimeclass delete: %w", err)
 	}
-	runtimeNames := []string{strings.TrimSpace(item.RuntimeName)}
-	runtimeSet := make(map[string]struct{}, len(runtimeNames))
-	for _, name := range runtimeNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		runtimeSet[name] = struct{}{}
+	controller, err := f.db.LoadControllerMicroservices()
+	if err != nil {
+		return fmt.Errorf("failed to list controller microservices while checking runtimeclass delete: %w", err)
 	}
-	if len(runtimeSet) == 0 {
+	blockingUUIDs := models.RuntimeClassBlockingUUIDs(item, locals, controller)
+	if len(blockingUUIDs) == 0 {
 		return nil
 	}
-
-	blockingSet := make(map[string]struct{})
-	for _, local := range items {
-		if local == nil || local.DeletedAt != nil {
-			continue
-		}
-		state := strings.TrimSpace(strings.ToLower(local.RuntimeState))
-		if state == "" {
-			state = strings.TrimSpace(strings.ToLower(local.State))
-		}
-		if state != "running" {
-			continue
-		}
-		runtime := runtimeFromManifestYAML(local.ManifestYAML)
-		if runtime == "" {
-			continue
-		}
-		if _, used := runtimeSet[runtime]; !used {
-			continue
-		}
-		if uuid := strings.TrimSpace(local.LocalUUID); uuid != "" {
-			blockingSet[uuid] = struct{}{}
-		}
-	}
-	if len(blockingSet) == 0 {
-		return nil
-	}
-	blockingUUIDs := make([]string, 0, len(blockingSet))
-	for uuid := range blockingSet {
-		blockingUUIDs = append(blockingUUIDs, uuid)
-	}
-	slices.Sort(blockingUUIDs)
+	runtimeNames := []string{strings.TrimSpace(item.RuntimeName), strings.TrimSpace(item.Name)}
 	return &ErrRuntimeClassInUse{
 		Name:                      item.Name,
 		RuntimeNames:              sortedUniqueNonEmpty(runtimeNames),
 		BlockingMicroserviceUuids: blockingUUIDs,
 	}
-}
-
-func runtimeFromManifestYAML(manifest string) string {
-	doc := struct {
-		Spec struct {
-			Container struct {
-				Runtime string `yaml:"runtime"`
-			} `yaml:"container"`
-		} `yaml:"spec"`
-	}{}
-	if err := yaml.Unmarshal([]byte(strings.TrimSpace(manifest)), &doc); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.ToLower(doc.Spec.Container.Runtime))
 }
 
 func sortedUniqueNonEmpty(items []string) []string {
@@ -1310,6 +1444,18 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 		logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy manifest validation failed: %v", err))
 		return "", nil, err
 	}
+	if f.db != nil && f.db.Conn() != nil && doc.Spec.Models.HasItems() {
+		if err := doc.ValidateCatalogApply(modelcatalog.LookupFromStore(f.db)); err != nil {
+			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy catalog validation failed: %v", err))
+			return "", nil, err
+		}
+	}
+	if f.db != nil && f.db.Conn() != nil && doc.Spec.Knowledge.HasItems() {
+		if err := doc.ValidateKnowledgeCatalogApply(knowledgecatalog.LookupFromStore(f.db)); err != nil {
+			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy knowledge catalog validation failed: %v", err))
+			return "", nil, err
+		}
+	}
 	var existing *models.LocalDeployedMicroservice
 	deploymentID := uuid.NewString()
 	if f.db.Conn() != nil {
@@ -1317,12 +1463,24 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 		if findErr != nil {
 			return "", nil, fmt.Errorf("failed to resolve existing local deployment: %w", findErr)
 		}
-		if len(existingItems) > 1 {
-			matches := make([]string, 0, len(existingItems))
-			for _, item := range existingItems {
-				if item == nil {
-					continue
-				}
+		live := make([]*models.LocalDeployedMicroservice, 0, len(existingItems))
+		var deleting *models.LocalDeployedMicroservice
+		for _, item := range existingItems {
+			if item == nil || item.IsGone() {
+				continue
+			}
+			if item.IsDeleting() {
+				deleting = item
+				continue
+			}
+			live = append(live, item)
+		}
+		if deleting != nil && len(live) == 0 {
+			return "", nil, fmt.Errorf("local microservice %q is deleting", strings.TrimSpace(doc.Metadata.Name))
+		}
+		if len(live) > 1 {
+			matches := make([]string, 0, len(live))
+			for _, item := range live {
 				if id := strings.TrimSpace(item.LocalUUID); id != "" {
 					matches = append(matches, id)
 				}
@@ -1330,8 +1488,8 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			slices.Sort(matches)
 			return "", nil, &ErrAmbiguousMicroserviceSelector{Matches: matches}
 		}
-		if len(existingItems) == 1 {
-			existing = existingItems[0]
+		if len(live) == 1 {
+			existing = live[0]
 			if existing != nil && strings.TrimSpace(existing.LocalUUID) != "" {
 				deploymentID = strings.TrimSpace(existing.LocalUUID)
 			}
@@ -1367,9 +1525,15 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy missing registry deploymentId=%s registryId=%d", deploymentID, regID))
 			return "", nil, fmt.Errorf("invalid registry id %d", regID)
 		}
+		if typeErr := models.RequireOCIForImagePull(reg); typeErr != nil {
+			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy registry type rejected deploymentId=%s registryId=%d err=%v", deploymentID, regID, typeErr))
+			return "", nil, typeErr
+		}
 		registry = reg
 		localMS.RegistryID = reg.ID
 	}
+	keepContainer := existing != nil && strings.TrimSpace(existing.ContainerID) != "" &&
+		!localDeployNeedsContainerRecreate(existing, localMS, deploymentID)
 	nextGeneration := int64(1)
 	restartCount := 0
 	if existing != nil {
@@ -1392,10 +1556,28 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 		Generation:         nextGeneration,
 		ObservedGeneration: 0,
 	}
-	emitDeployProgress(progress, DeployStagePersisting, "saving deployment metadata")
-	if err := f.UpsertLocalDeployment(localItem); err != nil {
-		logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy persist initial failed deploymentId=%s err=%v", deploymentID, err))
-		return "", nil, err
+	if keepContainer {
+		localItem.ContainerID = strings.TrimSpace(existing.ContainerID)
+		localItem.State = "running"
+		localItem.RuntimeState = "running"
+		localItem.ObservedGeneration = localItem.Generation
+		emitDeployProgress(progress, DeployStagePersisting, "saving deployment metadata")
+		if err := f.UpsertLocalDeployment(localItem); err != nil {
+			logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy persist initial failed deploymentId=%s err=%v", deploymentID, err))
+			return "", nil, err
+		}
+		if f.db != nil && f.db.Conn() != nil {
+			disk, _ := f.liveDiskPolicy()
+			if _, prepErr := modelcatalog.Prepare(disk, f.db, localMS, models.ModelSourceLocal, false); prepErr != nil {
+				logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy catalog refresh failed deploymentId=%s err=%v", deploymentID, prepErr))
+			}
+			if _, prepErr := knowledgecatalog.Prepare(disk, f.db, localMS, models.KnowledgeSourceLocal, false); prepErr != nil {
+				logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy knowledge catalog refresh failed deploymentId=%s err=%v", deploymentID, prepErr))
+			}
+		}
+		emitDeployProgress(progress, DeployStageDone, "deployment completed")
+		logging.LogInfo(runtimeAPIModuleName, fmt.Sprintf("local deploy updated catalog without recreate deploymentId=%s containerId=%s", deploymentID, localItem.ContainerID))
+		return deploymentID, doc, nil
 	}
 	if existing != nil && strings.TrimSpace(existing.ContainerID) != "" {
 		if removeErr := processmanager.GetInstance().RemoveContainerByContainerID(strings.TrimSpace(existing.ContainerID)); removeErr != nil {
@@ -1405,6 +1587,11 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			)
 			return "", nil, fmt.Errorf("failed to remove previous local runtime for %s: %w", deploymentID, removeErr)
 		}
+	}
+	emitDeployProgress(progress, DeployStagePersisting, "saving deployment metadata")
+	if err := f.UpsertLocalDeployment(localItem); err != nil {
+		logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy persist initial failed deploymentId=%s err=%v", deploymentID, err))
+		return "", nil, err
 	}
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 
@@ -1418,6 +1605,16 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 		emitDeployProgress(progress, stage, message)
 	})
 	if launchErr != nil {
+		if errors.Is(launchErr, modelcatalog.ErrWaiting) {
+			localItem.State = "queued"
+			localItem.RuntimeState = "queued"
+			localItem.LastError = models.CatalogWaitingMessage
+			localItem.LastTransitionAt = time.Now().Unix()
+			emitDeployProgress(progress, DeployStagePersisting, "waiting for model download")
+			_ = f.UpsertLocalDeployment(localItem)
+			logging.LogInfo(runtimeAPIModuleName, fmt.Sprintf("local deploy queued for model download deploymentId=%s name=%s", deploymentID, strings.TrimSpace(doc.Metadata.Name)))
+			return deploymentID, doc, nil
+		}
 		localItem.State = "failed"
 		localItem.RuntimeState = "failed"
 		localItem.LastError = launchErr.Error()
@@ -1467,16 +1664,28 @@ func (f *Facade) ParseAndValidateLocalRegistryManifest(manifest string) (*models
 }
 
 // ApplyLocalRegistryManifest validates and stores a registry manifest.
+// spec.id set → upsert that id; omitted → NextLocalRegistryID(). Built-in
+// ids cannot be edited. Collision on (type, url) for an existing id is a
+// validate error.
 func (f *Facade) ApplyLocalRegistryManifest(manifest string, dryRun bool) (*models.Registry, error) {
 	doc, err := f.ParseAndValidateLocalRegistryManifest(manifest)
 	if err != nil {
 		return nil, err
 	}
-	registryID, err := f.nextLocalRegistryID()
-	if err != nil {
+	registryID := doc.Spec.ID
+	if registryID <= 0 {
+		registryID, err = f.nextLocalRegistryID()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if models.IsBuiltInLocalRegistryID(registryID) {
+		return nil, fmt.Errorf("default registry %d cannot be edited", registryID)
+	}
+	reg := doc.ToRegistry(registryID)
+	if err := f.db.CheckLocalRegistryCollision(reg); err != nil {
 		return nil, err
 	}
-	reg := models.NewRegistry(registryID, doc.Spec.URL, !doc.Spec.Private, doc.Spec.UserName, doc.Spec.Password, doc.Spec.UserEmail)
 	if dryRun {
 		return reg, nil
 	}
@@ -1490,17 +1699,10 @@ func (f *Facade) ApplyLocalRegistryManifest(manifest string, dryRun bool) (*mode
 }
 
 func (f *Facade) nextLocalRegistryID() (int, error) {
-	items, err := f.ListRegistries()
-	if err != nil {
+	if err := f.db.EnsureDefaultLocalRegistries(); err != nil {
 		return 0, err
 	}
-	maxID := 2
-	for _, item := range items {
-		if item.ID > maxID {
-			maxID = item.ID
-		}
-	}
-	return maxID + 1, nil
+	return f.db.NextLocalRegistryID()
 }
 
 // ListRegistries returns persisted registry entries with defaults guaranteed.
@@ -1518,11 +1720,23 @@ func (f *Facade) GetRegistry(id int) (*models.Registry, error) {
 
 // DeleteRegistry removes one local registry entry.
 func (f *Facade) DeleteRegistry(id int) error {
-	if id <= 2 {
+	if models.IsBuiltInLocalRegistryID(id) {
 		return fmt.Errorf("default registry %d cannot be removed", id)
 	}
 	return f.db.DeleteLocalRegistry(id)
 }
 func manifestToMicroservice(doc *models.LocalDeployManifest, deploymentID, image string) *models.Microservice {
 	return models.BuildMicroserviceFromLocalManifest(doc, deploymentID, image)
+}
+
+func localDeployNeedsContainerRecreate(existing *models.LocalDeployedMicroservice, next *models.Microservice, deploymentID string) bool {
+	if existing == nil || next == nil || strings.TrimSpace(existing.ManifestYAML) == "" {
+		return true
+	}
+	prevDoc := &models.LocalDeployManifest{}
+	if err := yaml.Unmarshal([]byte(existing.ManifestYAML), prevDoc); err != nil {
+		return true
+	}
+	prev := models.BuildMicroserviceFromLocalManifest(prevDoc, deploymentID, prevDoc.ManifestImage())
+	return models.LocalDeployNeedsRecreate(prev, next)
 }

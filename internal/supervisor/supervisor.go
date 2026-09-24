@@ -16,12 +16,14 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
 	"github.com/eclipse-iofog/edgelet/internal/gps"
 	"github.com/eclipse-iofog/edgelet/internal/healthcheck"
+	"github.com/eclipse-iofog/edgelet/internal/knowledgemanager"
+	"github.com/eclipse-iofog/edgelet/internal/modelmanager"
+	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/network"
 	"github.com/eclipse-iofog/edgelet/internal/processmanager"
 	"github.com/eclipse-iofog/edgelet/internal/pruning"
 	"github.com/eclipse-iofog/edgelet/internal/resourceconsumption"
-	"github.com/eclipse-iofog/edgelet/internal/resourcemanager"
 	"github.com/eclipse-iofog/edgelet/internal/runtimestate"
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/store"
@@ -74,7 +76,6 @@ type Supervisor struct {
 	resourceConsumptionManager *resourceconsumption.Manager
 	fieldAgent                 *fieldagent.FieldAgent
 	processManager             *processmanager.ProcessManager
-	resourceManager            *resourcemanager.Manager
 	gpsManager                 *gps.Manager
 	localAPI                   *edgeletapi.EdgeletAPI
 	dockerPruningManager       *pruning.Manager
@@ -261,12 +262,6 @@ func (s *Supervisor) Start() error {
 		})
 	}
 
-	// Start Resource Manager
-	s.resourceManager = resourcemanager.GetInstance()
-	if err := s.startModule(s.resourceManager); err != nil {
-		return err
-	}
-
 	// Start GPS Manager
 	s.gpsManager = gps.GetInstance()
 	if err := s.startModule(s.gpsManager); err != nil {
@@ -275,18 +270,35 @@ func (s *Supervisor) Start() error {
 
 	// Start Pruning Manager — inject engine so non-Docker engines (iofog/containerd) are pruned correctly.
 	// Also wire in the microservice image callback so scheduled/threshold pruning protects
-	// ALL configured microservice images.
+	// controller-managed and local-deployed microservice images.
 	s.dockerPruningManager = pruning.GetInstance()
 	pm := s.processManager
 	s.dockerPruningManager.SetGetMicroservicesCallback(func() []string {
-		microservices := pm.GetLatestMicroservices()
-		names := make([]string, 0, len(microservices))
-		for _, ms := range microservices {
-			names = append(names, ms.ImageName)
-		}
-		return names
+		return pm.ConfiguredMicroserviceImages()
 	})
 	s.dockerPruningManager.SetEngine(eng)
+	pruneUnusedLocalModels := func() {
+		modelsRoot := modelpull.Root(s.config.DiskDirectory)
+		mm := modelmanager.New(store.GetInstance(), modelsRoot)
+		mm.SetLiveConfig(s.config)
+		mm.SetDiskPolicy(s.config.DiskDirectory, s.config.AvailableDiskThreshold, nil)
+		if _, err := mm.PruneDangling(); err != nil {
+			logging.LogError(moduleName, "Error pruning unused local models", err)
+		}
+	}
+	pruneUnusedLocalKnowledge := func() {
+		knowledgeRoot := modelpull.KnowledgeRoot(s.config.DiskDirectory)
+		km := knowledgemanager.New(store.GetInstance(), knowledgeRoot)
+		km.SetLiveConfig(s.config)
+		km.SetDiskPolicy(s.config.DiskDirectory, s.config.AvailableDiskThreshold, nil)
+		if _, err := km.PruneDangling(); err != nil {
+			logging.LogError(moduleName, "Error pruning unused local knowledge", err)
+		}
+	}
+	s.dockerPruningManager.SetPruneModelsCallback(pruneUnusedLocalModels)
+	s.dockerPruningManager.SetPruneKnowledgeCallback(pruneUnusedLocalKnowledge)
+	s.processManager.SetWatchdogLocalModelsCallback(pruneUnusedLocalModels)
+	s.processManager.SetWatchdogLocalKnowledgeCallback(pruneUnusedLocalKnowledge)
 	if err := s.dockerPruningManager.Start(); err != nil {
 		logging.LogError(moduleName, "Failed to start Pruning Manager", err)
 	}
@@ -504,7 +516,7 @@ func (s *Supervisor) Stop() error {
 
 	if s.dockerPruningManager != nil {
 		if err := s.dockerPruningManager.Stop(); err != nil {
-			logging.LogError(moduleName, "Error stopping Docker Pruning Manager", err)
+			logging.LogError(moduleName, "Error stopping Edgelet Pruning Manager", err)
 		}
 	}
 
@@ -517,12 +529,6 @@ func (s *Supervisor) Stop() error {
 	if s.gpsManager != nil {
 		if err := s.gpsManager.Stop(); err != nil {
 			logging.LogError(moduleName, "Error stopping GPS Manager", err)
-		}
-	}
-
-	if s.resourceManager != nil {
-		if err := s.resourceManager.Stop(); err != nil {
-			logging.LogError(moduleName, "Error stopping Resource Manager", err)
 		}
 	}
 
@@ -657,13 +663,13 @@ const containerdWatchdogFailureThreshold = 3
 // containerdWatchdogShouldSkipEscalation reports whether intentional data-plane
 // downtime must not trigger a control-plane restart.
 func containerdWatchdogShouldSkipEscalation(attachOnly bool) bool {
-	return attachOnly || processmanager.IsQuiescedForDataPlaneDrain()
+	return attachOnly || processmanager.DataPlaneDrainHoldActive() || processmanager.IsQuiescedForDataPlaneDrain()
 }
 
 // containerdWatchdogShouldEscalateUnhealthy reports whether repeated socket check
 // failures should request a control-plane restart.
 func containerdWatchdogShouldEscalateUnhealthy(consecutiveFailures int) bool {
-	if processmanager.IsQuiescedForDataPlaneDrain() {
+	if processmanager.DataPlaneDrainHoldActive() || processmanager.IsQuiescedForDataPlaneDrain() {
 		return false
 	}
 	return consecutiveFailures >= containerdWatchdogFailureThreshold
@@ -771,10 +777,6 @@ func (s *Supervisor) reloadHotConfig() error {
 
 	if s.resourceConsumptionManager != nil {
 		s.resourceConsumptionManager.InstanceConfigUpdated()
-	}
-
-	if s.resourceManager != nil {
-		s.resourceManager.InstanceConfigUpdated()
 	}
 
 	if s.networkInterfaceManager != nil {

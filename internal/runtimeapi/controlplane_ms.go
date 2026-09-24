@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 )
 
@@ -78,7 +79,7 @@ func controlPlaneRuntimeListEntry(item *models.ControlPlaneDeployment) map[strin
 	if state == "" {
 		state = strings.ToLower(strings.TrimSpace(item.State))
 	}
-	return map[string]any{
+	entry := map[string]any{
 		"uuid":        item.ControllerUUID,
 		"name":        item.Name,
 		"application": item.Namespace,
@@ -88,6 +89,10 @@ func controlPlaneRuntimeListEntry(item *models.ControlPlaneDeployment) map[strin
 		"containerId": item.ContainerID,
 		"image":       item.Image,
 	}
+	if podID := models.PodIDForEngine(currentEngineName(config.GetInstance()), item.ContainerID, ""); podID != "" {
+		entry["podId"] = podID
+	}
+	return entry
 }
 
 // IsControlPlaneDeleteBlocked reports whether err blocks control-plane delete while provisioned.

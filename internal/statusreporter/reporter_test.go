@@ -37,6 +37,12 @@ func TestGetStatusReport_IncludesAvailableRuntimes(t *testing.T) {
 	if !strings.Contains(report, "Available Runtimes          : docker") {
 		t.Fatalf("expected available runtimes line in report, got:\n%s", report)
 	}
+	runtimesIdx := strings.Index(report, "Available Runtimes")
+	classesIdx := strings.Index(report, "Runtime Classes")
+	cdiIdx := strings.Index(report, "Available CDI Devices")
+	if runtimesIdx == -1 || classesIdx < runtimesIdx || cdiIdx < classesIdx {
+		t.Fatalf("expected runtime classes and CDI after available runtimes, got:\n%s", report)
+	}
 }
 
 func TestGetAvailableRuntimes_DeterministicByEngineAndEmbeddedMode(t *testing.T) {
@@ -87,6 +93,48 @@ func TestGetAvailableRuntimes_DeterministicByEngineAndEmbeddedMode(t *testing.T)
 	runtimes = getAvailableRuntimesForEngine("edgelet", true)
 	if strings.Join(runtimes, ",") != "crun,edgelet-wasmtime,runc,spin" {
 		t.Fatalf("expected embedded edgelet runtimes with runtime classes and catalog, got: %v", runtimes)
+	}
+}
+
+func TestGetAppliedRuntimeClasses_SortedAppliedOnly(t *testing.T) {
+	cfg := config.GetInstance()
+	originalEngine := cfg.ContainerEngine
+	originalLister := listRuntimeClassesForStatus
+	t.Cleanup(func() {
+		cfg.ContainerEngine = originalEngine
+		listRuntimeClassesForStatus = originalLister
+	})
+
+	listRuntimeClassesForStatus = func() ([]*models.LocalRuntimeClass, error) {
+		return []*models.LocalRuntimeClass{
+			{Name: "spin", Handler: "spin", Source: models.RuntimeClassSourceManaged},
+			{Name: "nvidia", Handler: "nvidia", Source: models.RuntimeClassSourceLocal},
+		}, nil
+	}
+
+	cfg.ContainerEngine = "docker"
+	if got := GetAppliedRuntimeClasses(); len(got) != 0 {
+		t.Fatalf("docker classes want [], got %#v", got)
+	}
+
+	cfg.ContainerEngine = "edgelet"
+	got := GetAppliedRuntimeClasses()
+	if len(got) != 2 || got[0].Name != "nvidia" || got[0].Source != models.RuntimeClassSourceLocal {
+		t.Fatalf("expected nvidia local first, got %#v", got)
+	}
+	if got[1].Name != "spin" || got[1].Source != models.RuntimeClassSourceManaged {
+		t.Fatalf("expected spin managed second, got %#v", got)
+	}
+}
+
+func TestGetAvailableCDIDevices_DockerEmpty(t *testing.T) {
+	cfg := config.GetInstance()
+	originalEngine := cfg.ContainerEngine
+	cfg.ContainerEngine = "docker"
+	t.Cleanup(func() { cfg.ContainerEngine = originalEngine })
+	got := GetAvailableCDIDevices()
+	if got == nil || len(got) != 0 {
+		t.Fatalf("expected empty CDI list for docker, got %#v", got)
 	}
 }
 

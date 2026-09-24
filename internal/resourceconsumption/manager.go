@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -75,6 +76,7 @@ func (rcm *Manager) Start() error {
 	rcm.ctx, rcm.cancel = context.WithCancel(context.Background())
 
 	logging.LogDebug(moduleName, "Collecting initial resource usage data")
+	rcm.ensureHostIdentity()
 	rcm.collectUsageData()
 	logging.LogDebug(moduleName, fmt.Sprintf("Initial resource usage: Memory=%.2f MiB, CPU=%.2f%%, Disk=%.2f GiB",
 		rcm.statusReporter.GetResourceConsumptionManagerStatus().MemoryUsage,
@@ -116,6 +118,9 @@ func (rcm *Manager) collectUsageData() {
 
 	diskUsage := rcm.directorySize(rcm.config.DiskDirectory)
 	availableMemory := rcm.getSystemAvailableMemory()
+	totalSystemMemory := rcm.getSystemTotalMemory()
+	systemCpus := rcm.getSystemLogicalCPUCount()
+	hostID := rcm.ensureHostIdentity()
 	availableDisk := rcm.getAvailableDisk()
 	totalDiskSpace := rcm.getTotalDiskSpace()
 
@@ -146,6 +151,11 @@ func (rcm *Manager) collectUsageData() {
 		status.DiskViolation = diskUsage > rcm.diskLimit
 		status.CPUViolation = totalCPU > rcm.cpuLimit
 		status.AvailableMemory = availableMemory
+		status.SystemTotalMemory = totalSystemMemory
+		status.SystemCpus = systemCpus
+		status.SystemOs = hostID.os
+		status.SystemOsVersion = hostID.osVersion
+		status.SystemKernelVersion = hostID.kernelVersion
 		status.AvailableDisk = availableDisk
 		status.TotalDiskSpace = totalDiskSpace
 		status.TotalCPU = sample.hostCPU
@@ -223,6 +233,19 @@ func (rcm *Manager) getSystemAvailableMemory() int64 {
 		return 0
 	}
 	return int64(vmStat.Available) // #nosec G115 -- system available memory is below int64 max in practice
+}
+
+func (rcm *Manager) getSystemTotalMemory() int64 {
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		logging.LogError(moduleName, "Error getting system total memory", err)
+		return 0
+	}
+	return int64(vmStat.Total) // #nosec G115 -- system total memory is below int64 max in practice
+}
+
+func (rcm *Manager) getSystemLogicalCPUCount() int {
+	return runtime.NumCPU()
 }
 
 func (rcm *Manager) getAvailableDisk() int64 {

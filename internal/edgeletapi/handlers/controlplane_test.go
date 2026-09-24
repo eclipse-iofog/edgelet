@@ -241,8 +241,14 @@ func TestControlPlaneHandlers_ApplyGetManifestDelete(t *testing.T) {
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
 	}
-	if len(eng.removeVolumeNames) != 2 {
-		t.Fatalf("expected 2 volume removals, got %#v", eng.removeVolumeNames)
+	if len(eng.removeVolumeNames) != 0 {
+		t.Fatalf("control-plane delete must not use named-volume removal, got %#v", eng.removeVolumeNames)
+	}
+	if _, err := store.GetInstance().GetPersistentVolume(controllerUUID, "iofog-controller-db"); err == nil {
+		t.Fatal("expected control-plane db volume ledger row to be deleted")
+	}
+	if _, err := store.GetInstance().GetPersistentVolume(controllerUUID, "iofog-controller-log"); err == nil {
+		t.Fatal("expected control-plane log volume ledger row to be deleted")
 	}
 
 	_, found, err := store.GetInstance().GetSystemControlPlane()

@@ -56,6 +56,13 @@ func (d *DB) UpsertLocalWorkload(ms *models.LocalDeployedMicroservice) error {
 	if err != nil {
 		return fmt.Errorf("failed to upsert local workload: %w", err)
 	}
+	if err := d.UpsertPersistentVolumesFromMappings(
+		ms.LocalUUID,
+		PersistentVolumeKindWorkload,
+		volumeMappingsFromManifestYAML(ms.ManifestYAML),
+	); err != nil {
+		return fmt.Errorf("failed to record persistent volumes for %s: %w", ms.LocalUUID, err)
+	}
 	return nil
 }
 
@@ -160,8 +167,10 @@ func (d *DB) FindLocalWorkloadsByAppAndName(application, name string) ([]*models
 
 // DeleteLocalWorkload removes a local workload record by id.
 func (d *DB) DeleteLocalWorkload(id string) error {
-	_, err := d.Conn().Exec(`DELETE FROM local_workloads WHERE local_uuid = ?`, id)
-	return err
+	if _, err := d.Conn().Exec(`DELETE FROM local_workloads WHERE local_uuid = ?`, id); err != nil {
+		return err
+	}
+	return d.MarkPersistentVolumesUnreferenced(id)
 }
 
 // ClearLocalWorkloads removes all local workload records.

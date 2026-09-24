@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
@@ -11,6 +12,18 @@ import (
 
 // SaveControllerMicroservices replaces all controller microservice rows in a single transaction.
 func (d *DB) SaveControllerMicroservices(microservices []*models.Microservice) error {
+	previous, err := d.LoadControllerMicroservices()
+	if err != nil {
+		return err
+	}
+	prevUUIDs := make(map[string]struct{}, len(previous))
+	for _, ms := range previous {
+		if ms == nil || strings.TrimSpace(ms.MicroserviceUUID) == "" {
+			continue
+		}
+		prevUUIDs[ms.MicroserviceUUID] = struct{}{}
+	}
+
 	tx, err := d.Conn().Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -21,13 +34,40 @@ func (d *DB) SaveControllerMicroservices(microservices []*models.Microservice) e
 		return fmt.Errorf("failed to clear controller_microservices: %w", err)
 	}
 
+	nextUUIDs := make(map[string]struct{}, len(microservices))
 	for _, ms := range microservices {
+		if ms == nil {
+			continue
+		}
 		if err := insertMicroservice(tx, ms); err != nil {
 			return fmt.Errorf("failed to insert microservice %s: %w", ms.MicroserviceUUID, err)
 		}
+		if uuid := strings.TrimSpace(ms.MicroserviceUUID); uuid != "" {
+			nextUUIDs[uuid] = struct{}{}
+		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	for _, ms := range microservices {
+		if ms == nil || strings.TrimSpace(ms.MicroserviceUUID) == "" {
+			continue
+		}
+		if err := d.UpsertPersistentVolumesFromMappings(ms.MicroserviceUUID, PersistentVolumeKindWorkload, ms.VolumeMappings); err != nil {
+			return fmt.Errorf("failed to record persistent volumes for %s: %w", ms.MicroserviceUUID, err)
+		}
+	}
+	for uuid := range prevUUIDs {
+		if _, ok := nextUUIDs[uuid]; ok {
+			continue
+		}
+		if err := d.MarkPersistentVolumesUnreferenced(uuid); err != nil {
+			return fmt.Errorf("failed to mark persistent volumes unreferenced for %s: %w", uuid, err)
+		}
+	}
+	return nil
 }
 
 // LoadControllerMicroservices retrieves all controller microservices ordered by uuid.
@@ -41,7 +81,10 @@ func (d *DB) LoadControllerMicroservices() ([]*models.Microservice, error) {
 		config, run_as_user, platform, runtime, container_ip,
 		annotations, pid_mode, ipc_mode, cpu_set_cpus, memory_limit,
 		port_mappings, volume_mappings, env_vars, args,
-		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck
+		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck,
+		models, knowledge, sysctls, ulimits, devices, tmpfs,
+		entrypoint, commands, run_as_group, read_only_root_filesystem,
+		cpus, memory_reservation, memory_swap, shm_size, working_dir
 	FROM controller_microservices ORDER BY uuid`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query controller_microservices: %w", err)
@@ -87,7 +130,32 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		healthcheckJSON = &s
 	}
 
-	_, err := tx.Exec(`INSERT OR REPLACE INTO controller_microservices (
+	modelsJSON, err := ms.MarshalModelsJSON()
+	if err != nil {
+		return fmt.Errorf("marshal models: %w", err)
+	}
+	knowledgeJSON, err := ms.MarshalKnowledgeJSON()
+	if err != nil {
+		return fmt.Errorf("marshal knowledge: %w", err)
+	}
+	sysctlsJSON, err := marshalJSONDefault(ms.Sysctls, "{}")
+	if err != nil {
+		return fmt.Errorf("marshal sysctls: %w", err)
+	}
+	ulimitsJSON, err := marshalJSONDefault(ms.Ulimits, "{}")
+	if err != nil {
+		return fmt.Errorf("marshal ulimits: %w", err)
+	}
+	devicesJSON, err := marshalJSONDefault(ms.Devices, "[]")
+	if err != nil {
+		return fmt.Errorf("marshal devices: %w", err)
+	}
+	tmpfsJSON, err := marshalJSONDefault(ms.Tmpfs, "[]")
+	if err != nil {
+		return fmt.Errorf("marshal tmpfs: %w", err)
+	}
+
+	_, err = tx.Exec(`INSERT OR REPLACE INTO controller_microservices (
 		uuid, image_name, container_id, registry_id,
 		rebuild, host_network_mode, is_privileged, log_size,
 		is_router, microservice_name, application_name,
@@ -97,9 +165,12 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		annotations, pid_mode, ipc_mode, cpu_set_cpus, memory_limit,
 		port_mappings, volume_mappings, env_vars, args,
 		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck,
+		models, knowledge, sysctls, ulimits, devices, tmpfs,
+		entrypoint, commands, run_as_group, read_only_root_filesystem,
+		cpus, memory_reservation, memory_swap, shm_size, working_dir,
 		updated_at
 	) VALUES (
-		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 	)`,
 		ms.MicroserviceUUID, ms.ImageName, ms.ContainerID, ms.RegistryID,
 		boolToInt(ms.Rebuild), boolToInt(ms.HostNetworkMode), boolToInt(ms.IsPrivileged), ms.LogSize,
@@ -111,6 +182,10 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		string(portMappingsJSON), string(volumeMappingsJSON), string(envVarsJSON), string(argsJSON),
 		string(cdiDevsJSON), string(capAddJSON), string(capDropJSON), string(extraHostsJSON),
 		healthcheckJSON,
+		modelsJSON, knowledgeJSON, sysctlsJSON, ulimitsJSON, devicesJSON, tmpfsJSON,
+		encodeOptionalArgv(ms.Entrypoint), encodeOptionalArgv(ms.Commands), ms.RunAsGroup,
+		boolToInt(ms.ReadOnlyRootFilesystem),
+		ms.Cpus, ms.MemoryReservation, ms.MemorySwap, ms.ShmSize, ms.WorkingDir,
 		time.Now().Unix(),
 	)
 	return err
@@ -120,13 +195,17 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 	ms := &models.Microservice{}
 
 	var (
-		rebuild, hostNetworkMode, isPrivileged, isRouter  int
-		isNats, deleteFlag, deleteWithCleanup             int
-		isStuckInRestart, isUpdating                      int
-		portMappingsJSON, volumeMappingsJSON, envVarsJSON string
-		argsJSON, cdiDevsJSON, capAddJSON, capDropJSON    string
-		extraHostsJSON                                    string
-		healthcheckJSON                                   *string
+		rebuild, hostNetworkMode, isPrivileged, isRouter    int
+		isNats, deleteFlag, deleteWithCleanup               int
+		isStuckInRestart, isUpdating                        int
+		portMappingsJSON, volumeMappingsJSON, envVarsJSON   string
+		argsJSON, cdiDevsJSON, capAddJSON, capDropJSON      string
+		extraHostsJSON                                      string
+		healthcheckJSON                                     *string
+		modelsJSON, knowledgeJSON, sysctlsJSON, ulimitsJSON string
+		devicesJSON, tmpfsJSON                              string
+		entrypointJSON, commandsJSON                        *string
+		readOnlyRoot                                        int
 	)
 
 	err := rows.Scan(
@@ -139,6 +218,9 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		&ms.Annotations, &ms.PidMode, &ms.IpcMode, &ms.CPUSetCpus, &ms.MemoryLimit,
 		&portMappingsJSON, &volumeMappingsJSON, &envVarsJSON, &argsJSON,
 		&cdiDevsJSON, &capAddJSON, &capDropJSON, &extraHostsJSON, &healthcheckJSON,
+		&modelsJSON, &knowledgeJSON, &sysctlsJSON, &ulimitsJSON, &devicesJSON, &tmpfsJSON,
+		&entrypointJSON, &commandsJSON, &ms.RunAsGroup, &readOnlyRoot,
+		&ms.Cpus, &ms.MemoryReservation, &ms.MemorySwap, &ms.ShmSize, &ms.WorkingDir,
 	)
 	if err != nil {
 		return nil, err
@@ -152,6 +234,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 	ms.Delete = intToBool(deleteFlag)
 	ms.DeleteWithCleanup = intToBool(deleteWithCleanup)
 	ms.IsStuckInRestart = intToBool(isStuckInRestart)
+	ms.ReadOnlyRootFilesystem = intToBool(readOnlyRoot)
 	if intToBool(isUpdating) {
 		ms.SetIsUpdating(true)
 	}
@@ -169,6 +252,14 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		ms.Healthcheck = &models.Healthcheck{}
 		_ = json.Unmarshal([]byte(*healthcheckJSON), ms.Healthcheck)
 	}
+	_ = ms.UnmarshalModelsJSON(modelsJSON)
+	_ = ms.UnmarshalKnowledgeJSON(knowledgeJSON)
+	_ = json.Unmarshal([]byte(sysctlsJSON), &ms.Sysctls)
+	_ = json.Unmarshal([]byte(ulimitsJSON), &ms.Ulimits)
+	_ = json.Unmarshal([]byte(devicesJSON), &ms.Devices)
+	_ = json.Unmarshal([]byte(tmpfsJSON), &ms.Tmpfs)
+	ms.Entrypoint = decodeOptionalArgv(entrypointJSON)
+	ms.Commands = decodeOptionalArgv(commandsJSON)
 
 	// Ensure nil slices become empty slices (matches NewMicroservice behavior)
 	if ms.PortMappings == nil {
@@ -208,4 +299,43 @@ func boolToInt(b bool) int {
 
 func intToBool(i int) bool {
 	return i != 0
+}
+
+func marshalJSONDefault(v any, empty string) (string, error) {
+	if v == nil {
+		return empty, nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	if string(raw) == "null" {
+		return empty, nil
+	}
+	return string(raw), nil
+}
+
+func encodeOptionalArgv(argv *[]string) *string {
+	if argv == nil {
+		return nil
+	}
+	raw, err := json.Marshal(*argv)
+	if err != nil {
+		empty := "[]"
+		return &empty
+	}
+	s := string(raw)
+	return &s
+}
+
+func decodeOptionalArgv(raw *string) *[]string {
+	if raw == nil {
+		return nil
+	}
+	var items []string
+	if err := json.Unmarshal([]byte(*raw), &items); err != nil || items == nil {
+		empty := []string{}
+		return &empty
+	}
+	return &items
 }

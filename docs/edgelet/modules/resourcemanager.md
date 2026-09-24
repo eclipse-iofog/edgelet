@@ -1,75 +1,9 @@
 # Resource Manager
 
-The resource manager periodically sends **hardware and USB inventory** from the host HAL to the Controller via Field Agent. It is a lightweight polling module with no local persistence.
+Host hardware and USB inventory posting to the controller has been **removed**. There is no Resource Manager module, no `hal/hw` / `hal/usb` client, and no `deviceScanFrequency` config key.
 
-**Code:** `internal/resourcemanager/`
+**Edge Guard is not this module.** Host fingerprint / deprovision attestation remains — see [../edgeguard.md](../edgeguard.md) and [edgeguard.md](edgeguard.md).
 
-## Purpose
+Host CPU / memory / disk sampling is **Resource Consumption**, not Resource Manager — see [resourceconsumption.md](resourceconsumption.md).
 
-- On `deviceScanFrequency` interval, collect HW/USB info
-- Delegate POST paths to Field Agent (`SendHWInfoFromHalToController`, `SendUSBInfoFromHalToController`)
-
-## Dependencies
-
-| Depends on | Reason |
-|------------|--------|
-| `fieldagent` | Controller REST transport |
-| `config` | `deviceScanFrequency` |
-
-| Used by | Reason |
-|---------|--------|
-| `supervisor` | Started after Process Manager |
-
-## Lifecycle
-
-### Start
-
-`GetInstance().Start()`:
-
-1. Capture Field Agent singleton
-2. `startWorker()` — goroutine with ticker
-
-### Config update
-
-`InstanceConfigUpdated()` restarts worker with new frequency (cancels prior worker context).
-
-### Stop
-
-Cancel main context; `wg.Wait()`.
-
-## Configuration
-
-| Key | Effect |
-|-----|--------|
-| `deviceScanFrequency` | Seconds between HAL scan POSTs |
-
-## Module status
-
-| Property | Value |
-|----------|-------|
-| StatusReporter index | `5` (`utils.ResourceManager`) |
-| `GetModuleIndex()` | Used by Supervisor startModule |
-
-## External APIs
-
-Outbound only — Controller REST via Field Agent. No EdgeletAPI routes.
-
-## Observability
-
-- Log module: `"Resource Manager"`
-- Debug logs around each scan cycle
-
-## Failure modes
-
-| Symptom | Typical cause |
-|---------|----------------|
-| No HW info on controller | Not provisioned; Controller disconnected |
-| Scan stops after reload | Worker restart failed — check logs |
-
-## Code map
-
-| File | Role |
-|------|------|
-| `manager.go` | Worker loop, HAL send delegation |
-
-Related: [fieldagent.md](fieldagent.md), [statusreporter.md](statusreporter.md).
+The StatusReporter module index slot that used to map to Resource Manager is unused (indexes are not reshuffled).

@@ -7,7 +7,7 @@ The Field Agent is the **Controller client**. It polls the remote ioFog Controll
 ## Purpose
 
 - Maintain connection and trust with the Controller (ping, certificate verification)
-- Poll `config/changes` and apply microservice, registry, and volume mount deltas
+- Poll `config/changes` and apply microservice, registry, volume mount, model, and RuntimeClass deltas
 - Hydrate agent credentials and Edge Guard signature from SQLite
 - Notify Process Manager when desired microservice set changes
 - POST status/diagnostics on a configurable interval
@@ -38,7 +38,7 @@ Entry: `(*FieldAgent).Start()` in `agent.go`.
 1. Create `APIClient` and `Orchestrator` (Controller HTTPS)
 2. Hydrate `private_key` from `agent_credentials` table; reset JWT manager if missing
 3. If unprovisioned with `edgeGuardFrequency > 0`, force frequency to 0
-4. If provisioned: load initial microservices, registries, volume mounts from Controller into SQLite; notify Process Manager
+4. If provisioned: load initial microservices, registries, volume mounts, models, and RuntimeClasses from Controller into SQLite; notify Process Manager
 5. Start six background workers (see below)
 
 ### Stop
@@ -55,7 +55,7 @@ Cancel context; wait for worker goroutines (`wg.Wait()`).
 |--------|------------------|------|
 | `pingControllerWorker` | `pingFrequency` | Controller connectivity; updates connection state |
 | `runChangesWorker` | `changeFrequency` | `GET config/changes`; processes add/update/delete |
-| `postStatusWorker` | `statusFrequency` | Aggregated status POST to Controller |
+| `postStatusWorker` | `statusFrequency` | Aggregated status POST to Controller (`PUT status`; per-MS `errorMessage` plus additive last-crash keys) |
 | `upgradeScanWorker` | `upgradeScanFrequency` | Release OTA when `changeVersion` changes |
 | `localAPITokenRotationWorker` | internal | EdgeletAPI admin JWT rotation |
 | `serviceAccountTokenRotationWorker` | internal | Projected SA token lifecycle |
@@ -109,6 +109,8 @@ Field Agent is the primary writer for Controller-sourced rows:
 | `controller_microservices` | Desired microservices from Controller |
 | `controller_registries` | Registry credentials |
 | `controller_volume_mounts` | Secrets/configmaps |
+| `controller_models` | Fleet model snapshot |
+| `controller_runtime_classes` | Fleet RuntimeClass snapshot (`name` + `handler`) |
 | `agent_credentials` | Agent Ed25519 private key (singleton row) |
 | `agent_edgeguard_signature` | Last attested Edge Guard JWT |
 
@@ -118,7 +120,7 @@ Local deploy tables (`local_workloads`, etc.) are written by EdgeletAPI/runtimea
 
 | Surface | Role |
 |---------|------|
-| Controller REST | Poll, provision, status, diagnostics, OTA |
+| Controller REST | Poll, provision, status, diagnostics, OTA. Fog `PUT status` top-level keys are unchanged. Each `microserviceStatus` item keeps `errorMessage` through crash + 30s RUNNING grace, then sends `errorMessage:""`. Additive `lastError`, `lastErrorAt`, `restartCount` may be ignored by older controllers. No new `getChanges` flags or REST paths. |
 | EdgeletAPI (via runtimeapi) | `POST/DELETE /v1/system/provision`, exec/log WebSocket upgrade |
 | Process Manager | `Update()` channel; implements microservice list for PM |
 

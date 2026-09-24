@@ -1,0 +1,55 @@
+# =============================================================================
+# Edgelet Knowledge manifest — annotated subset (edgelet.iofog.org/v1)
+#
+# Apply:  edgelet deploy -f knowledge.yaml   (persists + downloads; CLI waits)
+# Pull:   edgelet knowledge pull <metadata.name> [--repo … --registry …]
+# Prose:  docs/edgelet/knowledge.md · docs/edgelet/manifest-reference.md
+#         docs/edgelet/oci-artifacts.md (how to push OCI / ORAS)
+#
+# Prerequisites:
+#   - OCI examples use built-in registry id 1 (docker.io).
+#   - Public Hub dataset examples use built-in registry id 3 (https://huggingface.co).
+#   - Hugging Face Knowledge always uses the Hub dataset API (not the model API).
+#   - Download is async on the daemon (Pending → Pulling → Ready / Failed).
+# =============================================================================
+
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: product-docs             # required — DNS-1123 label; on-disk directory name
+spec:
+  repo: acme/product-manuals     # required — Hub dataset id or OCI path, no host
+  revision: 9f3c111122223333444455556666777788889999  # HF commit (pinned)
+  registry: 3                    # required — built-in Hugging Face Hub (type hf)
+  files:                         # HF only; ignored for oci
+    - data/**/*.jsonl
+    - index/faiss.index
+  format: jsonl                  # optional hint: markdown, pdf, jsonl, parquet, arrow, sqlite, faiss, chroma, lance, unknown
+
+---
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: wiki-faiss
+  labels:
+    family: retrieval
+spec:
+  repo: acme/wiki-index          # OCI repository path (no registry host)
+  revision: v1                   # OCI tag (floating — not a digest)
+  registry: 1                    # docker.io
+  files: []                      # ignored for oci — full artifact is always pulled
+  format: faiss
+
+---
+apiVersion: edgelet.iofog.org/v1
+kind: Knowledge
+metadata:
+  name: wiki-faiss-pinned
+  labels:
+    family: retrieval
+spec:
+  repo: acme/wiki-index
+  revision: sha256:1eca257ec64d465cf38f766561e28eddb3b764adfba703288106a31cd2fe84a8
+  registry: 1
+  files: []
+  format: faiss

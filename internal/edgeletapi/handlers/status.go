@@ -10,6 +10,7 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/buildmeta"
 	"github.com/eclipse-iofog/edgelet/internal/config"
 	"github.com/eclipse-iofog/edgelet/internal/dnsresolver"
+	"github.com/eclipse-iofog/edgelet/internal/fieldagent"
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
@@ -46,6 +47,13 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		augmentWithCgroupStatus(statusMap)
 	}
 	augmentWithRuntimeStatus(statusMap)
+	augmentWithResourceMetrics(statusMap)
+	statusMap["runtimeClasses"] = statusreporter.GetAppliedRuntimeClasses()
+	statusMap["availableCdiDevices"] = statusreporter.GetAvailableCDIDevices()
+	knowledgeStatus, activeKnowledge, knowledgeLastUpdate := fieldagent.GetInstance().FogKnowledgeStatus()
+	statusMap["knowledgeStatus"] = knowledgeStatus
+	statusMap["activeKnowledge"] = activeKnowledge
+	statusMap["knowledgeLastUpdate"] = knowledgeLastUpdate
 
 	// Convert to JSON
 	jsonData, err := json.Marshal(statusMap)
@@ -64,8 +72,8 @@ func (h *StatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseStatusReport parses a status report string into a map
-func parseStatusReport(statusReport string) map[string]string {
-	result := make(map[string]string)
+func parseStatusReport(statusReport string) map[string]any {
+	result := make(map[string]any)
 	lines := strings.Split(statusReport, "\n")
 
 	for _, line := range lines {
@@ -83,7 +91,7 @@ func parseStatusReport(statusReport string) map[string]string {
 	return result
 }
 
-func augmentWithDNSStatus(status map[string]string) {
+func augmentWithDNSStatus(status map[string]any) {
 	if status == nil {
 		return
 	}
@@ -114,6 +122,60 @@ func augmentWithDNSStatus(status map[string]string) {
 	status["dnsRateLimitedTotal"] = strconv.FormatUint(s.RateLimitedTotal, 10)
 	status["dnsRejectedTotal"] = strconv.FormatUint(s.RejectedTotal, 10)
 	status["dnsHealth"] = deriveDNSHealth(s)
+}
+
+var legacyLocalResourceMetricKeys = []string{
+	"agentCpuPercent",
+	"agentMemoryMiB",
+	"runtimeCpuPercent",
+	"runtimeMemoryMiB",
+	"edgeletTotalCpuPercent",
+	"edgeletTotalMemoryMiB",
+}
+
+func augmentWithResourceMetrics(status map[string]any) {
+	if status == nil {
+		return
+	}
+	for _, key := range legacyLocalResourceMetricKeys {
+		delete(status, key)
+	}
+
+	rcs := statusreporter.GetInstance().GetResourceConsumptionManagerStatus()
+	status["agentCpu"] = stackCPUScaleToCores(rcs.AgentCPUPercent)
+	status["agentMemory"] = stackMemoryMiBToBytes(rcs.AgentMemoryMiB)
+	status["runtimeCpu"] = stackCPUScaleToCores(rcs.RuntimeCPUPercent)
+	status["runtimeMemory"] = stackMemoryMiBToBytes(rcs.RuntimeMemoryMiB)
+	status["runtimeAvailable"] = rcs.RuntimeAvailable
+	status["runtimeDegraded"] = rcs.RuntimeDegraded
+	status["runtimeTracked"] = rcs.RuntimeTracked
+	status["edgeletStackCpu"] = stackCPUScaleToCores(rcs.EdgeletTotalCPUPercent)
+	status["edgeletStackMemory"] = stackMemoryMiBToBytes(rcs.EdgeletTotalMemoryMiB)
+	// Controller-shaped aliases (PUT status units).
+	status["cpuUsage"] = rcs.CPUUsage
+	status["memoryUsage"] = rcs.MemoryUsage
+	status["diskUsage"] = rcs.DiskUsage
+
+	status["systemCpus"] = rcs.SystemCpus
+	status["systemOs"] = rcs.SystemOs
+	status["systemOsVersion"] = rcs.SystemOsVersion
+	status["systemKernelVersion"] = rcs.SystemKernelVersion
+	status["systemTotalMemory"] = rcs.SystemTotalMemory
+	status["systemTotalDisk"] = rcs.TotalDiskSpace
+	status["systemAvailableMemory"] = rcs.AvailableMemory
+	status["systemAvailableDisk"] = rcs.AvailableDisk
+	status["systemTotalCpu"] = rcs.TotalCPU
+}
+
+func stackCPUScaleToCores(scale float64) float64 {
+	return scale / 100.0
+}
+
+func stackMemoryMiBToBytes(mib float64) int64 {
+	if mib <= 0 {
+		return 0
+	}
+	return int64(mib * 1024 * 1024) // #nosec G115 -- RSS MiB fits in int64
 }
 
 func deriveDNSHealth(s dnsresolver.StatsSnapshot) string {

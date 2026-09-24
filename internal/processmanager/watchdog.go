@@ -77,6 +77,12 @@ func imageRefsMatch(a, b string) bool {
 	return false
 }
 
+// LocalWorkloadsOutOfScope reports whether local microservices and local models
+// are excluded because watchdog is enabled.
+func LocalWorkloadsOutOfScope(watchdogEnabled bool) bool {
+	return watchdogEnabled
+}
+
 func cleanupDecisionForContainer(
 	labels map[string]string,
 	containerID, image string,

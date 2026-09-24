@@ -70,3 +70,29 @@ func (m *LocalDeployedMicroservice) NormalizeDefaults() {
 		m.ObservedGeneration = 0
 	}
 }
+
+// IsDeleting reports whether a local remove is still in progress (container may still exist).
+func (m *LocalDeployedMicroservice) IsDeleting() bool {
+	if m == nil {
+		return false
+	}
+	runtime := strings.ToLower(strings.TrimSpace(m.RuntimeState))
+	desired := strings.ToLower(strings.TrimSpace(m.DesiredState))
+	if runtime == "deleting" {
+		return true
+	}
+	return desired == "deleted" && strings.TrimSpace(m.ContainerID) != ""
+}
+
+// IsGone reports a local tombstone that should not appear in inventory or name reuse.
+func (m *LocalDeployedMicroservice) IsGone() bool {
+	if m == nil || m.IsDeleting() {
+		return false
+	}
+	desired := strings.ToLower(strings.TrimSpace(m.DesiredState))
+	runtime := strings.ToLower(strings.TrimSpace(m.RuntimeState))
+	if m.DeletedAt != nil && strings.TrimSpace(m.ContainerID) == "" {
+		return desired == "deleted" || runtime == "deleted"
+	}
+	return desired == "deleted" && runtime == "deleted"
+}

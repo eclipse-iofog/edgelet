@@ -123,6 +123,21 @@ func (c *Client) ContainerStatus(ctx context.Context, containerID string) (*runt
 	})
 }
 
+// ContainerPID returns the host PID of a running CRI container.
+func (c *Client) ContainerPID(ctx context.Context, containerID string) (int, error) {
+	resp, err := c.runtime.ContainerStatus(ctx, &runtimeapi.ContainerStatusRequest{
+		ContainerId: containerID,
+		Verbose:     true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil {
+		return 0, nil
+	}
+	return ParseContainerPID(resp.Info), nil
+}
+
 // ListContainers lists containers matching the filter.
 func (c *Client) ListContainers(ctx context.Context, filter *runtimeapi.ContainerFilter) ([]*runtimeapi.Container, error) {
 	resp, err := c.runtime.ListContainers(ctx, &runtimeapi.ListContainersRequest{

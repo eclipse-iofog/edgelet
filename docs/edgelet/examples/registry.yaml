@@ -1,9 +1,41 @@
-# Example Registry manifest — apply with: edgelet deploy -f registry.yaml
+# =============================================================================
+# Edgelet Registry manifest — annotated reference (edgelet.iofog.org/v1)
+#
+# Apply:  edgelet deploy -f registry.yaml
+# Prose:  docs/edgelet/manifest-reference.md
+# Models: docs/edgelet/models.md
+#
+# Notes:
+#   - Built-in rows cannot be edited or removed:
+#       id 1 = docker.io (oci), id 2 = from_cache (oci),
+#       id 3 = https://huggingface.co (hf, public Hub).
+#   - type defaults to oci when omitted. Container image pull requires oci.
+#   - Public Hub models use built-in id 3. Add a user hf row (id 4+) for a
+#     private token or an enterprise Hub.
+#   - Treat this file as sensitive — passwords are stored on the node.
+# =============================================================================
+
 apiVersion: edgelet.iofog.org/v1
 kind: Registry
 spec:
-  url: quay.io
-  username: operator
-  password: "<replace-me>"
-  email: operator@example.com
+  id: 10                         # optional — upsert this local row; omit to allocate a new id
+  type: oci                      # oci (default) or hf
+  url: quay.io                   # required — registry host or Hub base URL
+  private: true                  # required
+  username: operator             # required when private=true and type=oci
+  password: "<replace-me>"       # required when private=true
+  email: operator@example.com    # optional — oci only
+  # ca: "<base64-pem>"           # optional — extra CA bundle (base64 PEM)
+  insecure: false                # optional — default false; true allows http:// and skips TLS verify
+
+---
+apiVersion: edgelet.iofog.org/v1
+kind: Registry
+spec:
+  id: 11                         # optional — user row (not built-in id 3)
+  type: hf
+  url: https://hf.enterprise.corp # enterprise Hub (url only — no repo path)
   private: true
+  username: operator             # optional for hf
+  password: "<hf-token>"         # required when private=true (Hub token)
+  insecure: false

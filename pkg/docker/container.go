@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/containerapply"
 	"github.com/eclipse-iofog/edgelet/internal/dnsresolver"
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/utils"
+	"github.com/eclipse-iofog/edgelet/internal/volumemount"
 	"github.com/eclipse-iofog/edgelet/internal/workloadmeta"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -514,11 +516,48 @@ func (c *Client) GetMicroserviceStatus(containerID, _ string) (*models.Microserv
 		status.HealthStatus = &healthStatus
 	}
 
+	if msg := formatContainerExitMessage(string(inspect.State.Status), inspect.State.ExitCode, inspect.State.OOMKilled, inspect.State.Error); msg != "" {
+		status.ErrorMessage = &msg
+	}
+
 	// Note: RestartStuckChecker integration will be handled in ProcessManager
 	// to avoid circular dependencies. The checker will be called after getting status
 	// to determine if status should be STUCK_IN_RESTART
 
 	return status, nil
+}
+
+// formatContainerExitMessage builds inspect failure text for Docker/Podman
+// workloads. A healthy running container with exit 0, no OOM, and no engine
+// error returns empty so recovery does not keep a stale current error.
+func formatContainerExitMessage(status string, exitCode int, oomKilled bool, stateError string) string {
+	if !shouldAttachContainerExitMessage(status, exitCode, oomKilled, stateError) {
+		return ""
+	}
+	oom := "false"
+	if oomKilled {
+		oom = "true"
+	}
+	msg := fmt.Sprintf("exitCode=%d oomKilled=%s", exitCode, oom)
+	if errText := strings.TrimSpace(stateError); errText != "" {
+		msg += " error=" + errText
+	}
+	return strings.TrimSpace(msg)
+}
+
+func shouldAttachContainerExitMessage(status string, exitCode int, oomKilled bool, stateError string) bool {
+	if oomKilled {
+		return true
+	}
+	errText := strings.TrimSpace(stateError)
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "created":
+		// created: only when an exit was already recorded. running: only when
+		// inspect is not a healthy start (exit 0, empty error).
+		return exitCode != 0 || errText != ""
+	default:
+		return true
+	}
 }
 
 // AreMicroserviceAndContainerEqual checks if a microservice configuration matches a container
@@ -547,6 +586,14 @@ func (c *Client) AreMicroserviceAndContainerEqual(containerID string, ms *models
 
 	// Check environment variables
 	if !c.isEnvVarsEqual(inspect, ms) {
+		return false
+	}
+
+	label := ""
+	if inspect.Config != nil && inspect.Config.Labels != nil {
+		label = inspect.Config.Labels[containerapply.LabelFingerprint]
+	}
+	if !containerapply.MatchesLabel(label, ms) {
 		return false
 	}
 
@@ -777,7 +824,6 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 	config := &container.Config{
 		Image: ms.ImageName,
 		Env:   envVars,
-		Cmd:   ms.Args,
 	}
 
 	// Set user
@@ -827,7 +873,7 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 	// Build volume bindings and mounts
 	// Note: We need to handle VOLUME_MOUNT type specially
 	if len(ms.VolumeMappings) > 0 {
-		binds, mounts, err := buildVolumeBindsAndMounts(ms.VolumeMappings, ms.MicroserviceUUID)
+		binds, mounts, err := buildVolumeBindsAndMounts(ms.VolumeMappings, ms.MicroserviceUUID, ms.RunAsUser)
 		if err != nil {
 			return "", err
 		}
@@ -958,6 +1004,16 @@ func (c *Client) CreateContainer(ms *models.Microservice, hostName string) (stri
 		}
 	}
 
+	diskDir := ""
+	if cfg != nil {
+		diskDir = strings.TrimSpace(cfg.DiskDirectory)
+	}
+	for _, w := range applyWorkloadCreateConfig(config, hostConfig, ms, diskDir) {
+		if c.logger != nil {
+			c.logger.Warn(w)
+		}
+	}
+
 	// ioFog MS lifecycle is owned by edgelet reconcile — not Docker RestartPolicy.
 	hostConfig.RestartPolicy = container.RestartPolicy{
 		Name: "no",
@@ -1053,7 +1109,7 @@ func buildPortBindings(portMappings []*models.PortMapping) (network.PortMap, err
 	return bindings, nil
 }
 
-func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserviceUUID string) ([]string, []mount.Mount, error) {
+func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserviceUUID string, runAsUser *string) ([]string, []mount.Mount, error) {
 	if len(volumeMappings) == 0 {
 		return nil, nil, nil
 	}
@@ -1062,33 +1118,44 @@ func buildVolumeBindsAndMounts(volumeMappings []*models.VolumeMapping, microserv
 	mounts := make([]mount.Mount, 0)
 
 	for _, vm := range volumeMappings {
-		// Resolve host destination for volume mounts
-		resolvedHostDestination := vm.HostDestination
-		if vm.Type == models.VolumeMappingTypeVolumeMount {
-			// Use volume mount resolution (will be implemented in volume.go)
-			var err error
-			resolvedHostDestination, err = ResolveVolumeMountPath(vm.HostDestination, vm.Type, microserviceUUID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to resolve volume mount path: %w", err)
-			}
+		if vm == nil {
+			continue
 		}
-
-		// Determine access mode
 		isReadOnly := strings.ToLower(vm.AccessMode) == "ro"
 
 		switch vm.Type {
 		case models.VolumeMappingTypeVolumeMount:
-			// Use Mount API for VOLUME_MOUNT type
-			m := mount.Mount{
+			resolvedHostDestination, err := ResolveVolumeMountPath(vm.HostDestination, vm.Type, microserviceUUID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to resolve volume mount path: %w", err)
+			}
+			mounts = append(mounts, mount.Mount{
 				Type:     mount.TypeBind,
 				Source:   resolvedHostDestination,
 				Target:   vm.ContainerDestination,
 				ReadOnly: isReadOnly,
+			})
+		case models.VolumeMappingTypeVolume:
+			// Bind the per-UUID or shared host directory. Do not create a
+			// node-global Docker named volume from hostDestination.
+			source, err := volumemount.GetInstance().ResolveHostPath(
+				microserviceUUID,
+				vm.HostDestination,
+				false,
+				runAsUser,
+				vm.EffectiveVolumeScope(),
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to resolve persistent volume path: %w", err)
 			}
-			mounts = append(mounts, m)
-		case models.VolumeMappingTypeBind, models.VolumeMappingTypeVolume:
-			// Use bind mount (legacy format; named volumes handled separately)
-			bind := fmt.Sprintf("%s:%s:%s", resolvedHostDestination, vm.ContainerDestination, vm.AccessMode)
+			mounts = append(mounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   source,
+				Target:   vm.ContainerDestination,
+				ReadOnly: isReadOnly,
+			})
+		case models.VolumeMappingTypeBind:
+			bind := fmt.Sprintf("%s:%s:%s", vm.HostDestination, vm.ContainerDestination, vm.AccessMode)
 			binds = append(binds, bind)
 		}
 	}

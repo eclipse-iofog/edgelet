@@ -4,7 +4,7 @@ Prune unused resources
 
 ### Synopsis
 
-Prune unused resources. Default mode is dangling images.
+Prune unused resources. Default mode is dangling images. volumes does not destroy persistent VOLUME data; use edgelet volume prune.
 
 ```
 edgelet system prune [dangling|containers|volumes|all] [flags]
@@ -16,7 +16,6 @@ edgelet system prune [dangling|containers|volumes|all] [flags]
 edgelet system prune
 edgelet system prune all
 edgelet system prune --mode all
-edgelet system prune --mode volumes
 ```
 
 ### Options

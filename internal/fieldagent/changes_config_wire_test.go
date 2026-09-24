@@ -29,7 +29,6 @@ func TestPostFogConfig_UsesControllerConfigKeys(t *testing.T) {
 	cfg.LogFileCount = 10
 	cfg.StatusFrequency = 10
 	cfg.ChangeFrequency = 20
-	cfg.DeviceScanFrequency = 60
 	cfg.LogLevel = "INFO"
 
 	var body map[string]any
@@ -74,6 +73,7 @@ func TestPostFogConfig_UsesControllerConfigKeys(t *testing.T) {
 		"processorConsumptionLimit",
 		"logDiskConsumptionLimit",
 		"logDiskDirectory",
+		"deviceScanFrequency",
 	} {
 		if _, ok := body[legacy]; ok {
 			t.Fatalf("legacy key %q should not be sent", legacy)
@@ -174,6 +174,80 @@ profiles:
 	}
 	if cfg.LogDirectory != "/var/log/custom/" {
 		t.Fatalf("LogDirectory=%q want /var/log/custom/", cfg.LogDirectory)
+	}
+}
+
+func TestGetFogConfig_OmitsRemovedDeviceScanFrequency(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "edgelet-config-device-scan-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp config: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(tmpFile.Name()) })
+
+	content := `currentProfile: default
+profiles:
+  default:
+    changeFrequency: "20"
+    logLevel: "INFO"
+`
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("close temp config: %v", err)
+	}
+	if err := config.LoadConfig(tmpFile.Name()); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/agent/config") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"changeFrequency":     30,
+				"deviceScanFrequency": 60,
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := config.GetInstance()
+	origURL := cfg.ControllerURL
+	origUUID := cfg.IOFogUUID
+	cfg.ControllerURL = server.URL
+	cfg.IOFogUUID = "agent-wire-device-scan"
+	t.Cleanup(func() {
+		cfg.ControllerURL = origURL
+		cfg.IOFogUUID = origUUID
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	fa := &FieldAgent{
+		config: cfg,
+		state:  NewState(),
+		ctx:    ctx,
+		apiClient: &APIClient{
+			baseURL:    server.URL,
+			httpClient: server.Client(),
+			jwtManager: auth.GetJWTManager(),
+		},
+	}
+	fa.state.SetControllerStatus(models.ControllerStatusOK)
+	fa.state.SetControllerVerified(true)
+	fa.state.SetInitialization(false)
+
+	if err := fa.getFogConfig(); err != nil {
+		t.Fatalf("getFogConfig: %v", err)
+	}
+	if cfg.ChangeFrequency != 30 {
+		t.Fatalf("ChangeFrequency=%d want 30", cfg.ChangeFrequency)
 	}
 }
 

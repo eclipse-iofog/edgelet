@@ -43,3 +43,36 @@ func TestLocalDeployedMicroserviceNormalizeDefaults(t *testing.T) {
 		t.Fatalf("expected failure_count default 0, got %d", item.FailureCount)
 	}
 }
+
+func TestLocalDeployedMicroserviceIsDeletingAndIsGone(t *testing.T) {
+	ts := int64(1)
+	deleting := &LocalDeployedMicroservice{
+		DesiredState: "deleted",
+		RuntimeState: "deleting",
+		ContainerID:  "abc",
+		DeletedAt:    &ts,
+	}
+	if !deleting.IsDeleting() {
+		t.Fatal("expected deleting workload to report IsDeleting")
+	}
+	if deleting.IsGone() {
+		t.Fatal("expected in-progress delete not to report IsGone")
+	}
+
+	tombstone := &LocalDeployedMicroservice{
+		DesiredState: "deleted",
+		RuntimeState: "deleted",
+		DeletedAt:    &ts,
+	}
+	if tombstone.IsDeleting() {
+		t.Fatal("expected tombstone not to report IsDeleting")
+	}
+	if !tombstone.IsGone() {
+		t.Fatal("expected tombstone to report IsGone")
+	}
+
+	live := &LocalDeployedMicroservice{DesiredState: "running", RuntimeState: "running", ContainerID: "abc"}
+	if live.IsDeleting() || live.IsGone() {
+		t.Fatal("expected running workload to be live")
+	}
+}

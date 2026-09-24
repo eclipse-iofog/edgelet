@@ -159,11 +159,44 @@ install_init_helpers() {
     install_shutdown_helper
 }
 
-# installed_embed_hash returns the basename of data/current (embed SHA256 prefix), or empty.
+edgelet_data_root() {
+    if [ -n "${EDGELET_DATA_DIR:-}" ]; then
+        echo "${EDGELET_DATA_DIR}"
+        return 0
+    fi
+    echo "/var/lib/edgelet"
+}
+
+# embed_bundle_ready is true when dir has an executable fat runtime and the
+# same companion files the extract path requires before it will run.
+embed_bundle_ready() {
+    _dir="$1"
+    [ -n "$_dir" ] || return 1
+    _fat="${_dir}/bin/edgelet"
+    [ -f "$_fat" ] && [ -x "$_fat" ] || return 1
+    _magic=$(od -An -tx1 -N 4 "$_fat" 2>/dev/null | tr -d ' \n' || true)
+    [ "$_magic" = "7f454c46" ] || return 1
+    [ -f "${_dir}/bin/containerd-shim-runc-v2" ] || return 1
+    [ -f "${_dir}/bin/aux/xtables-legacy-multi" ] || return 1
+    [ -f "${_dir}/bin/ip" ] || return 1
+    [ -f "${_dir}/bin/busybox" ] || return 1
+    [ -L "${_dir}/bin/aux/iptables" ] || return 1
+    [ "$(readlink "${_dir}/bin/aux/iptables" 2>/dev/null || true)" = "xtables-legacy-multi" ]
+}
+
+# installed_embed_hash prints the ready data/current bundle hash, or nothing
+# when the symlink is missing or the fat runtime is not ready.
 installed_embed_hash() {
-    _link="/var/lib/edgelet/data/current"
+    _link="$(edgelet_data_root)/data/current"
     [ -L "$_link" ] || return 0
-    basename "$(readlink -f "$_link" 2>/dev/null || readlink "$_link")"
+    _target=$(readlink "$_link" 2>/dev/null || true)
+    [ -n "$_target" ] || return 0
+    case "$_target" in
+        /*) ;;
+        *) _target="$(CDPATH= cd -- "$(dirname "$_link")" && pwd)/${_target}" ;;
+    esac
+    embed_bundle_ready "$_target" || return 0
+    basename "$_target"
 }
 
 # binary_embed_hash reads embed hash from a linux thin binary (edgelet version --verbose).
@@ -175,8 +208,9 @@ binary_embed_hash() {
         | head -1
 }
 
-# should_restart_data_plane is true when containerEngine=edgelet and the embed hash changed
-# (or data/current is not yet set). Returns false for docker/podman or lite builds without embed.
+# should_restart_data_plane is true when containerEngine=edgelet, the new embed
+# hash is set, and the ready current bundle is missing or different.
+# Returns false for docker/podman or a thin binary with no embed hash.
 should_restart_data_plane() {
     _eng="$1"
     _old="$2"
@@ -187,6 +221,64 @@ should_restart_data_plane() {
     [ "$_old" != "$_new" ]
 }
 
+# quiesce_data_plane_for_replace drains labeled workloads, force-stops leftovers,
+# and verifies before an embed replace. Control stays up. Non-zero leaves the
+# installed binary in place.
+quiesce_data_plane_for_replace() {
+    _bin="$1"
+    if [ -z "$_bin" ] || [ ! -x "$_bin" ]; then
+        _bin="${EDGELET_BIN:-/usr/local/bin/edgelet}"
+    fi
+    [ -x "$_bin" ] || return 1
+    info "Draining data plane before embed replace"
+    "$_bin" --quiet runtime drain --direct
+}
+
+stop_edgelet_containerd_unit() {
+    _init="$1"
+    info "Stopping edgelet-containerd (data plane)"
+    case "${_init}" in
+        systemd)
+            systemctl stop edgelet-containerd 2>/dev/null || true
+            systemctl reset-failed edgelet-containerd 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service edgelet-containerd stop 2>/dev/null || true
+            ;;
+        *)
+            stop_edgelet_dataplane_processes
+            ;;
+    esac
+}
+
+# stop_edgelet_dataplane_processes stops runtime-bootstrap and its containerd
+# child. It does not stop the control daemon.
+stop_edgelet_dataplane_processes() {
+    _pids=$(pgrep -f '[e]dgelet runtime-bootstrap' 2>/dev/null || true)
+    _pids="${_pids} $(pgrep -f '[e]dgelet-containerd-child' 2>/dev/null || true)"
+    _pids=$(echo "${_pids}" | tr ' ' '\n' | awk 'NF && !seen[$0]++')
+    [ -n "${_pids}" ] || return 0
+    for _p in ${_pids}; do
+        kill -TERM "${_p}" 2>/dev/null || true
+    done
+    sleep 1
+    for _p in ${_pids}; do
+        kill -0 "${_p}" 2>/dev/null || continue
+        kill -KILL "${_p}" 2>/dev/null || true
+    done
+}
+
+start_edgelet_dataplane_process() {
+    if pgrep -f '[e]dgelet runtime-bootstrap' >/dev/null 2>&1; then
+        return 0
+    fi
+    if pgrep -f '[e]dgelet-containerd-child' >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p /var/log/edgelet
+    /usr/local/bin/edgelet runtime-bootstrap >>/var/log/edgelet/containerd.log 2>&1 &
+}
+
 start_edgelet_containerd_unit() {
     _init="$1"
     _restart="$2"
@@ -195,8 +287,7 @@ start_edgelet_containerd_unit() {
             systemctl enable edgelet-containerd 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                systemctl stop edgelet-containerd 2>/dev/null || true
-                systemctl reset-failed edgelet-containerd 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 systemctl start edgelet-containerd
             else
                 systemctl start edgelet-containerd 2>/dev/null || true
@@ -206,10 +297,17 @@ start_edgelet_containerd_unit() {
             rc-update add edgelet-containerd default 2>/dev/null || true
             if [ "$_restart" = true ]; then
                 info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
-                rc-service edgelet-containerd stop 2>/dev/null || true
+                stop_edgelet_containerd_unit "${_init}"
                 rc-service edgelet-containerd start 2>/dev/null || true
             else
                 rc-service edgelet-containerd start 2>/dev/null || true
+            fi
+            ;;
+        *)
+            if [ "$_restart" = true ]; then
+                info "Embedded bundle hash changed; restarting edgelet-containerd (data plane)"
+                stop_edgelet_containerd_unit "${_init}"
+                start_edgelet_dataplane_process
             fi
             ;;
     esac
@@ -313,6 +411,9 @@ install_init_unit() {
                 write_procd_edgelet
             fi
             /etc/init.d/edgelet enable 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet stop 2>/dev/null || true
             /etc/init.d/edgelet start
             info "procd init script edgelet installed (engine=${_eng})."
@@ -328,6 +429,9 @@ install_init_unit() {
             elif command -v chkconfig >/dev/null 2>&1; then
                 chkconfig --add edgelet 2>/dev/null || true
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             /etc/init.d/edgelet restart 2>/dev/null || /etc/init.d/edgelet start
             info "SysV init script edgelet installed."
             ;;
@@ -338,6 +442,9 @@ install_init_unit() {
                 write_upstart_edgelet
             fi
             initctl reload-configuration 2>/dev/null || true
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             initctl restart edgelet 2>/dev/null || initctl start edgelet
             info "Upstart job edgelet installed."
             ;;
@@ -350,9 +457,13 @@ install_init_unit() {
                 write_s6_run
                 write_s6_finish
             fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
+            fi
             if command -v s6-svc >/dev/null 2>&1 && [ -d /var/run/s6/services ]; then
                 mkdir -p /var/run/s6/services/edgelet
                 ln -sf /etc/s6/edgelet /var/run/s6/services/edgelet/supervise 2>/dev/null || true
+                s6-svc -d /var/run/s6/services/edgelet 2>/dev/null || true
                 s6-svc -u /var/run/s6/services/edgelet 2>/dev/null || true
             fi
             info "s6 service installed under /etc/s6/edgelet (start via your s6 scan)."
@@ -367,6 +478,9 @@ install_init_unit() {
             else
                 write_runit_run
                 write_runit_finish
+            fi
+            if [ "${_eng}" = "edgelet" ]; then
+                start_edgelet_containerd_unit "${_init}" "${_restart_dp}"
             fi
             if [ -d /etc/runit ]; then
                 ln -sf /etc/runit/edgelet /etc/service/edgelet 2>/dev/null || \
