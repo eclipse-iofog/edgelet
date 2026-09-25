@@ -335,7 +335,7 @@ func ContainerConfigFromMicroservice(ms *models.Microservice, hostname string, e
 		},
 	}
 
-	if fp, err := containerapply.Marshal(containerapply.FromMicroservice(ms)); err == nil && fp != "" && fp != "{}" {
+	if fp, err := containerapply.ApplyLabel(ms, envVars); err == nil && fp != "" {
 		if config.Labels == nil {
 			config.Labels = make(map[string]string)
 		}

@@ -97,7 +97,7 @@ Host checks (docs and `KillMode=process`) do not need a VM:
 ./test/embedded/ota-dataplane-drain.sh --docs
 ```
 
-Live checks run inside the embedded Lima VM after `vm-install.sh`. They deploy a private volume workload, restart control while the ready embed hash matches (shim processes stay), then lock that volume and drain through CRI. Pass `--upgrade-bin` when a second thin binary has a different embed hash.
+Live checks run inside the embedded Lima VM after `vm-install.sh`. They deploy a private volume workload, restart control while the ready embed hash matches (shim processes stay), then lock that volume and drain through CRI. Pass `--upgrade-bin` when a second thin binary has a different embed hash. That fat replace remounts `/run` `noexec` for the upgrade and expects the drain runtime under the data directory.
 
 ```bash
 ./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test

@@ -16,11 +16,17 @@ func TestResolveDirectDrainFatUsesCurrentWhenHashMatches(t *testing.T) {
 	t.Parallel()
 
 	want := "/var/lib/edgelet/data/current/bin/edgelet"
+	stageDir := filepath.Join(t.TempDir(), constants.RuntimeDrainStageRel)
 	staged := false
 	got, err := resolveDirectDrainFat(directDrainEnv{
 		Engine:    constants.EngineEdgelet,
 		EmbedHash: "abc",
-		Lookup: func(string, string) (string, bool, error) {
+		DataDir:   constants.EdgeletDataDir,
+		StageDir:  stageDir,
+		Lookup: func(dataDir, _ string) (string, bool, error) {
+			if dataDir != constants.EdgeletDataDir {
+				t.Fatalf("dataDir=%q", dataDir)
+			}
 			return want, true, nil
 		},
 		Stage: func(string) (string, error) {
@@ -36,6 +42,12 @@ func TestResolveDirectDrainFatUsesCurrentWhenHashMatches(t *testing.T) {
 	}
 	if staged {
 		t.Fatal("hash match must exec data/current and must not stage a fat ELF")
+	}
+	if !strings.HasSuffix(got, filepath.Join("data", "current", "bin", "edgelet")) {
+		t.Fatalf("path=%q", got)
+	}
+	if _, err := os.Stat(stageDir); !os.IsNotExist(err) {
+		t.Fatalf("hash match created stage dir: %v", err)
 	}
 }
 
@@ -57,7 +69,10 @@ func TestResolveDirectDrainFatStagesTempELFWhenHashDiffers(t *testing.T) {
 		t.Fatalf("write installed: %v", err)
 	}
 
-	stageDir := filepath.Join(root, "runtime-drain")
+	stageDir := filepath.Join(root, constants.RuntimeDrainStageRel)
+	if strings.Contains(stageDir, filepath.Join(constants.EdgeletRunDir, "runtime-drain")) {
+		t.Fatalf("stage dir %q is under /run", stageDir)
+	}
 	lookupCalled := false
 	got, err := resolveDirectDrainFat(directDrainEnv{
 		Engine:    constants.EngineEdgelet,
@@ -78,8 +93,12 @@ func TestResolveDirectDrainFatStagesTempELFWhenHashDiffers(t *testing.T) {
 			if dir != stageDir {
 				t.Fatalf("stage dir=%q want %q", dir, stageDir)
 			}
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return "", err
+			info, statErr := os.Stat(dir)
+			if statErr != nil {
+				return "", statErr
+			}
+			if info.Mode().Perm() != 0o750 {
+				t.Fatalf("stage dir mode=%o", info.Mode().Perm())
 			}
 			path := filepath.Join(dir, "edgelet")
 			if err := os.WriteFile(path, []byte("\x7fELFstaged"), 0o755); err != nil {
@@ -197,7 +216,7 @@ func TestDirectDrainArgvForwardsTimeout(t *testing.T) {
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv=%q want %q", got, want)
 	}
-	got = directDrainArgv("/run/edgelet/runtime-drain/edgelet", 0)
+	got = directDrainArgv(filepath.Join(constants.EdgeletDataDir, constants.RuntimeDrainStageRel, "edgelet"), 0)
 	if got[len(got)-1] != "90" {
 		t.Fatalf("default timeout argv=%q", got)
 	}
@@ -219,5 +238,82 @@ func TestContainerEngineFromConfig(t *testing.T) {
 	}
 	if got := containerEngineFromConfig(path); got != constants.EnginePodman {
 		t.Fatalf("engine=%q", got)
+	}
+}
+
+func TestDirectDrainLocationsFollowDiskDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	disk := filepath.Join(root, "custom-disk") + string(os.PathSeparator)
+	cfg := filepath.Join(root, "config.yaml")
+	body := "currentProfile: default\nprofiles:\n  default:\n    containerEngine: edgelet\n    diskDirectory: " + disk + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	dataDir, stageDir, err := directDrainLocations(cfg)
+	if err != nil {
+		t.Fatalf("locations: %v", err)
+	}
+	resolved, err := filepath.Abs(filepath.Clean(disk))
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	if dataDir != resolved {
+		t.Fatalf("dataDir=%q want %q", dataDir, resolved)
+	}
+	wantStage := filepath.Join(resolved, constants.RuntimeDrainStageRel)
+	if stageDir != wantStage {
+		t.Fatalf("stageDir=%q want %q", stageDir, wantStage)
+	}
+	if strings.Contains(stageDir, filepath.Join(constants.EdgeletRunDir, "runtime-drain")) {
+		t.Fatalf("stage dir %q is under /run", stageDir)
+	}
+
+	var looked, staged string
+	got, err := resolveDirectDrainFat(directDrainEnv{
+		Engine:    constants.EngineEdgelet,
+		EmbedHash: "different",
+		DataDir:   dataDir,
+		StageDir:  stageDir,
+		Lookup: func(dir, _ string) (string, bool, error) {
+			looked = dir
+			return "", false, nil
+		},
+		Stage: func(dir string) (string, error) {
+			staged = dir
+			return filepath.Join(dir, "edgelet"), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if looked != dataDir {
+		t.Fatalf("lookup dataDir=%q want %q", looked, dataDir)
+	}
+	if staged != stageDir {
+		t.Fatalf("staged=%q want %q", staged, stageDir)
+	}
+	if filepath.Dir(filepath.Dir(staged)) != dataDir {
+		t.Fatalf("stage dir %q is not under data dir %q", staged, dataDir)
+	}
+	if got != filepath.Join(stageDir, "edgelet") {
+		t.Fatalf("path=%q", got)
+	}
+}
+
+func TestDirectDrainLocationsDefaultDiskDirectory(t *testing.T) {
+	t.Parallel()
+
+	dataDir, stageDir, err := directDrainLocations(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("locations: %v", err)
+	}
+	if dataDir != constants.EdgeletDataDir {
+		t.Fatalf("dataDir=%q", dataDir)
+	}
+	if stageDir != filepath.Join(constants.EdgeletDataDir, constants.RuntimeDrainStageRel) {
+		t.Fatalf("stageDir=%q", stageDir)
 	}
 }

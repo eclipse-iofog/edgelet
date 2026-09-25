@@ -12,6 +12,10 @@ const (
 	CRIReasonContainerExited = "CONTAINER_EXITED"
 )
 
+// ErrReconcilePaused is returned when container create must wait because a
+// data-plane drain is in progress. It is not a crash.
+var ErrReconcilePaused = errors.New("reconcile paused for data-plane drain")
+
 // NonRestartableContainerError signals that a runtime container object is in a
 // terminal non-restartable state and must be removed/recreated.
 type NonRestartableContainerError struct {

@@ -5,6 +5,48 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0-rc.8]
+
+### Changed
+- **Go dependencies:** patch/minor bump, `modernc.org/sqlite` **v1.59.0**.
+
+### Fixed
+
+- Reconcile no longer clears microservice CPU and memory in status sent to the controller; the last usage sample is kept until the usage refresh loop updates it.
+
+## [v1.1.0-rc.7]
+
+### Fixed
+
+- A local bind-path recreate is saved before the old container is removed, so the delete wake does not start a second container or keep the previous mount.
+
+### Changed
+
+- Idle workloads are not inspected every few seconds while the containerd event stream is healthy
+- A container exit, OOM, delete, or start reconciles that workload immediately
+- If the event stream is down, inspection returns to the previous periodic check until the stream is healthy
+- A spec change, a local deploy, or a catalog item becoming ready or failed reconciles the affected workloads without a full scan
+- A full compare still runs about once a minute
+- CPU and memory figures refresh on their own schedule, about every 10 seconds
+- Existing containers keep working; they are not recreated just to store a new apply label
+- Controller and manual fat OTA succeed on hosts where `/run` is mounted `noexec` (drain staging under the data directory)
+- Failed controller OTA attempts leave output in `/var/log/edgelet/ota-install.log`
+
+## [v1.1.0-rc.6]
+
+### Changed
+
+- **Public address:** fog status `ipAddressExternal` is filled in memory from `https://ipv4-check-perf.radar.cloudflare.com/api/info` (`ip_address`) after startup and after a successful config reload. It is not written to `config.yaml`. A failed lookup keeps the previous value.
+- **GPS AUTO:** coordinates come from that same lookup (`latitude`, `longitude`) instead of `http://ip-api.com/json`. `MANUAL`, `OFF`, and a working `DYNAMIC` device are unchanged.
+- **Host DNS names:** `edgelet.default.svc.bridge.local`, `host.docker.internal`, and `host.container.internal` resolve to the edgelet bridge gateway (`172.18.0.1` on `172.18.0.0/16`). If that gateway cannot be derived, the network-manager interface address is used. These names do not use `ipAddressExternal`.
+- **Linux unit tests:** `make test-linux` and `make quality-linux` also run `CGO_ENABLED=0 go test -short -tags 'linux,!cgo'`, the same non-cgo pass as the embed CI jobs. `make test-linux-race` skips that pass because the race detector requires cgo.
+
+### Fixed
+- **Volume holder tests:** the flock helper stays alive when tests are built with `CGO_ENABLED=0`. Embed CI no longer reports a deadlock and an empty holder list. Volume reconcile behavior is unchanged.
+- **Data-plane drain during reconcile:** while a data-plane drain is in progress, the edgelet engine returns before `RunPodSandbox` instead of creating a sandbox. Catalog and local reconcile retry that pause on the next monitor tick. It does not increment `restartCount` and it is not stored as a crash. Docker and Podman are unchanged.
+- **Drain retry:** if a CRI list or delete fails, or a labeled container or sandbox remains, quiesce retries until the existing shutdown grace deadline. Each stop uses the time left on that deadline. A volume-tree holder that survives SIGKILL still fails verify immediately. A drain that does not verify still leaves containerd running and does not reap shims.
+- **WASM shim log:** before the first wasm shim `-info`, the data plane creates `/var/lib/edgelet-containerd/shim-log/log` (directory `0750`, file `0600`) and uses that directory as its working directory. The shim opens the relative file `log` and does not create it. An existing symlink is rejected.
+
 ## [v1.1.0-rc.5]
 
 ### Changed

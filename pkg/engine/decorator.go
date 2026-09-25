@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -57,6 +58,9 @@ func (l *loggingEngine) CreateContainer(ms *models.Microservice, hostname string
 		image = ms.ImageName
 	}
 	containerID, err = l.inner.CreateContainer(ms, hostname)
+	if errors.Is(err, ErrReconcilePaused) {
+		return "", err
+	}
 	l.emitMutating(runtimeops.EventEngineCRIContainerCreated, containerID, image, runtimeops.ReasonCreateFailed, "container create failed", "container created", start, err, err == nil)
 	return containerID, err
 }
@@ -199,6 +203,15 @@ func (l *loggingEngine) TailContainerLogs(containerID, sessionID, microserviceUU
 
 func (l *loggingEngine) AreMicroserviceAndContainerEqual(containerID string, ms *models.Microservice, registry *models.Registry) bool {
 	return l.inner.AreMicroserviceAndContainerEqual(containerID, ms, registry)
+}
+
+func (l *loggingEngine) SetContainerSpecCompare(allow bool) {
+	type specGate interface {
+		SetContainerSpecCompare(bool)
+	}
+	if g, ok := l.inner.(specGate); ok {
+		g.SetContainerSpecCompare(allow)
+	}
 }
 
 func (l *loggingEngine) EnsureNetwork(name string) error {

@@ -38,6 +38,9 @@ type bootstrapDeps struct {
 }
 
 func startEmbeddedContainerdWithRetry() (*containerd.Service, error) {
+	if err := containerd.UseWasmShimLogDir(); err != nil {
+		return nil, fmt.Errorf("prepare wasm shim log: %w", err)
+	}
 	deps := bootstrapDeps{
 		ensureDependencies: data.EnsureExtracted,
 		newService: func() containerdStarter {

@@ -1152,6 +1152,7 @@ func (f *Facade) removeLocalWorkloadRecord(local *models.LocalDeployedMicroservi
 	if err := f.db.DeleteLocalWorkload(uuid); err != nil {
 		return "", err
 	}
+	processmanager.GetInstance().MarkReconcile(uuid)
 	if cleanup {
 		if err := f.db.AddPersistentVolumeCleanupUUID(uuid); err != nil {
 			return "", err
@@ -1224,7 +1225,13 @@ func (f *Facade) GetRuntimeMicroserviceLogs(selector string, tailLines int, sinc
 
 // UpsertLocalDeployment upserts one local deployment record.
 func (f *Facade) UpsertLocalDeployment(ms *models.LocalDeployedMicroservice) error {
-	return f.db.UpsertLocalWorkload(ms)
+	if err := f.db.UpsertLocalWorkload(ms); err != nil {
+		return err
+	}
+	if ms != nil {
+		processmanager.GetInstance().MarkReconcile(ms.LocalUUID)
+	}
+	return nil
 }
 
 // ListLocalDeployments lists local deployment records.
@@ -1239,7 +1246,11 @@ func (f *Facade) GetLocalDeployment(id string) (*models.LocalDeployedMicroservic
 
 // DeleteLocalDeployment removes local deployment by id.
 func (f *Facade) DeleteLocalDeployment(id string) error {
-	return f.db.DeleteLocalWorkload(id)
+	if err := f.db.DeleteLocalWorkload(id); err != nil {
+		return err
+	}
+	processmanager.GetInstance().MarkReconcile(id)
+	return nil
 }
 
 func (f *Facade) ensureRuntimeClassSupported() error {
@@ -1579,6 +1590,14 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 		logging.LogInfo(runtimeAPIModuleName, fmt.Sprintf("local deploy updated catalog without recreate deploymentId=%s containerId=%s", deploymentID, localItem.ContainerID))
 		return deploymentID, doc, nil
 	}
+	// Record the new generation before removing the container. A delete wake
+	// must see this apply as in flight and must not launch the previous spec.
+	localItem.LastStartAttemptAt = time.Now().Unix()
+	emitDeployProgress(progress, DeployStagePersisting, "saving deployment metadata")
+	if err := f.UpsertLocalDeployment(localItem); err != nil {
+		logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy persist initial failed deploymentId=%s err=%v", deploymentID, err))
+		return "", nil, err
+	}
 	if existing != nil && strings.TrimSpace(existing.ContainerID) != "" {
 		if removeErr := processmanager.GetInstance().RemoveContainerByContainerID(strings.TrimSpace(existing.ContainerID)); removeErr != nil {
 			logging.LogWarn(
@@ -1587,11 +1606,6 @@ func (f *Facade) ApplyLocalManifest(manifest, sourceName string, dryRun bool, pr
 			)
 			return "", nil, fmt.Errorf("failed to remove previous local runtime for %s: %w", deploymentID, removeErr)
 		}
-	}
-	emitDeployProgress(progress, DeployStagePersisting, "saving deployment metadata")
-	if err := f.UpsertLocalDeployment(localItem); err != nil {
-		logging.LogWarn(runtimeAPIModuleName, fmt.Sprintf("local deploy persist initial failed deploymentId=%s err=%v", deploymentID, err))
-		return "", nil, err
 	}
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 

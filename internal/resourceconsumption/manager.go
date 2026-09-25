@@ -41,6 +41,13 @@ type Manager struct {
 	cpuHistoryMu sync.Mutex
 	cpuHistory   map[string][]float64
 
+	procCPU         map[int32]cpuTimesSample
+	lastHost        hostCPUSample
+	haveHost        bool
+	diskSize        int64
+	diskSizeAt      time.Time
+	directorySizeFn func(string) int64
+
 	// Limits (in bytes for memory/disk, percentage for CPU)
 	diskLimit   int64
 	cpuLimit    float64
@@ -59,6 +66,7 @@ func GetInstance() *Manager {
 			config:        config.GetInstance(),
 			processReader: gopsutilProcessReader{},
 			cpuHistory:    make(map[string][]float64),
+			procCPU:       make(map[int32]cpuTimesSample),
 		}
 	})
 	return instance
@@ -116,7 +124,7 @@ func (rcm *Manager) collectUsageData() {
 	totalMemoryMiB := agentMemoryMiB + runtimeMemoryMiB
 	totalMemoryBytes := sample.agentRSS + sample.runtimeRSS
 
-	diskUsage := rcm.directorySize(rcm.config.DiskDirectory)
+	diskUsage := rcm.cachedDirectorySize(rcm.config.DiskDirectory)
 	availableMemory := rcm.getSystemAvailableMemory()
 	totalSystemMemory := rcm.getSystemTotalMemory()
 	systemCpus := rcm.getSystemLogicalCPUCount()
@@ -268,7 +276,27 @@ func (rcm *Manager) getTotalDiskSpace() int64 {
 	return int64(usage.Total) // #nosec G115 -- disk size is below int64 max in practice
 }
 
+func (rcm *Manager) cachedDirectorySize(path string) int64 {
+	now := time.Now()
+	rcm.mu.RLock()
+	if !rcm.diskSizeAt.IsZero() && now.Sub(rcm.diskSizeAt) < diskWalkInterval {
+		size := rcm.diskSize
+		rcm.mu.RUnlock()
+		return size
+	}
+	rcm.mu.RUnlock()
+	size := rcm.directorySize(path)
+	rcm.mu.Lock()
+	rcm.diskSize = size
+	rcm.diskSizeAt = now
+	rcm.mu.Unlock()
+	return size
+}
+
 func (rcm *Manager) directorySize(path string) int64 {
+	if rcm.directorySizeFn != nil {
+		return rcm.directorySizeFn(path)
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return 0
 	}

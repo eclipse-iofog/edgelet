@@ -12,10 +12,26 @@ import (
 )
 
 const (
-	cpuSampleInterval = time.Second
+	// cpuSampleInterval is zero so collectUsageData does not sleep inside the sampler.
+	cpuSampleInterval = time.Duration(0)
 	cpuSmoothingSize  = 3
 	collectTimeout    = 5 * time.Second
+	diskWalkInterval  = 60 * time.Second
 )
+
+type cpuTimesSample struct {
+	total float64
+	at    time.Time
+}
+
+type hostCPUSample struct {
+	total int64
+	idle  int64
+}
+
+type processTimesReader interface {
+	processCPUTimes(pid int32) (float64, bool)
+}
 
 type hostCPUReader func(ctx context.Context) float64
 type runtimePIDReader func() []int
@@ -30,6 +46,18 @@ type processMetricsReader interface {
 }
 
 type gopsutilProcessReader struct{}
+
+func (gopsutilProcessReader) processCPUTimes(pid int32) (float64, bool) {
+	proc, err := process.NewProcess(pid)
+	if err != nil {
+		return 0, false
+	}
+	times, err := proc.Times()
+	if err != nil {
+		return 0, false
+	}
+	return times.Total(), true
+}
 
 func (gopsutilProcessReader) processCPUPercent(ctx context.Context, pid int32) float64 {
 	proc, err := process.NewProcessWithContext(ctx, pid)
@@ -88,7 +116,7 @@ func (rcm *Manager) sampleEdgeletUsage(trackRuntime bool, runtimePIDs []int) edg
 	go func() {
 		defer wg.Done()
 		agentPID := getAgentPID()
-		agentCPU := reader.processCPUPercent(ctx, agentPID)
+		agentCPU := rcm.sampleProcessCPU(ctx, reader, agentPID)
 		agentRSS := reader.processRSSBytes(agentPID)
 		mu.Lock()
 		sample.agentCPU = agentCPU
@@ -113,8 +141,8 @@ func (rcm *Manager) sampleEdgeletUsage(trackRuntime bool, runtimePIDs []int) edg
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				runtimeCPU := reader.processCPUPercent(ctx, int32(pid)) // #nosec G115 -- proc PIDs fit in int32
-				runtimeRSS := reader.processRSSBytes(int32(pid))        // #nosec G115 -- proc PIDs fit in int32
+				runtimeCPU := rcm.sampleProcessCPU(ctx, reader, int32(pid)) // #nosec G115 -- proc PIDs fit in int32
+				runtimeRSS := reader.processRSSBytes(int32(pid))            // #nosec G115 -- proc PIDs fit in int32
 				mu.Lock()
 				sample.runtimeCPU += runtimeCPU
 				sample.runtimeRSS += runtimeRSS
@@ -129,15 +157,52 @@ func (rcm *Manager) sampleEdgeletUsage(trackRuntime bool, runtimePIDs []int) edg
 	return sample
 }
 
+func (rcm *Manager) sampleProcessCPU(ctx context.Context, reader processMetricsReader, pid int32) float64 {
+	if times, ok := reader.(processTimesReader); ok {
+		return rcm.deltaProcessCPU(pid, times)
+	}
+	if reader == nil {
+		return 0
+	}
+	return reader.processCPUPercent(ctx, pid)
+}
+
+func (rcm *Manager) deltaProcessCPU(pid int32, reader processTimesReader) float64 {
+	total, ok := reader.processCPUTimes(pid)
+	if !ok {
+		return 0
+	}
+	now := time.Now()
+	rcm.cpuHistoryMu.Lock()
+	if rcm.procCPU == nil {
+		rcm.procCPU = make(map[int32]cpuTimesSample)
+	}
+	prev, have := rcm.procCPU[pid]
+	rcm.procCPU[pid] = cpuTimesSample{total: total, at: now}
+	rcm.cpuHistoryMu.Unlock()
+	if !have {
+		return 0
+	}
+	elapsed := now.Sub(prev.at).Seconds()
+	if elapsed <= 0 {
+		return 0
+	}
+	delta := total - prev.total
+	if delta < 0 {
+		return 0
+	}
+	return (delta / elapsed) * 100
+}
+
 func (rcm *Manager) sampleHostCPU(ctx context.Context) float64 {
 	if rcm.hostCPUReader != nil {
 		return rcm.hostCPUReader(ctx)
 	}
+	if runtime.GOOS == "linux" {
+		return rcm.getTotalCPULinux()
+	}
 	percentages, err := cpu.PercentWithContext(ctx, cpuSampleInterval, false)
 	if err != nil || len(percentages) == 0 {
-		if runtime.GOOS == "linux" {
-			return rcm.getTotalCPULinux()
-		}
 		return 0
 	}
 	return percentages[0]

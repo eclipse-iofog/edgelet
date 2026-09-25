@@ -89,6 +89,13 @@ type Engine struct {
 	execToCont          sync.Map                  // execID -> containerID (for removal on StopExecSession)
 	dnsResolver         *dnsresolver.Resolver
 	runtimeEventsCancel context.CancelFunc
+	// runtimeEventHooks feeds container events in tests without a live containerd.
+	runtimeEventHooks *runtimeEventHooks
+
+	specCompareMu sync.Mutex
+	// specCompare allows reading the OCI spec to compare env when the apply
+	// label has no environment digest. The slow sweep turns this on.
+	specCompare bool
 }
 
 // New returns an uninitialised iofog engine. logDir is the directory to write
@@ -440,7 +447,9 @@ func (e *Engine) CreateContainer(ms *models.Microservice, hostname string) (stri
 	sandboxStart := time.Now()
 	sandboxID, err := e.runPodSandboxWithRecovery(ctx, podConfig, runtimeHandler, ms.MicroserviceUUID)
 	if err != nil {
-		e.emitCRISubstep(runtimeops.EventEngineCRISandboxCreated, "criRunPodSandbox", "", "", ms.ImageName, runtimeops.ReasonCreateFailed, sandboxStart, err)
+		if !errors.Is(err, engine.ErrReconcilePaused) {
+			e.emitCRISubstep(runtimeops.EventEngineCRISandboxCreated, "criRunPodSandbox", "", "", ms.ImageName, runtimeops.ReasonCreateFailed, sandboxStart, err)
+		}
 		return "", fmt.Errorf("RunPodSandbox for %s: %w", containerName, err)
 	}
 	e.emitEngineInfo(runtimeops.EventEngineCRISandboxCreated, "", sandboxID, ms.ImageName, "pod sandbox created", sandboxStart, map[string]any{
@@ -1888,10 +1897,30 @@ func readLastPlainLines(logPath string, nLines int) ([][]byte, error) {
 
 // --- Configuration drift detection ---
 
+// SetContainerSpecCompare allows an OCI spec read on the next env compare
+// when the apply label has no environment digest.
+func (e *Engine) SetContainerSpecCompare(allow bool) {
+	if e == nil {
+		return
+	}
+	e.specCompareMu.Lock()
+	e.specCompare = allow
+	e.specCompareMu.Unlock()
+}
+
+func (e *Engine) specCompareAllowed() bool {
+	if e == nil {
+		return false
+	}
+	e.specCompareMu.Lock()
+	defer e.specCompareMu.Unlock()
+	return e.specCompare
+}
+
 // AreMicroserviceAndContainerEqual returns true if the running container's
 // configuration matches the desired microservice spec. It compares:
 //  1. Image name
-//  2. Environment variables (set equality)
+//  2. Environment (label digest when present; OCI spec only on the slow sweep)
 //  3. Port mappings (from persisted label vs desired) — skipped for host-network mode
 //  4. Network mode (host vs bridge)
 func (e *Engine) AreMicroserviceAndContainerEqual(containerID string, ms *models.Microservice, registry *models.Registry) bool {
@@ -1907,55 +1936,9 @@ func (e *Engine) AreMicroserviceAndContainerEqual(containerID string, ms *models
 		return false
 	}
 
-	spec, err := c.Spec(ctx)
-	if err != nil {
-		log.Debugf("AreMicroserviceAndContainerEqual %s: Spec error: %v", shortID, err)
-		return false
-	}
 	info, err := c.Info(ctx)
 	if err != nil {
 		log.Debugf("AreMicroserviceAndContainerEqual %s: Info error: %v", shortID, err)
-		return false
-	}
-
-	// 1. Image — containerd stores qualified refs (e.g. docker.io/, quay.io/); controller
-	// often sends hostless names. imageref.Match uses the same registry context as pull.
-	registryURL, fromCache := imageref.MatchParamsOptional(registryURLFromRegistry(registry))
-	if !microserviceImageMatches(info.Image, ms.ImageName, registryURL, fromCache) {
-		log.Debugf("AreMicroserviceAndContainerEqual %s: image mismatch: got %q want %q",
-			shortID, info.Image, ms.ImageName)
-		return false
-	}
-
-	// 2. Environment variables (compare as sets; only desired keys are checked against actual).
-	desiredEnv := buildIofogContainerEnv(ms, config.GetInstance())
-	if !envSetsEqual(spec.Process.Env, desiredEnv) {
-		log.Debugf("AreMicroserviceAndContainerEqual %s: env mismatch", shortID)
-		return false
-	}
-
-	// 3. Port mappings — skipped for host-network containers because CRI ignores port
-	// bindings when the container shares the host network namespace. Comparing stored
-	// labels against desired mappings would produce false positives on every cycle.
-	if !ms.HostNetworkMode {
-		if info.Labels != nil {
-			var storedPorts []*models.PortMapping
-			if v, ok := info.Labels[labelPorts]; ok && v != "" {
-				_ = json.Unmarshal([]byte(v), &storedPorts)
-			}
-			if !portMappingsEqual(storedPorts, ms.PortMappings) {
-				log.Debugf("AreMicroserviceAndContainerEqual %s: port mismatch stored=%v desired=%v",
-					shortID, storedPorts, ms.PortMappings)
-				return false
-			}
-		}
-	}
-
-	// 4. Network mode — read canonical host-network label (OCI netns path is ambiguous for CRI).
-	storedHostNet := strings.EqualFold(strings.TrimSpace(info.Labels[workloadmeta.LabelHostNetwork]), "true")
-	if ms.HostNetworkMode != storedHostNet {
-		log.Debugf("AreMicroserviceAndContainerEqual %s: network mismatch want hostNet=%v stored=%v",
-			shortID, ms.HostNetworkMode, storedHostNet)
 		return false
 	}
 
@@ -1963,12 +1946,73 @@ func (e *Engine) AreMicroserviceAndContainerEqual(containerID string, ms *models
 	if info.Labels != nil {
 		label = info.Labels[containerapply.LabelFingerprint]
 	}
-	if !containerapply.MatchesLabel(label, ms) {
-		log.Debugf("AreMicroserviceAndContainerEqual %s: apply fingerprint mismatch", shortID)
+	if !matchContainerInfo(ms, registry, info.Image, info.Labels) {
 		return false
 	}
 
+	desiredEnv := buildIofogContainerEnv(ms, config.GetInstance())
+	if !needsOCISpec(label, e.specCompareAllowed()) {
+		if stored, ok := containerapply.EnvHashFromLabel(label); ok && stored != containerapply.HashEnv(desiredEnv) {
+			log.Debugf("AreMicroserviceAndContainerEqual %s: env mismatch", shortID)
+			return false
+		}
+		return true
+	}
+
+	spec, err := c.Spec(ctx)
+	if err != nil {
+		log.Debugf("AreMicroserviceAndContainerEqual %s: Spec error: %v", shortID, err)
+		return false
+	}
+	if spec == nil || spec.Process == nil {
+		log.Debugf("AreMicroserviceAndContainerEqual %s: Spec error: missing process", shortID)
+		return false
+	}
+	if !envSetsEqual(spec.Process.Env, desiredEnv) {
+		log.Debugf("AreMicroserviceAndContainerEqual %s: env mismatch", shortID)
+		return false
+	}
 	return true
+}
+
+func matchContainerInfo(ms *models.Microservice, registry *models.Registry, image string, labels map[string]string) bool {
+	if ms == nil {
+		return false
+	}
+	registryURL, fromCache := imageref.MatchParamsOptional(registryURLFromRegistry(registry))
+	if !microserviceImageMatches(image, ms.ImageName, registryURL, fromCache) {
+		return false
+	}
+	if !ms.HostNetworkMode {
+		var storedPorts []*models.PortMapping
+		if labels != nil {
+			if v, ok := labels[labelPorts]; ok && v != "" {
+				_ = json.Unmarshal([]byte(v), &storedPorts)
+			}
+		}
+		if !portMappingsEqual(storedPorts, ms.PortMappings) {
+			return false
+		}
+	}
+	storedHostNet := false
+	if labels != nil {
+		storedHostNet = strings.EqualFold(strings.TrimSpace(labels[workloadmeta.LabelHostNetwork]), "true")
+	}
+	if ms.HostNetworkMode != storedHostNet {
+		return false
+	}
+	label := ""
+	if labels != nil {
+		label = labels[containerapply.LabelFingerprint]
+	}
+	return containerapply.MatchesLabel(label, ms)
+}
+
+func needsOCISpec(label string, allowSpec bool) bool {
+	if containerapply.HasEnvHash(label) {
+		return false
+	}
+	return allowSpec
 }
 
 // registryURLFromRegistry returns the registry URL for imageref helpers.

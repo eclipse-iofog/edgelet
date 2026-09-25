@@ -137,7 +137,7 @@ RELEASE_FRESH_CI_IMAGE=1 ./test/release/build-all.sh
 
 ```bash
 make build-desktop-darwin build-desktop-windows
-scripts/release-binaries.sh v1.1.0-rc.5
+scripts/release-binaries.sh v1.1.0-rc.8
 ```
 
 Local / single-target builds:
@@ -149,7 +149,7 @@ make deps                     # embed pipeline before linux thin build
 make build-linux-amd64        # deps + thin for amd64
 make build-linux-arm64        # deps + thin for arm64
 make build-desktop-darwin     # darwin monolithic
-make release-binaries VERSION=v1.1.0-rc.5
+make release-binaries VERSION=v1.1.0-rc.8
 ```
 
 ## Testing
@@ -185,18 +185,18 @@ Identical builds and tags; choose the channel that matches your fleet docs. Over
 ### Eclipse (canonical)
 
 ```bash
-curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.0-rc.5/install.sh -o install.sh
+curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.0-rc.8/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.0-rc.5
+sudo ./install.sh --version=v1.1.0-rc.8
 # dev / CI: sudo ./install.sh --bin-path=build/edgelet-linux-amd64 --version=dev
 ```
 
 ### Datasance mirror
 
 ```bash
-curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.0-rc.5/install.sh -o install.sh
+curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.0-rc.8/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.0-rc.5
+sudo ./install.sh --version=v1.1.0-rc.8
 ```
 
 Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples.

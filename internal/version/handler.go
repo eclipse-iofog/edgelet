@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,7 +18,18 @@ import (
 const (
 	moduleName           = "Version Handler"
 	otaInProgressTimeout = 60 * time.Second
+	defaultOTAInstallLog = "/var/log/edgelet/ota-install.log"
 )
+
+var otaInstallLogPath = defaultOTAInstallLog
+
+func setOTAInstallLogPath(path string) {
+	if strings.TrimSpace(path) == "" {
+		otaInstallLogPath = defaultOTAInstallLog
+		return
+	}
+	otaInstallLogPath = path
+}
 
 // VersionCommand represents a version change command.
 type VersionCommand string //nolint:revive // exported API
@@ -366,14 +378,48 @@ func defaultDaemonHealthy() bool {
 }
 
 func defaultStartDetached(script string, args ...string) error {
-	cmdArgs := append([]string{script}, args...)
-	cmd := exec.Command("sh", cmdArgs...) // #nosec G204 -- script path is fixed contract path; args are validated flags
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	setDetachedProcAttr(cmd)
-	if err := cmd.Start(); err != nil {
+	logFile, err := openOTAInstallLog()
+	if err != nil {
 		return err
 	}
-	go func() { _ = cmd.Wait() }()
+	cmdArgs := append([]string{script}, args...)
+	cmd := exec.Command("sh", cmdArgs...) // #nosec G204 -- script path is fixed contract path; args are validated flags
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	setDetachedProcAttr(cmd)
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return err
+	}
+	report := reportDetachedInstallExit
+	go func() {
+		err := cmd.Wait()
+		_ = logFile.Close()
+		report(err)
+	}()
 	return nil
 }
+
+func openOTAInstallLog() (*os.File, error) {
+	path := otaInstallLogPath
+	if strings.TrimSpace(path) == "" {
+		path = defaultOTAInstallLog
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return nil, fmt.Errorf("create OTA install log directory: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640) // #nosec G302 G304 -- OTA install log is a fixed operator path
+	if err != nil {
+		return nil, fmt.Errorf("open OTA install log: %w", err)
+	}
+	return f, nil
+}
+
+func logDetachedInstallExit(err error) {
+	if err == nil {
+		return
+	}
+	logging.LogError(moduleName, "install.sh exited with an error", err)
+}
+
+var reportDetachedInstallExit = logDetachedInstallExit

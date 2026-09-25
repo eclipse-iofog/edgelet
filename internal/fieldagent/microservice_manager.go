@@ -66,13 +66,22 @@ func (fa *FieldAgent) SetCurrentMicroservices(microservices []*models.Microservi
 	copy(fa.currentMicroservices, microservices)
 }
 
-// setLatestMicroservices sets the latest microservices (internal use)
+// setLatestMicroservices sets the latest microservices (internal use).
+// Only workloads whose desired spec changed are marked for reconcile.
 func (fa *FieldAgent) setLatestMicroservices(microservices []*models.Microservice) {
-	fa.microservicesMu.Lock()
-	defer fa.microservicesMu.Unlock()
-
-	fa.latestMicroservices = make([]*models.Microservice, len(microservices))
-	copy(fa.latestMicroservices, microservices)
+	marked := fa.replaceLatestMicroservices(microservices)
+	if len(marked) == 0 {
+		return
+	}
+	fa.mu.RLock()
+	pm := fa.processManager
+	fa.mu.RUnlock()
+	if pm == nil {
+		return
+	}
+	for _, uuid := range marked {
+		pm.MarkReconcile(uuid)
+	}
 }
 
 // setRegistries sets the registries (internal use)
@@ -91,6 +100,7 @@ func (fa *FieldAgent) Clear() {
 	defer fa.microservicesMu.Unlock()
 
 	fa.latestMicroservices = make([]*models.Microservice, 0)
+	fa.latestDesired = nil
 	fa.currentMicroservices = make([]*models.Microservice, 0)
 	fa.registries = make([]*models.Registry, 0)
 	// Note: routes and configs are not stored in FieldAgent, they're passed to callbacks

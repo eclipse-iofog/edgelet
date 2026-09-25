@@ -69,6 +69,22 @@ type ProcessManager struct {
 	watchdogLocalModelsFn        func()
 	watchdogLocalKnowledgeMu     sync.Mutex
 	watchdogLocalKnowledgeFn     func()
+
+	// reconcileMu guards the dirty set and per-workload deadline timers.
+	reconcileMu            sync.Mutex
+	reconcileDirty         map[string]struct{}
+	reconcileDeadlines     map[string]*reconcileDeadline
+	reconcileDeadlineAfter func(time.Duration, func()) *time.Timer
+	reconcileNow           func() time.Time
+	// forceFullSweep runs one full reconcile on the next pass.
+	forceFullSweep bool
+	lastFullSweep  time.Time
+	// runtimeEventStreamDegraded is set when the container event stream is down.
+	// The periodic tick still reconciles every workload until the stream is healthy.
+	runtimeEventStreamDegraded bool
+	eventStreamWarned          bool
+	runtimeEvents              chan runtimeEventSignal
+	reconcileMonitorRunning    bool
 }
 
 // LocalDeployProgressCallback reports local deployment runtime stage transitions.
@@ -120,10 +136,15 @@ func (pm *ProcessManager) Start(eng engine.ContainerEngine, microserviceManager 
 
 	pm.ctx, pm.cancel = context.WithCancel(context.Background())
 	pm.taskQueue = NewTaskQueue(100)
+	if pm.runtimeEvents == nil {
+		pm.runtimeEvents = make(chan runtimeEventSignal, 32)
+	}
+	pm.requestFullSweep()
 
-	pm.wg.Add(2)
+	pm.wg.Add(3)
 	go pm.containersMonitor()
 	go pm.checkTasks()
+	go pm.containerStatsLoop()
 
 	pm.logger.Info("Process Manager started")
 	return nil
@@ -574,23 +595,24 @@ func (pm *ProcessManager) cleanupLocalKnowledgeForWatchdog() {
 	}
 }
 
-// Update notifies the ProcessManager of changes
-// updates registries and notifies monitor thread
+// Update notifies the ProcessManager of a full reload.
+// Startup and reconnect use this so every workload is reconciled once.
 func (pm *ProcessManager) Update() {
+	if pm == nil {
+		return
+	}
 	pm.logger.Debug("updates registries list according to the last changes")
 
-	// Update registries status
-	// Remove registries that no longer exist
 	if pm.microserviceManager != nil {
 		status := statusreporter.GetInstance().GetProcessManagerStatus()
 		if status != nil && status.RegistriesStatus != nil {
-			// Filter out registries that don't exist in microservice manager
-			// This is a simplified version
 			pm.logger.Debug("Updated registries status")
 		}
 	}
 
-	// Notify the monitor thread to restart immediately instead of waiting
+	cpUUID, _, _ := pm.lookupControlPlane()
+	locals, localErr := pm.listLocalWorkloadsForReconcile()
+	pm.markAllWorkloads(cpUUID, locals, localErr)
 	pm.notifyMonitorThread()
 }
 
@@ -615,6 +637,8 @@ func (pm *ProcessManager) containersMonitor() {
 			logging.LogError(ProcessManagerModuleName, "Panic recovered", fmt.Errorf("%v", r))
 		}
 	}()
+	pm.setReconcileMonitorRunning(true)
+	defer pm.setReconcileMonitorRunning(false)
 	cfg := config.GetInstance()
 	interval := time.Duration(cfg.MonitorContainersStatusFreqSeconds) * time.Second
 	ticker := time.NewTicker(interval)
@@ -628,7 +652,12 @@ func (pm *ProcessManager) containersMonitor() {
 			// Continue to monitoring
 		case <-pm.updateChan:
 			// Continue to monitoring immediately
+		case ev := <-pm.runtimeEvents:
+			pm.deliverRuntimeEvent(ev)
+			continue
 		}
+		// A deadline that is already waiting shares this pass with the periodic tick.
+		pm.drainReconcileWake(ticker)
 
 		ObserveDataPlaneDrainHold()
 		if IsQuiesced() {
@@ -640,15 +669,14 @@ func (pm *ProcessManager) containersMonitor() {
 		tickStart := time.Now()
 		reconcileStats := &reconcileCycleStats{}
 
-		pm.reconcileControlPlane()
-		pm.handleLatestMicroservices(reconcileStats)
-		pm.enqueueDueRetries()
-		pm.reconcileLocalDeployments()
-		pm.deleteRemainingMicroservices()
+		idle := pm.reconcileScheduled(reconcileStats)
+		if !idle {
+			pm.deleteRemainingMicroservices()
+			pm.pruneStaleProcessManagerStatuses()
+			pm.updateRunningMicroservicesCount()
+		}
 		pm.cleanupLocalModelsForWatchdog()
 		pm.cleanupLocalKnowledgeForWatchdog()
-		pm.pruneStaleProcessManagerStatuses()
-		pm.updateRunningMicroservicesCount()
 		pm.updateCurrentMicroservices()
 
 		desiredCount := 0
@@ -791,7 +819,13 @@ func persistLocalWorkloadIfPresent(item *models.LocalDeployedMicroservice) error
 	if item == nil || strings.TrimSpace(item.LocalUUID) == "" {
 		return nil
 	}
-	if loadLocalWorkload(item.LocalUUID) == nil {
+	stored := loadLocalWorkload(item.LocalUUID)
+	if stored == nil {
+		return nil
+	}
+	// A reconcile that loaded the previous generation must not write it back
+	// over an apply that has already stored a newer one.
+	if stored.Generation > item.Generation {
 		return nil
 	}
 	return store.GetInstance().UpsertLocalWorkload(item)
@@ -879,16 +913,16 @@ func (pm *ProcessManager) reconcileLocalDesiredStopped(item *models.LocalDeploye
 }
 
 func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeployedMicroservice, container *engine.Container, now int64) {
+	if localDeploymentLaunchInFlight(item, now) {
+		pm.logger.Debugf(
+			"Skipping local reconcile for %s: apply in-flight (generation=%d observed=%d)",
+			item.LocalUUID,
+			item.Generation,
+			item.ObservedGeneration,
+		)
+		return
+	}
 	if container == nil {
-		if localDeploymentLaunchInFlight(item, now) {
-			pm.logger.Debugf(
-				"Skipping local reconcile launch for %s: apply in-flight (generation=%d observed=%d)",
-				item.LocalUUID,
-				item.Generation,
-				item.ObservedGeneration,
-			)
-			return
-		}
 		pm.launchLocalDeploymentWithHook(item, now)
 		return
 	}
@@ -952,7 +986,7 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 				reason,
 				exitCode,
 			)
-			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+			if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 				return
 			}
 		}
@@ -970,7 +1004,7 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 					nr.ExitCode,
 					nr.Message,
 				)
-				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+				if recErr := pm.recreateLocalDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 					return
 				}
 			}
@@ -991,6 +1025,20 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 		}
 	}
 
+	_ = persistLocalWorkloadIfPresent(item)
+}
+
+func runtimeWaitErr(err error) bool {
+	return errors.Is(err, errVolumeInUse) || errors.Is(err, engine.ErrReconcilePaused)
+}
+
+func pauseLocalLaunch(item *models.LocalDeployedMicroservice, now int64) {
+	if item == nil {
+		return
+	}
+	item.RuntimeState = "queued"
+	item.State = item.RuntimeState
+	item.LastTransitionAt = now
 	_ = persistLocalWorkloadIfPresent(item)
 }
 
@@ -1045,6 +1093,10 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 	containerID, err := pm.LaunchLocalMicroservice(localMS, registry, hostIP)
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			pauseLocalLaunch(item, now)
+			return
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteLocalVolumeHold(item)
 			return
@@ -1123,6 +1175,14 @@ func (pm *ProcessManager) checkTasks() {
 		}
 
 		if err := pm.executeTask(task); err != nil {
+			if errors.Is(err, engine.ErrReconcilePaused) {
+				if pm.microserviceManager != nil {
+					if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+						ms.SetIsUpdating(false)
+					}
+				}
+				continue
+			}
 			if errors.Is(err, errVolumeInUse) {
 				pm.noteVolumeInUse(task.MicroserviceUUID)
 				if pm.microserviceManager != nil {
@@ -1163,6 +1223,7 @@ func (pm *ProcessManager) retryTask(task *ContainerTask) {
 		return
 	}
 	checker.ParkTask(task)
+	pm.armReconcileDeadline(task.MicroserviceUUID, delay)
 }
 
 func (pm *ProcessManager) enqueueDueRetries() {
@@ -1337,6 +1398,12 @@ func (pm *ProcessManager) addTask(task *ContainerTask) {
 // that already has an in-flight task, providing exactly-once per-cycle semantics and
 // preventing task-queue flooding.
 func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) {
+	pm.reconcileControllerMicroservices(nil, stats)
+}
+
+// reconcileControllerMicroservices runs the controller reconcile for every
+// latest microservice, or only the UUIDs in only when that set is non-nil.
+func (pm *ProcessManager) reconcileControllerMicroservices(only map[string]struct{}, stats *reconcileCycleStats) {
 	pm.logger.Debug("Start handle latest microservices")
 
 	latestMicroservices := pm.microserviceManager.GetLatestMicroservices()
@@ -1346,6 +1413,11 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 	})
 
 	for _, ms := range latestMicroservices {
+		if only != nil {
+			if _, ok := only[strings.TrimSpace(ms.MicroserviceUUID)]; !ok {
+				continue
+			}
+		}
 		// Skip microservices that already have an in-flight ADD or UPDATE task.
 		// IsUpdating is set before enqueueing and cleared when the task finishes,
 		// ensuring we never flood the queue with duplicate tasks.
@@ -1555,7 +1627,7 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 					stuckMsg := stuckInRestartErrorMessage(ms.MicroserviceUUID, fmt.Sprintf("Container repeatedly failing to start: %v", startErr))
 					status.ErrorMessage = &stuckMsg
 					statusreporter.GetInstance().UpdateProcessManagerStatus(func(pmStatus *models.ProcessManagerStatus) {
-						pmStatus.SetMicroservicesStatus(ms.MicroserviceUUID, status)
+						syncMicroserviceStatusToReporter(pmStatus, ms.MicroserviceUUID, status)
 					})
 					continue
 				}
@@ -1599,17 +1671,9 @@ func (pm *ProcessManager) handleLatestMicroservices(stats *reconcileCycleStats) 
 			}
 		}
 
-		// Merge per-container CPU/memory stats for running containers (best-effort).
-		if status.Status == models.MicroserviceStateRunning {
-			if stats, err := pm.engine.GetContainerStats(container.ID); err == nil {
-				status.CPUUsage = stats.CPUUsage
-				status.MemoryUsage = stats.MemoryUsage
-			}
-		}
-
 		pm.syncRuntimeStatus(ms.MicroserviceUUID, status)
 
-		pm.updateMicroservice(container, ms, stats)
+		pm.updateMicroservice(container, ms, status, stats)
 	}
 
 	pm.logger.Debug("Finished handle latest microservices")
@@ -1643,23 +1707,20 @@ func (pm *ProcessManager) deleteMicroservice(ms *models.Microservice) {
 }
 
 // updateMicroservice checks if a container needs updating
-func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *models.Microservice, stats *reconcileCycleStats) {
+func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *models.Microservice, status *models.MicroserviceStatus, stats *reconcileCycleStats) {
 	pm.logger.Debug("Start update microservice")
+
+	if status == nil {
+		return
+	}
 
 	ms.ContainerID = container.ID
 
-	ip, err := pm.engine.GetContainerIPAddress(container.ID)
-	if err != nil {
-		pm.logger.Warnf("Can't get IP address for microservice %s: %v", ms.MicroserviceUUID, err)
-		ip = "0.0.0.0"
+	ip := "0.0.0.0"
+	if status.IPAddress != nil && strings.TrimSpace(*status.IPAddress) != "" {
+		ip = strings.TrimSpace(*status.IPAddress)
 	}
 	ms.ContainerIPAddress = &ip
-
-	status, err := pm.engine.GetContainerStatus(container.ID, ms.MicroserviceUUID)
-	if err != nil {
-		pm.logger.Warnf("Error getting microservice status: %v", err)
-		return
-	}
 
 	shouldUpdate := pm.shouldContainerBeUpdated(ms, container, status)
 	if shouldUpdate {
@@ -1804,10 +1865,12 @@ func (pm *ProcessManager) recreateSkipReason(ms *models.Microservice) recreateSk
 
 func (pm *ProcessManager) emitRestartBackoff(uuid, decision string) {
 	checker := GetRestartStuckChecker()
+	delay := checker.RemainingDelay(uuid)
 	pm.emitReconcileDecision(uuid, decision, "restart_backoff", "delaying crash-driven recreate", runtimeops.LevelInfo, map[string]any{
 		"consecutiveFailures": checker.ConsecutiveFailures(uuid),
-		"delayMs":             checker.RemainingDelay(uuid).Milliseconds(),
+		"delayMs":             delay.Milliseconds(),
 	})
+	pm.armReconcileDeadline(uuid, delay)
 }
 
 func (pm *ProcessManager) syncRuntimeStatus(uuid string, status *models.MicroserviceStatus) {
@@ -2153,6 +2216,9 @@ func (pm *ProcessManager) recreateLocalDeployment(item *models.LocalDeployedMicr
 	}
 	newID, err := pm.containerManager.RecreateContainer(pm.reconcileOperationContext(item.LocalUUID), ms, RecreateOptions{PullImage: pullImage})
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			return err
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteLocalVolumeHold(item)
 			return err

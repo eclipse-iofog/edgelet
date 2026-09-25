@@ -106,7 +106,8 @@ func TestUpdateCoordinates_AutoModeTriggersGPSCallbackOnSuccess(t *testing.T) {
 	cfg.GPSMode = "auto"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"status":"success","lat":41.0151,"lon":28.9795}`))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"latitude":"41.01510","longitude":"28.97950","ip_address":"203.0.113.5"}`))
 	}))
 	defer func() {
 		server.Close()

@@ -145,7 +145,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 
 	if item.Generation > item.ObservedGeneration {
 		pullImage := pm.consumeControlPlanePullOnRecreate()
-		if err := pm.recreateControlPlaneDeployment(item, pullImage, now); err == nil || errors.Is(err, errVolumeInUse) {
+		if err := pm.recreateControlPlaneDeployment(item, pullImage, now); err == nil || runtimeWaitErr(err) {
 			return
 		}
 	}
@@ -185,7 +185,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 					nr.ExitCode,
 					nr.Message,
 				)
-				if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+				if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 					return
 				}
 			}
@@ -205,7 +205,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 				reason,
 				exitCode,
 			)
-			if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+			if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 				return
 			}
 		}
@@ -223,7 +223,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 					nr.ExitCode,
 					nr.Message,
 				)
-				if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || errors.Is(recErr, errVolumeInUse) {
+				if recErr := pm.recreateControlPlaneDeployment(item, false, now); recErr == nil || runtimeWaitErr(recErr) {
 					return
 				}
 			}
@@ -235,7 +235,6 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 			item.FailureCount = 0
 		}
 		_ = store.GetInstance().UpsertSystemControlPlane(item)
-		pm.mergeControlPlaneContainerStats(item, container, status)
 		pm.syncControlPlaneProcessManagerStatus(item, container, status)
 		return
 	case "failed", "unknown":
@@ -247,31 +246,7 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 	}
 
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
-	pm.mergeControlPlaneContainerStats(item, container, status)
 	pm.syncControlPlaneProcessManagerStatus(item, container, status)
-}
-
-func (pm *ProcessManager) mergeControlPlaneContainerStats(
-	item *models.ControlPlaneDeployment,
-	container *engine.Container,
-	status *models.MicroserviceStatus,
-) {
-	if pm == nil || item == nil || container == nil || status == nil {
-		return
-	}
-	if !item.ControllerRegistered {
-		return
-	}
-	if status.Status != models.MicroserviceStateRunning {
-		return
-	}
-	if pm.engine == nil {
-		return
-	}
-	if stats, err := pm.engine.GetContainerStats(container.ID); err == nil {
-		status.CPUUsage = stats.CPUUsage
-		status.MemoryUsage = stats.MemoryUsage
-	}
 }
 
 func (pm *ProcessManager) syncControlPlaneProcessManagerStatus(
@@ -292,9 +267,9 @@ func (pm *ProcessManager) syncControlPlaneProcessManagerStatus(
 		next := runtimeStatus
 		if next == nil {
 			next = models.NewMicroserviceStatusWithState(controlPlaneRuntimeStateToMicroserviceState(item.RuntimeState))
-			if container != nil {
-				next.ContainerID = container.ID
-			}
+		}
+		if container != nil && strings.TrimSpace(next.ContainerID) == "" {
+			next.ContainerID = container.ID
 		}
 		syncMicroserviceStatusToReporter(pmStatus, uuid, next)
 		synced = next
@@ -354,6 +329,16 @@ func (pm *ProcessManager) bumpControlPlaneFailure(item *models.ControlPlaneDeplo
 	item.State = item.RuntimeState
 }
 
+func pauseControlPlaneLaunch(item *models.ControlPlaneDeployment, now int64) {
+	if item == nil {
+		return
+	}
+	item.RuntimeState = "queued"
+	item.State = item.RuntimeState
+	item.LastTransitionAt = now
+	_ = store.GetInstance().UpsertSystemControlPlane(item)
+}
+
 func (pm *ProcessManager) noteControlPlaneVolumeHold(item *models.ControlPlaneDeployment) {
 	if item == nil {
 		return
@@ -402,6 +387,10 @@ func (pm *ProcessManager) launchControlPlaneWithProgress(item *models.ControlPla
 	hostIP := network.GetInstance().GetCurrentIPAddress()
 	containerID, err := pm.LaunchLocalMicroserviceWithProgress(ms, registry, hostIP, progress)
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			pauseControlPlaneLaunch(item, now)
+			return
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteControlPlaneVolumeHold(item)
 			return
@@ -455,6 +444,9 @@ func (pm *ProcessManager) recreateControlPlaneDeploymentWithProgress(item *model
 	}
 	containerID, err := pm.LaunchLocalMicroserviceWithProgress(ms, registry, network.GetInstance().GetCurrentIPAddress(), progress)
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			return err
+		}
 		if errors.Is(err, errVolumeInUse) {
 			pm.noteControlPlaneVolumeHold(item)
 			return err

@@ -172,6 +172,144 @@ func TestQuiesceLabeledWorkloads_UsesLongerStopTimeout(t *testing.T) {
 	}
 }
 
+func TestQuiesceLabeledWorkloads_RetryStopsAtDeadline(t *testing.T) {
+	fake := newLabeledDrainFake()
+	start := time.Now()
+	result := QuiesceLabeledWorkloads(context.Background(), fake, 80*time.Millisecond, QuiesceDeps{
+		AfterKillWait: time.Millisecond,
+		Poll:          time.Second,
+		VolumeHolders: func(string) ([]int, error) { return nil, nil },
+		ListTasks:     func(context.Context) ([]string, error) { return []string{"sandbox-1"}, nil },
+		Release:       func(context.Context) error { return nil },
+	})
+	elapsed := time.Since(start)
+	if result.Status != DrainQuiesceVerifyFailed {
+		t.Fatalf("expected verifyFailed at deadline, got %+v", result)
+	}
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("retry ran past the quiesce deadline: %s", elapsed)
+	}
+}
+
+func TestQuiesceLabeledWorkloads_ResidueClearsOnRetry(t *testing.T) {
+	fake := newLabeledDrainFake()
+	var calls atomic.Int32
+	result := QuiesceLabeledWorkloads(context.Background(), fake, 2*time.Second, QuiesceDeps{
+		AfterKillWait: time.Millisecond,
+		Poll:          10 * time.Millisecond,
+		VolumeHolders: func(string) ([]int, error) { return nil, nil },
+		Release:       func(context.Context) error { return nil },
+		ListTasks: func(context.Context) ([]string, error) {
+			if calls.Add(1) == 1 {
+				return []string{"sandbox-1"}, nil
+			}
+			return nil, nil
+		},
+	})
+	if result.Status != DrainQuiesceComplete {
+		t.Fatalf("expected complete after residue cleared, got %+v", result)
+	}
+}
+
+func TestQuiesceLabeledWorkloads_ListErrorClearsOnRetry(t *testing.T) {
+	inner := newLabeledDrainFake()
+	flaky := &flakyListRuntime{inner: inner, fails: 1}
+	result := QuiesceLabeledWorkloads(context.Background(), flaky, 2*time.Second, QuiesceDeps{
+		AfterKillWait: time.Millisecond,
+		Poll:          10 * time.Millisecond,
+		VolumeHolders: func(string) ([]int, error) { return nil, nil },
+		ListTasks:     func(context.Context) ([]string, error) { return nil, nil },
+	})
+	if result.Status != DrainQuiesceComplete {
+		t.Fatalf("expected complete after list recovered, got %+v", result)
+	}
+}
+
+func TestQuiesceLabeledWorkloads_ReleaseUsesRemainingStopBudget(t *testing.T) {
+	fake := newLabeledDrainFake()
+	remaining := &atomic.Int64{}
+	var seen atomic.Int64
+	var lists atomic.Int32
+	result := QuiesceLabeledWorkloads(context.Background(), fake, 3*time.Second, QuiesceDeps{
+		StopTimeoutSec: 30,
+		RemainingStop:  remaining,
+		AfterKillWait:  time.Millisecond,
+		Poll:           10 * time.Millisecond,
+		VolumeHolders:  func(string) ([]int, error) { return nil, nil },
+		Release: func(context.Context) error {
+			seen.Store(remaining.Load())
+			return nil
+		},
+		ListTasks: func(context.Context) ([]string, error) {
+			if lists.Add(1) == 1 {
+				return []string{"sandbox-1"}, nil
+			}
+			return nil, nil
+		},
+	})
+	if result.Status != DrainQuiesceComplete {
+		t.Fatalf("expected complete, got %+v", result)
+	}
+	if got := seen.Load(); got <= 0 || got > 3 {
+		t.Fatalf("stop budget = %d, want the time left on the 3s deadline", got)
+	}
+}
+
+func TestQuiesceLabeledWorkloads_ReleaseErrorClearsOnRetry(t *testing.T) {
+	fake := newLabeledDrainFake()
+	var calls atomic.Int32
+	result := QuiesceLabeledWorkloads(context.Background(), fake, 2*time.Second, QuiesceDeps{
+		AfterKillWait: time.Millisecond,
+		Poll:          10 * time.Millisecond,
+		VolumeHolders: func(string) ([]int, error) { return nil, nil },
+		ListTasks:     func(context.Context) ([]string, error) { return nil, nil },
+		Release: func(context.Context) error {
+			if calls.Add(1) == 1 {
+				return errors.New("remove sandbox failed")
+			}
+			return nil
+		},
+	})
+	if result.Status != DrainQuiesceComplete {
+		t.Fatalf("expected complete after delete recovered, got %+v", result)
+	}
+}
+
+func TestQuiesceLabeledWorkloads_VolumeHolderDoesNotRetry(t *testing.T) {
+	fake := newLabeledDrainFake("c1")
+	start := time.Now()
+	result := QuiesceLabeledWorkloads(context.Background(), fake, 3*time.Second, QuiesceDeps{
+		AfterKillWait: time.Millisecond,
+		ListTasks:     func(context.Context) ([]string, error) { return nil, nil },
+		VolumeHolders: func(string) ([]int, error) { return []int{99}, nil },
+		Kill:          func(int) error { return errors.New("unkillable") },
+		SelfPID:       1,
+	})
+	if result.Status != DrainQuiesceVerifyFailed {
+		t.Fatalf("expected verifyFailed for holder, got %+v", result)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("volume holder should fail closed without using the grace budget, took %s", elapsed)
+	}
+}
+
+type flakyListRuntime struct {
+	inner *labeledDrainFake
+	fails int
+}
+
+func (f *flakyListRuntime) ListLabeledRunning(ctx context.Context) ([]string, error) {
+	if f.fails > 0 {
+		f.fails--
+		return nil, errors.New("cri unavailable")
+	}
+	return f.inner.ListLabeledRunning(ctx)
+}
+
+func (f *flakyListRuntime) StopContainer(ctx context.Context, id string, timeoutSec int64) error {
+	return f.inner.StopContainer(ctx, id, timeoutSec)
+}
+
 func TestQuiesceLabeledWorkloads_RuntimeListErrorTimesOutWhenClear(t *testing.T) {
 	fake := newLabeledDrainFake()
 	fake.listErr = errors.New("cri unavailable")

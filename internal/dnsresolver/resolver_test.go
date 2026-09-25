@@ -28,6 +28,13 @@ func newTestResolver() *Resolver {
 	}
 }
 
+func TestHostAdvertiseIPUsesBridgeGateway(t *testing.T) {
+	got := newTestResolver().hostAdvertiseIP()
+	if got != "172.18.0.1" {
+		t.Fatalf("hostAdvertiseIP() = %q, want 172.18.0.1", got)
+	}
+}
+
 func TestNormalizeName(t *testing.T) {
 	got := normalizeName("APP.Service.SVC.BRIDGE.LOCAL.")
 	if got != "app.service.svc.bridge.local" {

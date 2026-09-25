@@ -95,8 +95,11 @@ func TestVolumeHolderFlockHelper(t *testing.T) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatalf("lock file: %v", err)
 	}
+	// A timer keeps the non-cgo runtime from treating this process as deadlocked.
 	signal.Ignore(syscall.SIGTERM)
-	select {}
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func containsPID(pids []int, want int) bool {

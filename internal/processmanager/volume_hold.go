@@ -106,6 +106,7 @@ func (pm *ProcessManager) deferVolumeCreate(ms *models.Microservice, keep *model
 		pm.syncRuntimeStatus(ms.MicroserviceUUID, keep)
 	}
 	pm.noteVolumeInUse(ms.MicroserviceUUID)
+	pm.armReconcileDeadline(ms.MicroserviceUUID, reconcileTickInterval())
 	return true
 }
 

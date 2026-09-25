@@ -1,7 +1,10 @@
 package processmanager
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +64,77 @@ func TestReconcileLocalDesiredRunning_SkipsLaunchWhenApplyInFlight(t *testing.T)
 
 	if launchCalled {
 		t.Fatal("expected reconcile to skip launch while CLI apply is in-flight")
+	}
+}
+
+func TestReconcileLocalDesiredRunning_SkipsLiveContainerWhileApplyInFlight(t *testing.T) {
+	pm := &ProcessManager{logger: logging.NewModuleLogger("test-process-manager")}
+	nowSec := time.Now().Unix()
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:          "local-apply",
+		RuntimeState:       "starting",
+		State:              "starting",
+		DesiredState:       "running",
+		Generation:         3,
+		ObservedGeneration: 0,
+		LastStartAttemptAt: nowSec,
+		ManifestYAML:       minimalLocalManifestYAML(),
+	}
+	launchCalled := false
+	pm.launchLocalDeploymentFn = func(*models.LocalDeployedMicroservice, int64) {
+		launchCalled = true
+	}
+	pm.getContainerStatusFn = func(_, _ string) (*models.MicroserviceStatus, error) {
+		return &models.MicroserviceStatus{Status: models.MicroserviceStateRunning}, nil
+	}
+
+	pm.reconcileLocalDesiredRunning(item, &engine.Container{ID: "still-running"}, nowSec)
+
+	if launchCalled {
+		t.Fatal("expected reconcile to skip launch while a container is still running and apply is in-flight")
+	}
+	if item.ObservedGeneration != 0 {
+		t.Fatalf("expected generation to stay unobserved, got %d", item.ObservedGeneration)
+	}
+	if item.RuntimeState != "starting" {
+		t.Fatalf("expected runtime state to stay starting, got %q", item.RuntimeState)
+	}
+}
+
+func TestPersistLocalWorkloadIfPresent_SkipsOlderGeneration(t *testing.T) {
+	openLocalReconcileTestDB(t)
+
+	current := &models.LocalDeployedMicroservice{
+		LocalUUID:          "local-gen",
+		MicroserviceName:   "local-ms",
+		ManifestYAML:       minimalLocalManifestYAML(),
+		Generation:         3,
+		ObservedGeneration: 3,
+		RuntimeState:       "running",
+		State:              "running",
+		DesiredState:       "running",
+	}
+	if err := store.GetInstance().UpsertLocalWorkload(current); err != nil {
+		t.Fatalf("seed generation 3: %v", err)
+	}
+
+	stale := *current
+	stale.Generation = 2
+	stale.ObservedGeneration = 2
+	stale.ManifestYAML = strings.Replace(minimalLocalManifestYAML(), "name: local-ms", "name: old-ms", 1)
+	if err := persistLocalWorkloadIfPresent(&stale); err != nil {
+		t.Fatalf("persist older generation: %v", err)
+	}
+
+	got := loadLocalWorkload("local-gen")
+	if got == nil {
+		t.Fatal("expected stored workload")
+	}
+	if got.Generation != 3 {
+		t.Fatalf("generation %d, want 3", got.Generation)
+	}
+	if !strings.Contains(got.ManifestYAML, "name: local-ms") {
+		t.Fatalf("older manifest overwrote generation 3: %s", got.ManifestYAML)
 	}
 }
 
@@ -545,6 +619,36 @@ func TestReconcileLocalDesiredRunning_KeepsLastErrorOnFirstRunning(t *testing.T)
 	}
 	if got.RestartCount != 2 {
 		t.Fatalf("expected restart_count kept, got %d", got.RestartCount)
+	}
+}
+
+func TestLaunchLocalDeploymentPausedDoesNotBumpRestart(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	eng := &lifecycleTestEngine{
+		createErr: fmt.Errorf("RunPodSandbox for local-ms: %w", engine.ErrReconcilePaused),
+	}
+	pm := &ProcessManager{
+		engine: eng,
+		logger: logging.NewModuleLogger("test-process-manager"),
+		ctx:    context.Background(),
+	}
+	item := &models.LocalDeployedMicroservice{
+		LocalUUID:    "local-paused",
+		ManifestYAML: minimalLocalManifestYAML(),
+		Generation:   1,
+	}
+	pm.launchLocalDeployment(item, time.Now().Unix())
+	if item.RestartCount != 0 || item.FailureCount != 0 {
+		t.Fatalf("restartCount=%d failureCount=%d", item.RestartCount, item.FailureCount)
+	}
+	if item.LastError != "" {
+		t.Fatalf("lastError=%q", item.LastError)
+	}
+	if item.RuntimeState != "queued" {
+		t.Fatalf("runtime state %q, want queued so the next tick retries", item.RuntimeState)
+	}
+	if localDeploymentLaunchInFlight(item, time.Now().Unix()) {
+		t.Fatal("paused launch must not stay in flight")
 	}
 }
 

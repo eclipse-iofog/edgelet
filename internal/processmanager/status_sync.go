@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
+	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 )
 
 // errorClearGrace is how long a microservice must stay RUNNING before the
@@ -94,6 +95,29 @@ func explicitEmptyErrorMessage() *string {
 	return &empty
 }
 
+// AdvanceRunningErrorClear clears the current error text once a workload has
+// stayed running for the grace period. It uses the status already stored and
+// does not inspect the runtime. The usage sampler can call this on its own loop.
+func AdvanceRunningErrorClear() {
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+		if s == nil {
+			return
+		}
+		for uuid, st := range s.MicroservicesStatus {
+			if st == nil || st.Status != models.MicroserviceStateRunning {
+				continue
+			}
+			if st.ErrorMessage == nil || strings.TrimSpace(*st.ErrorMessage) == "" {
+				continue
+			}
+			if !statusGrace.elapsed(uuid) {
+				continue
+			}
+			st.ErrorMessage = explicitEmptyErrorMessage()
+		}
+	})
+}
+
 // syncMicroserviceStatusToReporter stores runtime status for Pot reporting.
 // Current errorMessage is kept until the microservice has been continuously
 // RUNNING for errorClearGrace; lastError is overwritten only on a new failure.
@@ -137,5 +161,25 @@ func syncMicroserviceStatusToReporter(pmStatus *models.ProcessManagerStatus, uui
 		}
 	}
 
+	preserveUsageFromPrevious(prev, status)
+
 	pmStatus.SetMicroservicesStatus(uuid, status)
+}
+
+// preserveUsageFromPrevious keeps the last CPU and memory sample on the status
+// object when reconcile refreshes runtime state without re-sampling usage.
+func preserveUsageFromPrevious(prev, next *models.MicroserviceStatus) {
+	if prev == nil || next == nil {
+		return
+	}
+	if next.Status != models.MicroserviceStateRunning {
+		return
+	}
+	nextCID := strings.TrimSpace(next.ContainerID)
+	prevCID := strings.TrimSpace(prev.ContainerID)
+	if nextCID == "" || nextCID != prevCID {
+		return
+	}
+	next.CPUUsage = prev.CPUUsage
+	next.MemoryUsage = prev.MemoryUsage
 }

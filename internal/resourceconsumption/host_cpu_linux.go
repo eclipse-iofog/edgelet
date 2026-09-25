@@ -49,5 +49,17 @@ func (rcm *Manager) getTotalCPULinux() float64 {
 	if totalTime <= 0 {
 		return 0.0
 	}
-	return float64(totalTime-idleTime) / float64(totalTime) * 100.0
+	prev := rcm.lastHost
+	have := rcm.haveHost
+	rcm.lastHost = hostCPUSample{total: totalTime, idle: idleTime}
+	rcm.haveHost = true
+	if !have {
+		return 0.0
+	}
+	dTotal := totalTime - prev.total
+	dIdle := idleTime - prev.idle
+	if dTotal <= 0 {
+		return 0.0
+	}
+	return float64(dTotal-dIdle) / float64(dTotal) * 100.0
 }

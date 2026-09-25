@@ -676,6 +676,9 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	createStart := time.Now()
 	containerID, err := cm.engine.CreateContainer(ms, hostIP)
 	if err != nil {
+		if errors.Is(err, engine.ErrReconcilePaused) {
+			return err
+		}
 		cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
 			Event:      runtimeops.EventContainerCreated,
 			Level:      runtimeops.LevelError,

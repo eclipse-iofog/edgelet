@@ -7,7 +7,9 @@
 # Live legs inside the embedded Lima VM (after vm-install.sh):
 #   ./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test
 #
-# Fat embed hash change (second thin binary whose embed hash differs):
+# Fat embed hash change (second thin binary whose embed hash differs).
+# That leg remounts /run noexec for the replace, then restores the previous
+# option. The drain runtime is staged under the data directory.
 #   ./test/embedded/ota-dataplane-drain.sh --vm-name=iofog-test \
 #       --upgrade-bin=build/edgelet-linux-arm64
 #
@@ -43,7 +45,7 @@ for arg in "$@"; do
         --upgrade-bin=*) UPGRADE_BIN="${arg#*=}" ;;
         -h|--help)
             if [[ -n "${_script}" && -f "${_script}" ]]; then
-                sed -n '2,16p' "${_script}"
+                sed -n '2,18p' "${_script}"
             fi
             exit 0
             ;;
@@ -75,6 +77,16 @@ check_static() {
         || fail "troubleshooting.md missing leftover process section"
     grep -q 'edgelet volume rm' "${trouble}" \
         || fail "troubleshooting.md missing volume rm warning"
+    grep -q 'data/.runtime-drain' "${inst}" \
+        || fail "installation.md missing drain staging path"
+    grep -q 'noexec' "${inst}" \
+        || fail "installation.md missing noexec note"
+    grep -q 'Upgrade stays on the old version' "${trouble}" \
+        || fail "troubleshooting.md missing stuck-upgrade section"
+    grep -q 'permission denied' "${trouble}" \
+        || fail "troubleshooting.md missing drain permission denied"
+    grep -q 'ota-install.log' "${trouble}" \
+        || fail "troubleshooting.md missing OTA install log"
     if grep -R -n --include='*.md' '\.cursor/' "${REPO_ROOT}/docs/edgelet" >/dev/null; then
         fail "operator docs link outside the public doc tree"
     fi
@@ -92,6 +104,7 @@ run_guest() {
     local shim_file
     shim_file="$(mktemp)"
     lock_pid=""
+    run_exec_restore=0
 
     command -v edgelet >/dev/null || fail "edgelet is not installed"
     command -v python3 >/dev/null || fail "python3 is required for the volume lock fixture"
@@ -105,7 +118,17 @@ run_guest() {
             wait "${pid}" 2>/dev/null || true
         fi
     }
-    trap cleanup_lock EXIT
+    restore_run_exec() {
+        if [[ "${run_exec_restore:-0}" -eq 1 ]]; then
+            mount -o remount,exec /run || echo "WARNING: could not restore exec on /run" >&2
+            run_exec_restore=0
+        fi
+    }
+    cleanup_guest() {
+        restore_run_exec
+        cleanup_lock
+    }
+    trap cleanup_guest EXIT
 
     ms_uuid() {
         edgelet ms inspect "edgelet.${name}" 2>/dev/null \
@@ -295,10 +318,25 @@ EOF
         if [[ -z "${upgrade_hash}" || "${upgrade_hash}" == "${current}" ]]; then
             echo ">>> upgrade binary embed hash matches current; skipping fat replace"
         else
-            echo ">>> fat embed hash change ${current} -> ${upgrade_hash}"
+            echo ">>> fat embed hash change ${current} -> ${upgrade_hash} with /run noexec"
+            local receipt="/var/backups/edgelet/install-receipt"
+            local before_sha=""
+            if [[ -f "${receipt}" ]]; then
+                before_sha="$(sed -n 's/^binary_sha256=//p' "${receipt}" | head -n1)"
+            fi
+            if findmnt -n -o OPTIONS /run | tr ',' '\n' | grep -qx noexec; then
+                echo ">>> /run is already noexec"
+            else
+                mount -o remount,noexec /run || fail "could not remount /run noexec"
+                run_exec_restore=1
+            fi
+            findmnt -n -o OPTIONS /run | tr ',' '\n' | grep -qx noexec \
+                || fail "/run is not mounted noexec"
             start_lock "${lockfile}"
             holder="${lock_pid}"
             bash /tmp/ota-drain-install.sh --upgrade --airgap --bin-path=/tmp/ota-drain-upgrade-bin
+            local staged="${disk}/data/.runtime-drain/edgelet"
+            [[ -f "${staged}" ]] || fail "drain runtime was not staged at ${staged}"
             if ! holder_gone "${holder}"; then
                 fail "lock holder ${holder} survived fat replace"
             fi
@@ -309,6 +347,11 @@ EOF
             local after
             after="$(ready_current_hash)"
             [[ "${after}" == "${upgrade_hash}" ]] || fail "ready current ${after} != upgrade hash ${upgrade_hash}"
+            local after_sha=""
+            [[ -f "${receipt}" ]] || fail "install receipt missing after fat upgrade"
+            after_sha="$(sed -n 's/^binary_sha256=//p' "${receipt}" | head -n1)"
+            [[ -n "${after_sha}" && "${after_sha}" != "${before_sha}" ]] \
+                || fail "install receipt binary_sha256 did not change"
             uuid="$(ms_uuid || true)"
             [[ -n "${uuid}" ]] || fail "workload missing after fat replace"
             vol="${disk}/volumes/data/${uuid}/ota-drain-data"
@@ -321,7 +364,7 @@ EOF
 
     echo ">>> PASS: control restart kept shims; drain released the volume lock"
     trap - EXIT
-    cleanup_lock
+    cleanup_guest
 }
 
 if [[ "${GUEST}" -eq 1 ]]; then

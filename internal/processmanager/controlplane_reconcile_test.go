@@ -260,6 +260,12 @@ func TestReconcileControlPlane_ReportsContainerStatsWhenRegistered(t *testing.T)
 	if msStatus == nil {
 		t.Fatal("expected controller microservice status")
 	}
+	if msStatus.CPUUsage != 0 || msStatus.MemoryUsage != 0 {
+		t.Fatalf("reconcile must not sample usage, got cpu=%v memory=%d", msStatus.CPUUsage, msStatus.MemoryUsage)
+	}
+
+	pm.sampleRunningContainerStats()
+	msStatus = statusreporter.GetInstance().GetProcessManagerStatus().GetMicroserviceStatus("cp-stats")
 	if msStatus.CPUUsage != 12.5 {
 		t.Fatalf("expected cpuUsage=12.5, got %v", msStatus.CPUUsage)
 	}
@@ -309,6 +315,7 @@ func TestReconcileControlPlane_OmitsContainerStatsBeforeRegister(t *testing.T) {
 	}
 
 	pm.reconcileControlPlane()
+	pm.sampleRunningContainerStats()
 
 	msStatus := statusreporter.GetInstance().GetProcessManagerStatus().GetMicroserviceStatus("cp-no-stats")
 	if msStatus == nil {

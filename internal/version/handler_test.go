@@ -182,6 +182,16 @@ func TestExecuteChangeVersionScript_LaunchesDetachedInstallSh(t *testing.T) {
 
 	var mu sync.Mutex
 	var launched []string
+	setOTAInstallLogPath(filepath.Join(dir, "ota-install.log"))
+	t.Cleanup(func() { setOTAInstallLogPath("") })
+
+	prevReport := reportDetachedInstallExit
+	exitDone := make(chan error, 1)
+	reportDetachedInstallExit = func(err error) {
+		exitDone <- err
+	}
+	t.Cleanup(func() { reportDetachedInstallExit = prevReport })
+
 	h := NewHandler(NewReleaseManager(WithPaths(script, filepath.Join(dir, "receipt"), filepath.Join(dir, "prev"), filepath.Join(dir, "cache"))))
 	h.isContainer = func() bool { return false }
 	h.isDaemonHealthy = func() bool { return true }
@@ -224,6 +234,15 @@ func TestExecuteChangeVersionScript_LaunchesDetachedInstallSh(t *testing.T) {
 	}
 	if pending == nil || pending.ProvisionKey != "audit-key" {
 		t.Fatalf("expected pending file written, got %+v", pending)
+	}
+
+	select {
+	case err := <-exitDone:
+		if err != nil {
+			t.Fatalf("detached install.sh exit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for detached install.sh")
 	}
 }
 
@@ -346,6 +365,77 @@ func TestIsReadyToRollbackWithAction_SemverMustMatchPrevious(t *testing.T) {
 	}
 	if h.IsReadyToRollbackWithAction(map[string]any{"semver": "9.9.9"}) {
 		t.Fatal("expected not ready when semver mismatches previous version")
+	}
+}
+
+func TestDetachedInstallLogTruncatesEachAttempt(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "ota-install.log")
+	setOTAInstallLogPath(logPath)
+	t.Cleanup(func() { setOTAInstallLogPath("") })
+
+	prev := reportDetachedInstallExit
+	type result struct{ err error }
+	ch := make(chan result, 1)
+	reportDetachedInstallExit = func(err error) {
+		ch <- result{err: err}
+	}
+	t.Cleanup(func() { reportDetachedInstallExit = prev })
+
+	okScript := filepath.Join(dir, "ok.sh")
+	badScript := filepath.Join(dir, "bad.sh")
+	writeFile(t, okScript, "#!/bin/sh\nprintf 'attempt-one\\n'\n")
+	writeFile(t, badScript, "#!/bin/sh\nprintf 'attempt-two\\n'\nexit 3\n")
+	if err := os.Chmod(okScript, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(badScript, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	waitExit := func() error {
+		t.Helper()
+		select {
+		case got := <-ch:
+			return got.err
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for install.sh")
+		}
+		return nil
+	}
+
+	if err := defaultStartDetached(okScript); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := waitExit(); err != nil {
+		t.Fatalf("success exit: %v", err)
+	}
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "attempt-one\n" {
+		t.Fatalf("log=%q", body)
+	}
+
+	if err := defaultStartDetached(badScript); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := waitExit(); err == nil {
+		t.Fatal("expected non-zero install.sh exit")
+	}
+	body, err = os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "attempt-two\n" {
+		t.Fatalf("truncated log=%q", body)
+	}
+	if strings.Contains(string(body), "attempt-one") || strings.Contains(string(body), "stale") {
+		t.Fatalf("previous attempt remained in log: %q", body)
 	}
 }
 

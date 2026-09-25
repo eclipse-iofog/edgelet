@@ -462,7 +462,16 @@ func TestActivePullNames(t *testing.T) {
 	}
 	close(ociPuller.block)
 	waitState(t, m, "product-docs", models.KnowledgeStateReady)
-	if names := m.ActivePullNames(); len(names) != 0 {
+	deadline = time.Now().Add(2 * time.Second)
+	var names []string
+	for time.Now().Before(deadline) {
+		names = m.ActivePullNames()
+		if len(names) == 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(names) != 0 {
 		t.Fatalf("expected no active pulls after success, got %v", names)
 	}
 }

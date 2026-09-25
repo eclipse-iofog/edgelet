@@ -346,6 +346,10 @@ Fat order, while control is still up:
 2. If verify fails, `install.sh` exits non-zero with `Data-plane drain did not verify; binary was not replaced`. The installed binary, the receipt, and workload shims stay as they were.
 3. If verify passes, stop `edgelet-containerd`, install `/usr/local/bin/edgelet`, start the data plane, start control, then write the install receipt.
 
+When the new thin binary’s embed hash differs from ready `data/current`, drain unpacks only the fat runtime to `{diskDirectory}/data/.runtime-drain/edgelet` (default `/var/lib/edgelet/data/.runtime-drain/edgelet`) and executes that file. It does not extract the rest of the bundle and does not change `data/current`. The stage directory is created mode `0750`. `/run` may stay mounted `noexec`. The drain verification marker remains `/run/edgelet/drain-verified`.
+
+Controller-driven upgrades start `install.sh` detached. That script’s output is written to `/var/log/edgelet/ota-install.log`, which is truncated at the start of each attempt. A non-zero exit is recorded in the edgelet log.
+
 ```bash
 # Installed embed hash is the directory name behind a ready current symlink.
 readlink /var/lib/edgelet/data/current

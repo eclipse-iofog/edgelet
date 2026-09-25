@@ -113,6 +113,7 @@ func (s *Supervisor) SetContainerdAttachOnly(v bool) {
 // Start starts all modules in the correct order
 func (s *Supervisor) Start() error {
 	logging.LogDebug(moduleName, "Starting Supervisor")
+	config.ScheduleIPAddressExternalRefresh()
 
 	// Open SQLite database before any module starts
 	db := store.GetInstance()

@@ -389,7 +389,7 @@ func (fa *FieldAgent) getFogStatus() map[string]any {
 		"systemTime":                statusReporterStatus.SystemTime,
 		"lastStatusTime":            statusReporterStatus.LastUpdate,
 		"ipAddress":                 network.GetInstance().GetCurrentIPAddress(), // Get from NetworkInterfaceManager
-		"ipAddressExternal":         fa.config.IPAddressExternal,
+		"ipAddressExternal":         fa.config.GetIPAddressExternal(),
 		"microserviceMessageCounts": "[]",
 		"lastCommandTime":           fieldAgentStatus.LastCommandTime,
 		"tunnelStatus":              tunnelStatusJSON,

@@ -120,7 +120,7 @@ func (fa *FieldAgent) reconcileControllerMicroservice(microservices []*models.Mi
 		fa.processManager.SetControlPlanePullOnRecreate(true)
 	}
 	if fa.processManager != nil {
-		fa.processManager.Update()
+		fa.processManager.MarkReconcile(cpUUID)
 	}
 	logging.LogInfo(moduleName, fmt.Sprintf("merged controller microservice spec uuid=%s generation=%d", cpUUID, cp.Generation))
 }

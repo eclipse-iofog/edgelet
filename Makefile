@@ -205,7 +205,7 @@ test-integration: ## Run integration tests
 	@echo "Running integration tests..."
 	@go test -v ./test/integration/...
 
-test-linux: ## Run make test-unit in Linux Docker (CI Test job parity; GOARCH=host arch)
+test-linux: ## Run make test-unit in Linux Docker, plus the non-cgo Linux pass (GOARCH=host arch)
 	@chmod +x scripts/test-linux.sh
 	@GOARCH=$${GOARCH:-$$(go env GOARCH)} scripts/test-linux.sh
 
