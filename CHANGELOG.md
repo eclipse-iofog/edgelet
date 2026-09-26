@@ -5,6 +5,12 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0] - 26-09-2026
+
+### Changed
+
+- **Go dependencies:** patch/minor bumps — `github.com/bmatcuk/doublestar/v4` **v4.10.2**, `github.com/klauspost/compress` **v1.20.0**, `golang.org/x/sys` **v0.48.0**, `golang.org/x/term` **v0.46.0** (no edgelet API changes required).
+
 ## [v1.1.0-rc.8]
 
 ### Changed
