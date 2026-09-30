@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Go dependencies:** patch/minor bumps — `github.com/bmatcuk/doublestar/v4` **v4.10.2**, `github.com/klauspost/compress` **v1.20.0**, `golang.org/x/sys` **v0.48.0**, `golang.org/x/term` **v0.46.0** (no edgelet API changes required).
 
+### Fixed
+
+- **Edgelet engine healthchecks:** probe exec now matches Docker healthcheck I/O (no TTY, closed stdin, stdout and stderr captured) and runs as the container user. Fixes false **unhealthy** results for probes such as `clickhouse-client` on hardened images where the same command succeeds under `docker run --health-cmd` or `edgelet ms exec`. Failed probes log captured output in addition to the exit code.
+
 ## [v1.1.0-rc.8]
 
 ### Changed

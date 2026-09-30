@@ -8,6 +8,7 @@ package edgelet
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,6 +58,11 @@ const (
 	// client.WithRuntime(); short names like "runc" are invalid in v2.1+.
 	runcRuntimeType = "io.containerd.runc.v2"
 	spinRuntimeType = "io.containerd.spin.v2"
+
+	// healthcheckOutputLimit is the combined stdout/stderr kept from a probe.
+	// Matches Docker's healthcheck log cap. The rest is drained so a noisy
+	// probe cannot fill the pipe and block.
+	healthcheckOutputLimit = 4096
 
 	// hostsDir is the directory where per-container /etc/hosts files are written.
 	hostsDir = "/run/edgelet/hosts"
@@ -2258,25 +2264,27 @@ func (e *Engine) StartExecSession(execID string, stdin io.Reader, stdout, stderr
 	return nil
 }
 
-// ExecWithExitCode runs a command in the container and returns the exit code.
-// Used for healthcheck execution. Returns (exitCode, error). On timeout, kills
-// the process and returns (-1, context.DeadlineExceeded).
-func (e *Engine) ExecWithExitCode(containerID string, cmd []string, timeout time.Duration) (int, error) {
+// ExecWithExitCode runs a command in the container and returns its exit code
+// and combined stdout/stderr. Stdin is closed and no terminal is allocated,
+// matching a Docker healthcheck exec. The process runs as the container user.
+// On timeout, kills the process and returns (-1, output so far, context.DeadlineExceeded).
+func (e *Engine) ExecWithExitCode(containerID string, cmd []string, timeout time.Duration) (int, string, error) {
 	ctx := e.ctx()
 	c, err := e.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return -1, fmt.Errorf("load container %s: %w", containerID, err)
+		return -1, "", fmt.Errorf("load container %s: %w", containerID, err)
 	}
 
 	spec, err := c.Spec(ctx)
 	if err != nil {
-		return -1, fmt.Errorf("get spec for %s: %w", containerID, err)
+		return -1, "", fmt.Errorf("get spec for %s: %w", containerID, err)
 	}
 
 	execSpec := &specs.Process{
 		Args:     cmd,
 		Cwd:      "/",
 		Env:      spec.Process.Env,
+		User:     spec.Process.User,
 		Terminal: false,
 	}
 	if spec.Process.Cwd != "" {
@@ -2288,15 +2296,25 @@ func (e *Engine) ExecWithExitCode(containerID string, cmd []string, timeout time
 	execID := containerID[:12] + "-hc-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	task, err := c.Task(ctx, nil)
 	if err != nil {
-		return -1, fmt.Errorf("get task for %s: %w", containerID, err)
+		return -1, "", fmt.Errorf("get task for %s: %w", containerID, err)
 	}
 
-	proc, err := task.Exec(ctx, execID, execSpec, cio.NullIO)
+	fifoDir := filepath.Join(constants.EdgeletRunDir, "exec-fifo")
+	if err := os.MkdirAll(fifoDir, 0700); err != nil {
+		return -1, "", fmt.Errorf("create exec fifo dir: %w", err)
+	}
+	output := &limitedBuffer{limit: healthcheckOutputLimit}
+	creator := cio.NewCreator(
+		cio.WithFIFODir(fifoDir),
+		cio.WithStreams(nil, output, output),
+	)
+
+	proc, err := task.Exec(ctx, execID, execSpec, creator)
 	if err != nil {
-		return -1, fmt.Errorf("exec in %s: %w", containerID, err)
+		return -1, "", fmt.Errorf("exec in %s: %w", containerID, err)
 	}
 	if err := proc.Start(ctx); err != nil {
-		return -1, fmt.Errorf("start exec %s: %w", execID, err)
+		return -1, "", fmt.Errorf("start exec %s: %w", execID, err)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -2305,19 +2323,52 @@ func (e *Engine) ExecWithExitCode(containerID string, cmd []string, timeout time
 	exitCh, err := proc.Wait(waitCtx)
 	if err != nil {
 		_, _ = proc.Delete(ctx)
-		return -1, err
+		return -1, output.String(), err
 	}
 
 	select {
 	case exitStatus := <-exitCh:
+		if pio := proc.IO(); pio != nil {
+			pio.Wait()
+		}
 		code := exitStatus.ExitCode()
 		_, _ = proc.Delete(ctx)
-		return int(code), nil
+		return int(code), output.String(), nil
 	case <-waitCtx.Done():
 		_ = proc.Kill(ctx, syscall.SIGKILL)
+		if pio := proc.IO(); pio != nil {
+			pio.Wait()
+		}
 		_, _ = proc.Delete(ctx)
-		return -1, waitCtx.Err()
+		return -1, output.String(), waitCtx.Err()
 	}
+}
+
+// limitedBuffer keeps the first limit bytes and still consumes the rest,
+// so a probe that writes more than the cap cannot block on a full pipe.
+type limitedBuffer struct {
+	mu    sync.Mutex
+	buf   bytes.Buffer
+	limit int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if remain := b.limit - b.buf.Len(); remain > 0 {
+		if len(p) < remain {
+			_, _ = b.buf.Write(p)
+		} else {
+			_, _ = b.buf.Write(p[:remain])
+		}
+	}
+	return len(p), nil
+}
+
+func (b *limitedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // StopExecSession kills the running exec process, waits for exit, and deregisters it from containerd.

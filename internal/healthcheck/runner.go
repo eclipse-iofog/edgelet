@@ -25,7 +25,7 @@ var log = logging.NewModuleLogger(moduleName)
 //
 //nolint:revive // exported API
 type HealthcheckEngine interface {
-	ExecWithExitCode(containerID string, cmd []string, timeout time.Duration) (int, error)
+	ExecWithExitCode(containerID string, cmd []string, timeout time.Duration) (int, string, error)
 }
 
 // MicroserviceProvider provides microservice lookup for healthcheck config.
@@ -149,12 +149,12 @@ func (r *Runner) runOnce() {
 			continue // Still in start period, skip
 		}
 		log.Debugf("Healthcheck %s (container %s): exec cmd=%v", msUUID, c.ID, cmd)
-		exitCode, err := r.healthcheckEngine.ExecWithExitCode(c.ID, cmd, timeout)
+		exitCode, output, err := r.healthcheckEngine.ExecWithExitCode(c.ID, cmd, timeout)
 		healthy := err == nil && exitCode == 0
 		if healthy {
 			log.Debugf("Healthcheck %s: healthy (exit %d)", msUUID, exitCode)
 		} else {
-			log.Warnf("Healthcheck %s: exec failed (exit %d, err %v)", msUUID, exitCode, err)
+			log.Warnf("Healthcheck %s: exec failed (exit %d, err %v): %s", msUUID, exitCode, err, output)
 		}
 		r.mu.Lock()
 		if healthy {
