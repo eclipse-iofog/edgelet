@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Toolchain:** Go **1.26.9** in `go.mod`, CI workflows, Dockerfiles, `scripts/version.sh`, and the Linux quality and test scripts. Image digests refreshed for `golang:1.26.9-trixie`, `alpine:3.22`, and `alpine:3.24`.
 - **Security / vulncheck:** stdlib fixes in Go **1.26.9** for **GO-2026-6599**, **GO-2026-6600**, **GO-2026-6604**, **GO-2026-6605**, **GO-2026-6607**, **GO-2026-6608**, and **GO-2026-6613**; bump `golang.org/x/net` to **v0.60.0** (with `golang.org/x/crypto` **v0.57.0** and `golang.org/x/text` **v0.42.0**) for **GO-2026-6603**, **GO-2026-6610**, **GO-2026-6611**, **GO-2026-6612**, and **GO-2026-6617**.
 - **Go dependencies:** `github.com/klauspost/compress` **v1.20.1**, `github.com/shirou/gopsutil/v4` **v4.26.9**, `modernc.org/sqlite` **v1.60.1** (with `modernc.org/libc` **v1.77.1**). No edgelet API changes.
+- **Moby SDK (docker/podman engine):** bump `github.com/moby/moby/client` to **v0.6.2** and `github.com/moby/moby/api` to **v1.56.1** (indirect `github.com/docker/go-connections` **v0.8.2**). Drop the unused `github.com/docker/distribution` replace and the `github.com/moby/moby` v28.5.1 / v28.5.2 excludes. No edgelet API changes.
 
 ## [v1.1.0] - 26-09-2026
 
