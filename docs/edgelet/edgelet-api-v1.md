@@ -198,7 +198,7 @@ When RuntimeClass endpoints are called outside supported mode (`full` build flav
 
 ### `/v1/system/*`
 
-Daemon administration: status, info, version, provision/deprovision, config get/patch/switch, reload, stop, prune, GPS, controller certificate upload, controller connection status, ControlPlane get/restart/delete, daemon logs (HTTP and `:stream` WebSocket).
+Daemon administration: status, info, version, provision/deprovision, config get/patch/switch, reload, stop, prune, GPS, controller certificate upload, controller connection status, ControlPlane get/restart/delete, daemon logs (HTTP and `:stream` WebSocket). Config field catalog: [config.md](config.md).
 
 Notable behaviors:
 

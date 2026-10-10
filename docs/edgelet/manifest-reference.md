@@ -5,6 +5,8 @@ Edgelet accepts **`edgelet.iofog.org/v1`** YAML manifests via:
 ```bash
 edgelet deploy -f manifest.yaml
 edgelet deploy -f manifest.yaml --timeout=20m   # ControlPlane async apply
+
+Agent daemon settings (`controllerUrl`, engine, limits): [config.md](config.md) — not deploy manifests.
 ```
 
 Validation runs in the daemon before apply. Shapes are defined in `internal/models/` and surfaced through EdgeletAPI `/v1/deploy/*`.

@@ -141,6 +141,8 @@ sudo edgelet init-config
 
 `init-config` is idempotent and does **not** overwrite an existing file.
 
+Full parameter reference (YAML keys, CLI, Controller push/pull): **[config.md](config.md)**.
+
 Controller CA (`/etc/edgelet/cert.crt`) is **not** installed by default. For lab installs use `--with-sample-ca`; for production use **`edgelet provision`** or `edgelet config cert`.
 
 ### Install flags

@@ -9,6 +9,7 @@ Operator and developer documentation for the Edgelet edge agent.
 | [architecture.md](architecture.md) | Module layout, data flows, EdgeletAPI vs Controller API |
 | [modules/README.md](modules/README.md) | Runtime module deep dives (all tiers) |
 | [installation.md](installation.md) | install.sh, OTA, upgrade/rollback, controller readiness |
+| [config.md](config.md) | Agent `config.yaml` — keys, CLI/API, Controller sync |
 | [deployment.md](deployment.md) | Production topology, engines, systemd, provisioning |
 | [persistence.md](persistence.md) | SQLite backup/restore, schema v4 in-place upgrade, secrets threat model |
 | [troubleshooting.md](troubleshooting.md) | Daemon, containerd, auth, CLI connectivity, leftover volume locks, microservice crashes |
@@ -39,9 +40,6 @@ Operator and developer documentation for the Edgelet edge agent.
 | [edgelet-api-v1.md](edgelet-api-v1.md) | Operator guide — transport, auth, errors, route behavior |
 | [edgelet-api-v1-openapi.yaml](edgelet-api-v1-openapi.yaml) | OpenAPI 3.1 contract |
 | [edgelet-api-v1-rbac-resources.md](edgelet-api-v1-rbac-resources.md) | RBAC resource/verb mapping |
-| [CONTROLLER-HANDOFF-MODELS.md](CONTROLLER-HANDOFF-MODELS.md) | Controller contract: HAL drop, RuntimeClass, status keys, catalog flag, image TLS, prune, microservice last-crash extras |
-| [CONTROLLER-HANDOFF-KNOWLEDGE.md](CONTROLLER-HANDOFF-KNOWLEDGE.md) | Controller contract: Knowledge GET, catalog flag, status keys, prune |
-| [CONTROLLER-HANDOFF-VOLUMES.md](CONTROLLER-HANDOFF-VOLUMES.md) | Controller contract: additive `volumeMappings[].scope` (`private` \| `shared`) |
 
 ## Migration
 

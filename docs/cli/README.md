@@ -5,6 +5,7 @@ Operator-facing CLI for the Cobra-based `edgelet` command tree.
 | Resource | Path |
 |----------|------|
 | Edgelet docs index | [../edgelet/README.md](../edgelet/README.md) |
+| Agent config.yaml | [../edgelet/config.md](../edgelet/config.md) |
 | Migration from legacy CLI | [../edgelet/migration-from-iofog-agent-cli.md](../edgelet/migration-from-iofog-agent-cli.md) |
 | JSON/YAML output shapes | [output-schemas.md](output-schemas.md) |
 | Generated per-command pages | [generated/](generated/) (`make cli-docs`) |

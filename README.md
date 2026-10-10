@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/eclipse-iofog/edgelet/actions/workflows/ci.yml/badge.svg)](https://github.com/eclipse-iofog/edgelet/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/eclipse-iofog/edgelet?include_prereleases)](https://github.com/eclipse-iofog/edgelet/releases)
-[![Go](https://img.shields.io/badge/Go-1.26.6-blue.svg)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26.9-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-EPL--2.0-blue.svg)](LICENSE)
 [![Binary size](https://img.shields.io/badge/linux%20thin-~35%20MiB-informational)](https://github.com/eclipse-iofog/edgelet/releases)
 [![govulncheck](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml)
@@ -84,7 +84,7 @@ CLI reference: [docs/cli/README.md](docs/cli/README.md) · [output schemas](docs
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Go | **1.26.6+** | See `go.mod` |
+| Go | **1.26.9+** | See `go.mod` |
 | Make | any | GNU Make |
 | Docker | 26.10+ | Required for macOS release builds and embed CI |
 | Docker / Podman | 26.10+ | When `containerEngine` is `docker` or `podman` |

@@ -18,23 +18,25 @@
 
 apiVersion: edgelet.iofog.org/v1 # required
 kind: ControlPlane                 # required
+# Identity: metadata.namespace + metadata.name → CONTROLLER_* env and bridge DNS.
+# Pot register API uses microservice name "controller" (fixed); see control-plane.md.
 
 metadata:
-  name: pot                        # required — DNS-1123 label (≤63 chars); microservice name
+  name: pot                        # required — DNS-1123 label (≤63 chars); CONTROLLER_NAME + DNS
   namespace: default               # optional — defaults to "default" if omitted; drives DNS FQDNs
   # labels: {}                     # FORBIDDEN — validation rejects metadata.labels
 
 spec:
   controller:
     image: ghcr.io/datasance/controller:3.8.0-beta.0 # required — controller container image
-    registry: 1                    # optional — local registry row ID for image pull
-    port: 51121                    # optional — API port (host 51121 + container); default 51121
+    registry: 1                    # optional — local registry row ID (pull + register registryId); omit → id 2 (from_cache)
+    port: 51121                    # optional — container API port; host 51121. Omit → mapping 51121, API_PORT env omitted
     publicUrl: https://controller.example.com # recommended — CONTROLLER_PUBLIC_URL
     trustProxy: true               # optional — honor X-Forwarded-* when TLS terminates at ingress
 
   console:                         # optional — EdgeOps Console (embedded in Controller image)
-    port: 8008                     # optional — container console port; host maps port 80
-    url: https://console.example.com # optional — CONSOLE_URL (defaults to publicUrl)
+    port: 8008                     # optional — container console port; host 80. Omit → mapping 8008, CONSOLE_PORT env omitted
+    url: https://console.example.com # optional — CONSOLE_URL (only if set; Edgelet does not default from publicUrl)
 
   auth:                            # required — OIDC configuration (embedded or external IdP)
     mode: embedded                 # required — embedded | external
@@ -109,7 +111,7 @@ spec:
   # vault:                           # optional — inject VAULT_* env into controller
   #   enabled: true
   #   provider: hashicorp            # hashicorp, openbao, vault, aws, azure, google, ...
-  #   basePath: "pot/$namespace/secrets"  # $namespace → metadata.namespace
+  #   basePath: "pot/default/secrets"  # literal VAULT_BASE_PATH — use namespace value explicitly (no $namespace expansion)
   #   hashicorp:                     # provide ONE provider block matching provider
   #     address: "http://vault.example.com:8200"
   #     token: "<replace-me>"

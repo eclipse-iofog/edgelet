@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-GO_IMAGE="${GO_IMAGE:-golang:1.26.6}"
+GO_IMAGE="${GO_IMAGE:-golang:1.26.9}"
 GOARCH="${GOARCH:-$(go env GOARCH)}"
 TEST_FLAGS="${TEST_FLAGS:-}"
 RUN_NOCGO=1
