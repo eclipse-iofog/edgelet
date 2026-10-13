@@ -2,6 +2,7 @@ package gps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -343,34 +344,77 @@ func (m *Manager) updateCoordinates() {
 	}
 }
 
-// updateDynamicCoordinates updates coordinates in DYNAMIC mode
+// updateDynamicCoordinates updates coordinates in DYNAMIC mode.
+// A receiver that is talking but has no fix keeps the last device coordinates.
+// IP geolocation runs only when the serial port itself cannot be read.
 func (m *Manager) updateDynamicCoordinates() bool {
 	if m.deviceHandler != nil && m.deviceHandler.IsRunning() {
-		if err := m.deviceHandler.ReadAndUpdateCoordinates(); err != nil {
-			logging.LogError(moduleName, "Error updating DYNAMIC coordinates", err)
-			m.status.SetHealthStatus(HealthStatusDeviceError)
-			return m.updateAutoCoordinates()
+		previous := m.config.GPSCoordinates
+		err := m.deviceHandler.ReadAndUpdateCoordinates()
+		if err == nil {
+			m.noteHealth(HealthStatusHealthy)
+			return m.config.GPSCoordinates != previous
 		}
-		m.status.SetHealthStatus(HealthStatusHealthy)
-		return true
-	}
-	logging.LogWarn(moduleName, "Device handler not running, falling back to AUTO mode")
-	m.status.SetHealthStatus(HealthStatusDeviceError)
-	return m.updateAutoCoordinates()
-}
-
-// updateAutoCoordinates updates coordinates in AUTO mode
-func (m *Manager) updateAutoCoordinates() bool {
-	if m.webHandler != nil {
-		if err := m.webHandler.UpdateCoordinates(); err != nil {
-			logging.LogError(moduleName, "Error updating AUTO coordinates", err)
-			m.status.SetHealthStatus(HealthStatusIPError)
+		if errors.Is(err, errNoFix) {
+			m.noteHealth(HealthStatusNoFix)
 			return false
 		}
-		m.status.SetHealthStatus(HealthStatusHealthy)
-		return true
+		logging.LogError(moduleName, "Error updating DYNAMIC coordinates", err)
+		m.noteHealth(HealthStatusDeviceError)
+		return m.fallbackToIP()
 	}
-	return false
+	logging.LogWarn(moduleName, "Device handler not running, falling back to AUTO mode")
+	m.noteHealth(HealthStatusDeviceError)
+	return m.fallbackToIP()
+}
+
+// updateAutoCoordinates updates coordinates in AUTO mode.
+func (m *Manager) updateAutoCoordinates() bool {
+	if m.webHandler == nil {
+		return false
+	}
+	previous := m.config.GPSCoordinates
+	if err := m.webHandler.UpdateCoordinates(); err != nil {
+		logging.LogError(moduleName, "Error updating AUTO coordinates", err)
+		m.noteHealth(HealthStatusIPError)
+		return false
+	}
+	m.noteHealth(HealthStatusHealthy)
+	return m.config.GPSCoordinates != previous
+}
+
+// fallbackToIP looks up coordinates when the GPS device cannot be read.
+// A successful lookup leaves the device-error status in place.
+func (m *Manager) fallbackToIP() bool {
+	if m.webHandler == nil {
+		m.webHandler = NewWebHandler(m)
+	}
+	previous := m.config.GPSCoordinates
+	if err := m.webHandler.UpdateCoordinates(); err != nil {
+		logging.LogError(moduleName, "Error updating AUTO coordinates", err)
+		m.noteHealth(HealthStatusIPError)
+		return false
+	}
+	return m.config.GPSCoordinates != previous
+}
+
+func (m *Manager) noteHealth(status HealthStatus) {
+	if m.status == nil {
+		return
+	}
+	previous := m.status.GetHealthStatus()
+	if previous == status {
+		return
+	}
+	m.status.SetHealthStatus(status)
+	switch status {
+	case HealthStatusNoFix:
+		logging.LogInfo(moduleName, "GPS no fix; keeping last coordinates")
+	case HealthStatusHealthy:
+		if previous == HealthStatusNoFix {
+			logging.LogInfo(moduleName, "GPS fix acquired")
+		}
+	}
 }
 
 // GetStatus returns the GPS status

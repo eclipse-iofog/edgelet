@@ -7,6 +7,7 @@ type HealthStatus string
 
 const (
 	HealthStatusHealthy     HealthStatus = "HEALTHY"
+	HealthStatusNoFix       HealthStatus = "NO_FIX"
 	HealthStatusDeviceError HealthStatus = "DEVICE_ERROR"
 	HealthStatusIPError     HealthStatus = "IP_ERROR"
 	HealthStatusOff         HealthStatus = "OFF"

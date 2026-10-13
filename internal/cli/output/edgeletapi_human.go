@@ -69,6 +69,7 @@ var infoOutputOrder = []string{
 	"gpsDevice",
 	"gpsScanFrequency",
 	"gpsMode",
+	"gpsStatus",
 	"watchdogEnabled",
 	"developerMode",
 	"timeZone",

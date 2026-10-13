@@ -104,6 +104,7 @@ func TestInitializeGPS_DynamicWithoutDeviceFallsBackToManual(t *testing.T) {
 func TestUpdateCoordinates_AutoModeTriggersGPSCallbackOnSuccess(t *testing.T) {
 	cfg := config.GetInstance()
 	cfg.GPSMode = "auto"
+	cfg.GPSCoordinates = "0.00000,0.00000"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -122,6 +123,7 @@ func TestUpdateCoordinates_AutoModeTriggersGPSCallbackOnSuccess(t *testing.T) {
 		atomic.AddInt32(&callbackCount, 1)
 		return nil
 	})
+	t.Cleanup(func() { cfg.SetGPSConfigCallback(nil) })
 
 	m := &Manager{
 		status: NewStatus(),
@@ -133,6 +135,11 @@ func TestUpdateCoordinates_AutoModeTriggersGPSCallbackOnSuccess(t *testing.T) {
 
 	if got := atomic.LoadInt32(&callbackCount); got != 1 {
 		t.Fatalf("expected GPS callback to be triggered once, got %d", got)
+	}
+
+	m.updateCoordinates()
+	if got := atomic.LoadInt32(&callbackCount); got != 1 {
+		t.Fatalf("expected unchanged coordinates to skip the GPS callback, got %d", got)
 	}
 }
 

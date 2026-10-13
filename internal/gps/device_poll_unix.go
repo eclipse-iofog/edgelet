@@ -4,6 +4,7 @@ package gps
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -33,7 +34,7 @@ func (d *DeviceHandler) readLineWithTimeout(file *os.File, reader *bufio.Reader,
 		return "", fmt.Errorf("poll failed: %w", err)
 	}
 	if n == 0 {
-		return "", errors.New("read timeout")
+		return "", errReadTimeout
 	}
 	if pollFds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
 		return "", errors.New("device poll error")
@@ -42,9 +43,83 @@ func (d *DeviceHandler) readLineWithTimeout(file *os.File, reader *bufio.Reader,
 		return "", errors.New("device not readable")
 	}
 
-	line, err := reader.ReadString('\n')
+	if err := file.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return "", fmt.Errorf("set read deadline: %w", err)
+	}
+	defer func() {
+		_ = file.SetReadDeadline(time.Time{})
+	}()
+
+	line, err := readBoundedLine(reader)
 	if err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return "", errReadTimeout
+		}
 		return "", err
 	}
-	return strings.TrimSpace(line), nil
+	return line, nil
+}
+
+// nextLine returns the next NMEA line. Complete lines already in the reader
+// buffer are taken before polling the device, so a scan sees the newest
+// sentence in the backlog rather than stopping on the first buffered line.
+func (d *DeviceHandler) nextLine(file *os.File, reader *bufio.Reader, timeout time.Duration) (string, error) {
+	if line, ok, err := readBufferedLine(reader); ok || err != nil {
+		return line, err
+	}
+	return d.readLineWithTimeout(file, reader, timeout)
+}
+
+func readBufferedLine(reader *bufio.Reader) (string, bool, error) {
+	buffered := reader.Buffered()
+	if buffered == 0 {
+		return "", false, nil
+	}
+	peeked, err := reader.Peek(buffered)
+	if err != nil {
+		return "", false, err
+	}
+	if !bytes.Contains(peeked, []byte{'\n'}) {
+		return "", false, nil
+	}
+	line, err := readBoundedLine(reader)
+	if err != nil {
+		return "", false, err
+	}
+	return line, true, nil
+}
+
+func readBoundedLine(reader *bufio.Reader) (string, error) {
+	var buf []byte
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		if b == '\n' {
+			return strings.TrimSpace(string(buf)), nil
+		}
+		if b == '\r' {
+			continue
+		}
+		if len(buf) >= maxNMEALineLength {
+			if err := discardUntilNewline(reader); err != nil {
+				return "", err
+			}
+			return "", errOversizedLine
+		}
+		buf = append(buf, b)
+	}
+}
+
+func discardUntilNewline(reader *bufio.Reader) error {
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			return err
+		}
+		if b == '\n' {
+			return nil
+		}
+	}
 }

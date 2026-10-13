@@ -16,18 +16,29 @@ import (
 
 const (
 	deviceHandlerModuleName = "GPS Device Handler"
-	readTimeout             = 5 * time.Second
+	defaultReadTimeout      = 5 * time.Second
+	defaultDrainIdle        = 50 * time.Millisecond
+	maxDrainLines           = 128
+	maxNMEALineLength       = 512
+)
+
+var (
+	errNoFix         = errors.New("gps fix unavailable")
+	errReadTimeout   = errors.New("read timeout")
+	errOversizedLine = errors.New("nmea line exceeds maximum length")
 )
 
 // DeviceHandler handles GPS device communication
 type DeviceHandler struct {
-	manager    *Manager
-	config     *config.Config
-	devicePath string
-	deviceFile *os.File
-	reader     *bufio.Reader
-	isRunning  bool
-	mu         sync.RWMutex
+	manager     *Manager
+	config      *config.Config
+	devicePath  string
+	deviceFile  *os.File
+	reader      *bufio.Reader
+	isRunning   bool
+	readTimeout time.Duration
+	idleTimeout time.Duration
+	mu          sync.RWMutex
 }
 
 // NewDeviceHandler creates a new DeviceHandler
@@ -100,7 +111,10 @@ func (d *DeviceHandler) IsRunning() bool {
 	return d.isRunning
 }
 
-// ReadAndUpdateCoordinates reads from GPS device and updates coordinates if valid
+// ReadAndUpdateCoordinates reads the sentences already buffered for this scan.
+// A valid fix updates coordinates. Sentences with no fix return errNoFix and
+// leave the stored coordinates unchanged. No bytes, or a port error, is returned
+// to the caller as a device failure.
 func (d *DeviceHandler) ReadAndUpdateCoordinates() error {
 	d.mu.RLock()
 	if !d.isRunning || d.reader == nil {
@@ -109,34 +123,68 @@ func (d *DeviceHandler) ReadAndUpdateCoordinates() error {
 	}
 	reader := d.reader
 	deviceFile := d.deviceFile
+	firstTimeout := d.firstReadTimeout()
+	idleTimeout := d.drainIdleTimeout()
 	d.mu.RUnlock()
 	if deviceFile == nil {
 		return errors.New("device file is not open")
 	}
 
-	// Read line with timeout
-	line, err := d.readLineWithTimeout(deviceFile, reader, readTimeout)
-	if err != nil {
-		logging.LogWarn(deviceHandlerModuleName, fmt.Sprintf("GPS device timeout - no data received within %v", readTimeout))
-		return err
+	var last nmea.Message
+	var readErr error
+	lines := 0
+	for lines < maxDrainLines {
+		timeout := idleTimeout
+		if lines == 0 {
+			timeout = firstTimeout
+		}
+		line, err := d.nextLine(deviceFile, reader, timeout)
+		if err != nil {
+			if errors.Is(err, errOversizedLine) {
+				lines++
+				continue
+			}
+			readErr = err
+			break
+		}
+		lines++
+		msg, err := nmea.Parse(line)
+		if err != nil {
+			continue
+		}
+		last = msg
 	}
 
-	// Parse NMEA message
-	nmeaMsg, err := nmea.Parse(line)
-	if err != nil {
-		logging.LogWarn(deviceHandlerModuleName, fmt.Sprintf("Failed to parse NMEA message: %v", err))
-		return err
+	if lines == 0 {
+		if readErr == nil {
+			readErr = errReadTimeout
+		}
+		logging.LogWarn(deviceHandlerModuleName, fmt.Sprintf("GPS device read failed: %v", readErr))
+		return readErr
 	}
-
-	if !nmeaMsg.IsValid() {
-		logging.LogWarn(deviceHandlerModuleName, "Invalid NMEA message received")
-		return errors.New("invalid NMEA message")
+	if last != nil && last.IsValid() {
+		coordinates := fmt.Sprintf("%.5f,%.5f", last.GetLatitude(), last.GetLongitude())
+		d.config.GPSCoordinates = coordinates
+		logging.LogDebug(deviceHandlerModuleName, fmt.Sprintf("Updated GPS coordinates: %s", coordinates))
+		return nil
 	}
+	if readErr != nil && !errors.Is(readErr, errReadTimeout) {
+		logging.LogWarn(deviceHandlerModuleName, fmt.Sprintf("GPS device read failed: %v", readErr))
+		return readErr
+	}
+	return errNoFix
+}
 
-	// Update coordinates in configuration
-	coordinates := fmt.Sprintf("%.5f,%.5f", nmeaMsg.GetLatitude(), nmeaMsg.GetLongitude())
-	d.config.GPSCoordinates = coordinates
+func (d *DeviceHandler) firstReadTimeout() time.Duration {
+	if d.readTimeout > 0 {
+		return d.readTimeout
+	}
+	return defaultReadTimeout
+}
 
-	logging.LogDebug(deviceHandlerModuleName, fmt.Sprintf("Updated GPS coordinates: %s", coordinates))
-	return nil
+func (d *DeviceHandler) drainIdleTimeout() time.Duration {
+	if d.idleTimeout > 0 {
+		return d.idleTimeout
+	}
+	return defaultDrainIdle
 }

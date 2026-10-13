@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/gps"
 	"github.com/eclipse-iofog/edgelet/internal/network"
 	"github.com/eclipse-iofog/edgelet/internal/utils/logging"
 )
@@ -45,6 +46,7 @@ func (h *InfoHandler) HandleInfo(w http.ResponseWriter, r *http.Request) {
 	// Parse config report into map
 	infoMap := parseInfoReport(configReport)
 	infoMap["networkInterface"] = formatInfoNetworkInterface(cfg.NetworkInterface, network.GetInstance().GetNetworkInterface())
+	infoMap["gpsStatus"] = string(gps.GetInstance().GetStatus().GetHealthStatus())
 
 	// Convert to JSON
 	jsonData, err := json.Marshal(infoMap)
