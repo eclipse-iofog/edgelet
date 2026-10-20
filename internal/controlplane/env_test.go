@@ -243,6 +243,21 @@ func TestBuildControllerEnv_FullProjection(t *testing.T) {
 	assertEnv(t, env, "TLS_BASE64_CERT", cert)
 	assertEnv(t, env, "TLS_BASE64_KEY", key)
 	assertEnv(t, env, "SERVER_DEV_MODE", "false")
+	if _, ok := env["OIDC_ISSUER_TLS_BASE64_CA"]; ok {
+		t.Fatal("expected OIDC_ISSUER_TLS_BASE64_CA omitted")
+	}
+}
+
+func TestBuildControllerEnv_IssuerCA(t *testing.T) {
+	doc := validControlPlaneDocForEnvTest()
+	ca := base64.StdEncoding.EncodeToString([]byte("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"))
+	doc.Spec.Auth.IssuerCA = ca
+
+	env, err := BuildControllerEnv(doc, "uuid-issuer-ca")
+	if err != nil {
+		t.Fatalf("BuildControllerEnv: %v", err)
+	}
+	assertEnv(t, env, "OIDC_ISSUER_TLS_BASE64_CA", ca)
 }
 
 func TestBuildControllerEnv_EmbeddedBootstrapProjection(t *testing.T) {

@@ -90,6 +90,7 @@ type ControlPlaneAuthSpec struct {
 	InsecureAllowBootstrapLog *bool                         `yaml:"insecureAllowBootstrapLog,omitempty" json:"insecureAllowBootstrapLog,omitempty"`
 	Bootstrap                 *ControlPlaneAuthBootstrap    `yaml:"bootstrap,omitempty" json:"bootstrap,omitempty"`
 	IssuerURL                 string                        `yaml:"issuerUrl,omitempty" json:"issuerUrl,omitempty"`
+	IssuerCA                  string                        `yaml:"issuerCa,omitempty" json:"issuerCa,omitempty"`
 	Client                    *ControlPlaneAuthClient       `yaml:"client,omitempty" json:"client,omitempty"`
 	ConsoleClient             string                        `yaml:"consoleClient,omitempty" json:"consoleClient,omitempty"`
 	ConsoleClientEnabled      *bool                         `yaml:"consoleClientEnabled,omitempty" json:"consoleClientEnabled,omitempty"`
@@ -338,6 +339,9 @@ func validateBootstrapPassword(password string) error {
 }
 
 func validateControlPlaneAuthOptions(auth *ControlPlaneAuthSpec) error {
+	if err := validateControlPlaneIssuerCA(auth.IssuerCA); err != nil {
+		return err
+	}
 	if auth.SessionStore != nil {
 		sessionType := strings.TrimSpace(auth.SessionStore.Type)
 		if sessionType != "" && sessionType != "memory" && sessionType != "database" {
@@ -376,6 +380,17 @@ func validateControlPlaneAuthOptions(auth *ControlPlaneAuthSpec) error {
 		if auth.OIDCTTL.IDTokenTTLSeconds != nil && *auth.OIDCTTL.IDTokenTTLSeconds <= 0 {
 			return errors.New("spec.auth.oidcTtl.idTokenTtlSeconds must be positive when set")
 		}
+	}
+	return nil
+}
+
+func validateControlPlaneIssuerCA(ca string) error {
+	trimmed := strings.TrimSpace(ca)
+	if trimmed == "" {
+		return nil
+	}
+	if _, err := base64.StdEncoding.DecodeString(trimmed); err != nil {
+		return fmt.Errorf("spec.auth.issuerCa must be valid base64: %w", err)
 	}
 	return nil
 }

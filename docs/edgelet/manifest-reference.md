@@ -333,6 +333,8 @@ Deploys **one** Datasance Controller container per Edgelet node (optional — re
 | `spec.auth.bootstrap` | Required when `mode: embedded` (`username`, `password` with complexity rules) |
 | `spec.auth.issuerUrl` + `spec.auth.client` | Required when `mode: external` |
 
+`spec.auth.issuerCa` is optional. It is the standard base64 of a PEM CA or a concatenated PEM bundle and sets `OIDC_ISSUER_TLS_BASE64_CA`.
+
 ### Forbidden fields
 
 | Field | Reason |
@@ -364,6 +366,7 @@ spec:
       username: admin
       password: "<secret>"      # ≥12 chars, 1 uppercase, 1 special
     issuerUrl: <url>            # required when mode=external
+    issuerCa: <base64>          # optional — PEM CA or PEM bundle; OIDC_ISSUER_TLS_BASE64_CA
     client:                     # required when mode=external
       id: <id>
       secret: <secret>

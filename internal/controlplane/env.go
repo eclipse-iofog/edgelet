@@ -84,6 +84,7 @@ func projectAuthEnv(env map[string]string, auth *models.ControlPlaneAuthSpec) {
 		setEnvIfNonEmpty(env, "OIDC_BOOTSTRAP_ADMIN_PASSWORD", auth.Bootstrap.Password)
 	}
 	setEnvIfNonEmpty(env, "OIDC_ISSUER_URL", auth.IssuerURL)
+	setEnvIfNonEmpty(env, "OIDC_ISSUER_TLS_BASE64_CA", auth.IssuerCA)
 	if auth.Client != nil {
 		setEnvIfNonEmpty(env, "OIDC_CLIENT_ID", auth.Client.ID)
 		setEnvIfNonEmpty(env, "OIDC_CLIENT_SECRET", auth.Client.Secret)

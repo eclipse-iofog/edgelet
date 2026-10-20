@@ -46,6 +46,7 @@ spec:
       username: admin              # OIDC_BOOTSTRAP_ADMIN_USERNAME
       password: "<replace-me>"     # OIDC_BOOTSTRAP_ADMIN_PASSWORD (≥12 chars, 1 upper, 1 special)
     # issuerUrl: https://auth.example.com/realms/myrealm  # required when mode=external
+    # issuerCa: "<base64 PEM or PEM bundle>"  # optional — OIDC_ISSUER_TLS_BASE64_CA
     # client:                      # required when mode=external; optional overrides in embedded
     #   id: controller
     #   secret: "<replace-me>"

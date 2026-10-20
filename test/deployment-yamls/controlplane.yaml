@@ -24,6 +24,7 @@ spec:
   # auth external example:
   #   mode: external
   #   issuerUrl: https://auth.example.com/realms/myrealm
+  #   issuerCa: <base64 PEM or PEM bundle>
   #   client:
   #     id: pot-controller
   #     secret: <replace-me>

@@ -5,7 +5,11 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v1.1.2] - 20-10-2026
+
+### Added
+
+- **ControlPlane issuer CA:** optional `spec.auth.issuerCa` accepts the standard base64 of a PEM CA or a concatenated PEM bundle and sets `OIDC_ISSUER_TLS_BASE64_CA` on the controller container. An external HTTPS issuer signed by that private CA can be trusted with certificate checks left on. The field is redacted in `edgelet controlplane get --manifest`. The controller image must honor `OIDC_ISSUER_TLS_BASE64_CA`.
 
 ### Changed
 

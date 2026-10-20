@@ -99,6 +99,60 @@ func TestControlPlaneManifestValidate_ExternalRequiresClientAndIssuer(t *testing
 	}
 }
 
+func TestParseControlPlaneManifest_IssuerCA(t *testing.T) {
+	manifest := `
+apiVersion: edgelet.iofog.org/v1
+kind: ControlPlane
+metadata:
+  name: pot
+spec:
+  controller:
+    image: ghcr.io/datasance/controller:3.8.0-beta.0
+  auth:
+    mode: external
+    issuerUrl: https://auth.example.com/realms/pot
+    issuerCa: cGVt
+    client:
+      id: client
+      secret: secret
+`
+	doc, err := ParseControlPlaneManifest(manifest)
+	if err != nil {
+		t.Fatalf("ParseControlPlaneManifest: %v", err)
+	}
+	if doc.Spec.Auth.IssuerCA != "cGVt" {
+		t.Fatalf("issuerCa=%q", doc.Spec.Auth.IssuerCA)
+	}
+}
+
+func TestControlPlaneManifestValidate_IssuerCA(t *testing.T) {
+	doc := validControlPlaneManifestForTest()
+	ca := base64.StdEncoding.EncodeToString([]byte("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"))
+	doc.Spec.Auth.IssuerCA = ca
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("expected embedded issuerCa to pass: %v", err)
+	}
+
+	doc.Spec.Auth.Mode = "external"
+	doc.Spec.Auth.Bootstrap = nil
+	doc.Spec.Auth.IssuerURL = "https://auth.example.com/realms/pot"
+	doc.Spec.Auth.Client = &ControlPlaneAuthClient{ID: "client", Secret: "secret"}
+	doc.Spec.Auth.IssuerCA = ca
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("expected external issuerCa to pass: %v", err)
+	}
+
+	doc.Spec.Auth.IssuerCA = "not-base64!!!"
+	if err := doc.Validate(); err == nil || !strings.Contains(err.Error(), "spec.auth.issuerCa must be valid base64") {
+		t.Fatalf("expected issuerCa base64 error, got: %v", err)
+	}
+
+	doc.Spec.Auth.IssuerCA = "   "
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("expected blank issuerCa to pass: %v", err)
+	}
+}
+
 func TestControlPlaneManifestValidate_RequiresControllerImage(t *testing.T) {
 	doc := validControlPlaneManifestForTest()
 	doc.Spec.Controller.Image = ""
@@ -439,6 +493,7 @@ func TestControlPlaneManifestNormalizeDefaults(t *testing.T) {
 func TestControlPlaneManifestMaskSecrets(t *testing.T) {
 	doc := validControlPlaneManifestForTest()
 	doc.Spec.Auth.Client = &ControlPlaneAuthClient{ID: "client", Secret: "top-secret"}
+	doc.Spec.Auth.IssuerCA = base64.StdEncoding.EncodeToString([]byte("ca-pem"))
 	doc.Spec.Auth.SessionStore = &ControlPlaneAuthSessionStore{Secret: "session-secret"}
 	doc.Spec.TLS = &ControlPlaneTLSConfig{
 		Base64: &ControlPlaneTLSBase64{Cert: "cert-b64", Key: "key-b64", CA: "ca-b64"},
@@ -449,6 +504,9 @@ func TestControlPlaneManifestMaskSecrets(t *testing.T) {
 	}
 	if doc.Spec.Auth.Client.Secret != controlPlaneSecretMask {
 		t.Fatalf("expected masked client secret, got %q", doc.Spec.Auth.Client.Secret)
+	}
+	if doc.Spec.Auth.IssuerCA != controlPlaneSecretMask {
+		t.Fatalf("expected masked issuer CA, got %q", doc.Spec.Auth.IssuerCA)
 	}
 	if doc.Spec.Auth.SessionStore.Secret != controlPlaneSecretMask {
 		t.Fatalf("expected masked session secret, got %q", doc.Spec.Auth.SessionStore.Secret)

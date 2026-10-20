@@ -41,6 +41,8 @@ Remote Controller (`controllerUrl` points elsewhere) without local ControlPlane 
 - `embedded`: `spec.auth.bootstrap.username` and `spec.auth.bootstrap.password` (password rules: ≥12 chars, 1 uppercase, 1 special)
 - `external`: `spec.auth.issuerUrl`, `spec.auth.client.id`, `spec.auth.client.secret`
 
+**Optional:** `spec.auth.issuerCa` is standard base64 of a PEM CA or a concatenated PEM bundle. Edgelet sets `OIDC_ISSUER_TLS_BASE64_CA`. An external HTTPS issuer signed by that private CA is trusted with certificate checks left on. The controller image must honor that variable. Embedded mode may include the field; Controller ignores it.
+
 **Forbidden in YAML:** `spec.siteCA`, `spec.localCA`, legacy keys (`auth.url`, `ecnViewer*`, `spec.https`, old Keycloak fields). Import site/local CA via Controller REST after deploy.
 
 **Annotated example:** [examples/controlplane.yaml](examples/controlplane.yaml).
@@ -141,6 +143,7 @@ Edgelet sets container environment with `BuildControllerEnv`. Rules:
 | `bootstrap.username` | `OIDC_BOOTSTRAP_ADMIN_USERNAME` |
 | `bootstrap.password` | `OIDC_BOOTSTRAP_ADMIN_PASSWORD` |
 | `issuerUrl` | `OIDC_ISSUER_URL` |
+| `issuerCa` | `OIDC_ISSUER_TLS_BASE64_CA` |
 | `client.id` | `OIDC_CLIENT_ID` |
 | `client.secret` | `OIDC_CLIENT_SECRET` |
 | `consoleClient` | `OIDC_CONSOLE_CLIENT_ID` |
@@ -245,7 +248,7 @@ Edgelet sets container environment with `BuildControllerEnv`. Rules:
 
 ## Secrets in CLI/API output
 
-`edgelet controlplane get --manifest` and `GET /v1/system/controlplane/manifest` return YAML with secrets replaced by **`***`**: auth bootstrap password, OIDC client secret, session store secret, database password/CA, TLS base64 blobs, vault tokens/keys/credentials. Non-secret fields remain visible.
+`edgelet controlplane get --manifest` and `GET /v1/system/controlplane/manifest` return YAML with secrets replaced by **`***`**: auth bootstrap password, OIDC client secret, issuer CA, session store secret, database password/CA, TLS base64 blobs, vault tokens/keys/credentials. Non-secret fields remain visible.
 
 ## Controller microservice registration
 

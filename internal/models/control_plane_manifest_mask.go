@@ -37,6 +37,7 @@ func (m *ControlPlaneManifest) MaskSecrets() {
 		if m.Spec.Auth.SessionStore != nil {
 			m.Spec.Auth.SessionStore.Secret = maskSecretValue(m.Spec.Auth.SessionStore.Secret)
 		}
+		m.Spec.Auth.IssuerCA = maskSecretValue(m.Spec.Auth.IssuerCA)
 	}
 	if m.Spec.Database != nil {
 		m.Spec.Database.Password = maskSecretValue(m.Spec.Database.Password)
