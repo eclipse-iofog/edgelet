@@ -69,6 +69,54 @@ flowchart TD
 
 Comparison uses `auth.EdgeGuardHashFromJWT()` on the stored JWT vs newly computed hash — avoids false deprovision when only `iat`/`exp`/`jti` rotate.
 
+## What counts as a hardware change
+
+A hardware change is any difference in the canonical fingerprint JSON. Edge Guard lowercases and trims strings, sorts device lists, then SHA-256 hashes that JSON. The stored Edge Guard JWT is compared by its `hash` claim. A new JWT whose only changes are `iat`, `exp`, or `jti` is not a hardware change.
+
+The next attestation tick that samples a different hash sets daemon status to `WARNING`, sets `warningMessage` to `HW signature changed` (20 characters), `PUT`s that status to the controller, then deprovisions. `securityViolationInfo` is not sent by Edgelet. The controller builds that field from the warning.
+
+### Fields that change the hash
+
+| Field | Hashed values | A change means |
+|---|---|---|
+| System | Product UUID, serial, vendor, model | Board identity or a VM move |
+| BIOS | Vendor, version | Firmware change |
+| Motherboard | Product, serial | Board swap |
+| CPU | Vendor, model name, family, model, stepping, physical core count | CPU identity change. Load and frequency are not included. |
+| PCI | Slot, class, vendor, device, subsystem vendor, subsystem device | Card added, removed, or moved to another slot |
+| GPU | Derived from PCI class `0x03` | Follows the PCI list |
+| Root disk | Device path, serial, WWN, model | Root disk replaced or the root device path changed |
+| NICs | Name, MAC, link state | See below |
+| USB | Bus path, vendor, product, manufacturer, product name, serial | Plug, unplug, or a different port. USB hubs are skipped. |
+| Optional | Memory-module locator, serial, part number; secure boot; TPM present, EK hash, PCR hash; board serial; `/etc/machine-id` | DIMM, secure-boot, TPM, or machine-id change |
+| ARM only | Device-tree model, compatible, serial | Board identity on arm and arm64 |
+
+Empty DMI placeholders (`none`, `not specified`, `not available`, `unknown`, `to be filled by o.e.m.`) are omitted before hashing.
+
+### NIC link state
+
+Linux link state is `/sys/class/net/<iface>/carrier`. Edge Guard stores one of three values:
+
+| Value | Meaning |
+|---|---|
+| `1` | Interface is administratively up and the PHY has carrier |
+| `0` | Interface is administratively up and the PHY has no carrier |
+| `unknown` | `carrier` could not be read, which is what Linux returns when the interface is administratively down |
+
+`1`, `0`, and `unknown` are different hashes. IP addresses, routes, and whether packets flow are not part of the fingerprint.
+
+Included interfaces are those with a real MAC whose names start with `eth`, `en`, `em`, `eno`, `ens`, `enp`, `wlan`, `wlp`, or `wwan`. That includes USB Ethernet names such as `enx*`. Ignored names start with `lo`, `docker`, `br-`, `veth`, `virbr`, `tun`, `tap`, `vmnet`, `vnet`, `cni`, `flannel`, or `cali`.
+
+Any included NIC moving between `1`, `0`, and `unknown` deprovisions the agent if an attestation tick samples the new value. A short flap is invisible when the tick falls outside it.
+
+**Ethernet cabled to a modem.** A direct cable into a modem that is powered off drops carrier from `1` to `0` while the host interface stays up. A switch left powered between the host and the modem keeps the host link up, so shutting the modem down does not change `linkState`.
+
+**USB modem.** The hashed link is the USB-Ethernet connection to the modem, not the cellular session inside it. Powering the modem off removes the interface or moves it to `unknown`. Losing cellular data while the stick stays plugged in and enumerated leaves `linkState` unchanged.
+
+**Wi-Fi (`wlp*`, `wlan*`).** Losing association (access point gone, radio off, out of range) normally moves carrier from `1` to `0`. Staying associated while only the upstream path dies leaves `linkState` at `1`.
+
+**WWAN (`wwan*`).** When the driver ties carrier to the data session, a session drop changes the hash. Bringing the interface down is stored as `unknown`, which also changes the hash. An interface that stays up with carrier while packets stop does not change `linkState`.
+
 ## Configuration
 
 | Key | Effect |
@@ -103,7 +151,7 @@ No direct HTTP. Side effects:
 
 | Symptom | Typical cause |
 |---------|----------------|
-| Unexpected deprovision | Hardware change; VM migration; fingerprint source drift |
+| Unexpected deprovision | Hardware change; NIC link flap (`1` / `0` / `unknown`); USB plug or unplug; TPM PCR change; VM migration; fingerprint source drift |
 | Attestation skipped | Frequency 0 or unprovisioned |
 | Start error | DB signature load failure on enabled config |
 

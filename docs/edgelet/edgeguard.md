@@ -56,6 +56,8 @@ Collected in `internal/edgeguard/fingerprint_linux.go`:
 
 Darwin and Windows use platform-specific collectors (`fingerprint_darwin.go`, `fingerprint_windows.go`).
 
+Link state, included interface names, and which field changes deprovision the agent are described in [What counts as a hardware change](modules/edgeguard.md#what-counts-as-a-hardware-change).
+
 ---
 
 ## On mismatch
@@ -67,7 +69,7 @@ When the fingerprint hash changes:
 3. Agent **deprovision** (`Deprovision(false)` — credentials cleared via normal deprovision path)
 4. Stored baseline JWT **deleted**
 
-Operators must investigate physical changes (NIC swap, disk change, USB devices that affect policy, VM identity drift) before reprovisioning.
+Operators must investigate physical changes before reprovisioning. A NIC link-state change (`1`, `0`, or `unknown`), USB plug or unplug, disk change, or VM identity drift is enough to mismatch. See [What counts as a hardware change](modules/edgeguard.md#what-counts-as-a-hardware-change).
 
 ---
 

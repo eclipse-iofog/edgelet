@@ -3,7 +3,7 @@ module github.com/eclipse-iofog/edgelet
 go 1.26.9
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.2
+	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/briandowns/spinner v1.23.2
 	github.com/containerd/cgroups/v3 v3.1.3
 	github.com/containerd/containerd/api v1.11.1
@@ -33,8 +33,8 @@ require (
 	github.com/xeipuuv/gojsonschema v1.2.0
 	github.com/yusufpapurcu/wmi v1.2.4
 	golang.org/x/crypto v0.57.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/term v0.46.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/cri-api v0.36.2
@@ -61,7 +61,7 @@ require (
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-cni v1.1.13 // indirect
 	github.com/containerd/go-runc v1.1.0 // indirect
-	github.com/containerd/imgcrypt/v2 v2.0.2 // indirect
+	github.com/containerd/imgcrypt/v2 v2.0.3 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/nri v0.12.0 // indirect
 	github.com/containerd/otelttrpc v0.1.0 // indirect
@@ -112,7 +112,7 @@ require (
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/sys/signal v0.7.1 // indirect
 	github.com/moby/sys/symlink v0.3.0 // indirect
-	github.com/moby/sys/user v0.4.0 // indirect
+	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
@@ -180,8 +180,5 @@ replace (
 	github.com/containerd/containerd/api => github.com/containerd/containerd/api v1.11.1
 	github.com/containerd/containerd/v2 => github.com/k3s-io/containerd/v2 v2.3.2-k3s2
 
-	// Force OpenPGP fix: ocicrypt v1.3.2 uses ProtonMail/go-crypto (GO-2026-5932)
-	github.com/containerd/imgcrypt/v2 => github.com/containerd/imgcrypt/v2 v2.0.3
-	github.com/containers/ocicrypt => github.com/containers/ocicrypt v1.3.2
 	k8s.io/cri-api => github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api v1.36.2-k3s2
 )
