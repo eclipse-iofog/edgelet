@@ -5,7 +5,7 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.1.2] - 20-10-2026
+## [v1.1.2] - 21-10-2026
 
 ### Added
 
@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Security / vulncheck:** bump indirect `github.com/moby/sys/user` to **v0.4.1** for **GO-2026-6686** (unbounded parsing of user and group database files during image pull).
 - **Go dependencies:** `github.com/bmatcuk/doublestar/v4` **v4.10.3**, `golang.org/x/sys` **v0.49.0**, `golang.org/x/term` **v0.47.0**. No edgelet API changes.
+- **Go 1.26.10** minimum (see `go.mod`). CI and the govulncheck workflow use the same toolchain. Clears [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) (`crypto/x509` distrust of compromised intermediate certificates), reachable from `client.CreateCertificateFromYaml` via `x509.Certificate.Verify`. `make vulncheck` is clean.  
+- Image digests refreshed for `golang:1.26.10-trixie`.
 
 ## [v1.1.1] - 13-10-2026
 

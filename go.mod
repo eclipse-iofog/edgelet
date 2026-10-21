@@ -1,6 +1,6 @@
 module github.com/eclipse-iofog/edgelet
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3
