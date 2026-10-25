@@ -47,6 +47,7 @@ func TestSchemaV2_ModelTablesExist(t *testing.T) {
 		"models", "sysctls", "ulimits", "devices", "tmpfs",
 		"entrypoint", "commands", "run_as_group", "read_only_root_filesystem",
 		"cpus", "memory_reservation", "memory_swap", "shm_size", "working_dir",
+		"supplemental_groups",
 	})
 	assertAbsentColumns(t, "controller_microservices", msCols, []string{
 		"models_json", "container_spec_json",
@@ -125,8 +126,8 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 4 {
-		t.Fatalf("expected schema version 4 after upgrade, got %d", maxVersion)
+	if maxVersion != 5 {
+		t.Fatalf("expected schema version 5 after upgrade, got %d", maxVersion)
 	}
 
 	got, err := db.GetLocalRegistry(5)
@@ -166,26 +167,27 @@ func TestMigration002_UpgradeFromV1Fixture(t *testing.T) {
 		"models", "sysctls", "ulimits", "devices", "tmpfs",
 		"entrypoint", "commands", "run_as_group", "read_only_root_filesystem",
 		"cpus", "memory_reservation", "memory_swap", "shm_size", "working_dir",
+		"supplemental_groups",
 	})
 	assertAbsentColumns(t, "controller_microservices", msCols, []string{
 		"models_json", "container_spec_json",
 	})
 
 	var (
-		modelsJSON, sysctlsJSON, devicesJSON string
-		readOnly                             int
-		entrypoint                           sql.NullString
-		cpus                                 sql.NullFloat64
+		modelsJSON, sysctlsJSON, devicesJSON, groupsJSON string
+		readOnly                                         int
+		entrypoint                                       sql.NullString
+		cpus                                             sql.NullFloat64
 	)
 	if err := db.Conn().QueryRow(
-		`SELECT models, sysctls, devices, read_only_root_filesystem, entrypoint, cpus
+		`SELECT models, sysctls, devices, supplemental_groups, read_only_root_filesystem, entrypoint, cpus
 		 FROM controller_microservices WHERE uuid = ?`,
 		"ms-fixture",
-	).Scan(&modelsJSON, &sysctlsJSON, &devicesJSON, &readOnly, &entrypoint, &cpus); err != nil {
+	).Scan(&modelsJSON, &sysctlsJSON, &devicesJSON, &groupsJSON, &readOnly, &entrypoint, &cpus); err != nil {
 		t.Fatalf("upgraded microservice columns: %v", err)
 	}
-	if modelsJSON != "{}" || sysctlsJSON != "{}" || devicesJSON != "[]" || readOnly != 0 {
-		t.Fatalf("expected column defaults, got models=%q sysctls=%q devices=%q ro=%d", modelsJSON, sysctlsJSON, devicesJSON, readOnly)
+	if modelsJSON != "{}" || sysctlsJSON != "{}" || devicesJSON != "[]" || groupsJSON != "[]" || readOnly != 0 {
+		t.Fatalf("expected column defaults, got models=%q sysctls=%q devices=%q groups=%q ro=%d", modelsJSON, sysctlsJSON, devicesJSON, groupsJSON, readOnly)
 	}
 	if entrypoint.Valid || cpus.Valid {
 		t.Fatalf("expected omitted entrypoint/cpus, got entrypoint=%v cpus=%v", entrypoint, cpus)

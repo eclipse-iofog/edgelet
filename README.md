@@ -199,7 +199,7 @@ chmod +x install.sh
 sudo ./install.sh --version=v1.1.2
 ```
 
-Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples.
+Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), a CycloneDX and SPDX SBOM beside each binary, `LICENSE-3RD-PARTY.md`, `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples. The source-tree inventory is `SBOM.md` at the repository root.
 
 ### Install paths
 

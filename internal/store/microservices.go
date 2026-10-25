@@ -84,7 +84,8 @@ func (d *DB) LoadControllerMicroservices() ([]*models.Microservice, error) {
 		cdi_devs, cap_add, cap_drop, extra_hosts, healthcheck,
 		models, knowledge, sysctls, ulimits, devices, tmpfs,
 		entrypoint, commands, run_as_group, read_only_root_filesystem,
-		cpus, memory_reservation, memory_swap, shm_size, working_dir
+		cpus, memory_reservation, memory_swap, shm_size, working_dir,
+		supplemental_groups
 	FROM controller_microservices ORDER BY uuid`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query controller_microservices: %w", err)
@@ -150,6 +151,14 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 	if err != nil {
 		return fmt.Errorf("marshal devices: %w", err)
 	}
+	groups, err := models.NormalizeSupplementalGroups(ms.SupplementalGroups)
+	if err != nil {
+		return fmt.Errorf("supplemental groups: %w", err)
+	}
+	groupsJSON, err := marshalJSONDefault(groups, "[]")
+	if err != nil {
+		return fmt.Errorf("marshal supplemental groups: %w", err)
+	}
 	tmpfsJSON, err := marshalJSONDefault(ms.Tmpfs, "[]")
 	if err != nil {
 		return fmt.Errorf("marshal tmpfs: %w", err)
@@ -168,9 +177,9 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		models, knowledge, sysctls, ulimits, devices, tmpfs,
 		entrypoint, commands, run_as_group, read_only_root_filesystem,
 		cpus, memory_reservation, memory_swap, shm_size, working_dir,
-		updated_at
+		supplemental_groups, updated_at
 	) VALUES (
-		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 	)`,
 		ms.MicroserviceUUID, ms.ImageName, ms.ContainerID, ms.RegistryID,
 		boolToInt(ms.Rebuild), boolToInt(ms.HostNetworkMode), boolToInt(ms.IsPrivileged), ms.LogSize,
@@ -186,7 +195,7 @@ func insertMicroservice(tx *sql.Tx, ms *models.Microservice) error {
 		encodeOptionalArgv(ms.Entrypoint), encodeOptionalArgv(ms.Commands), ms.RunAsGroup,
 		boolToInt(ms.ReadOnlyRootFilesystem),
 		ms.Cpus, ms.MemoryReservation, ms.MemorySwap, ms.ShmSize, ms.WorkingDir,
-		time.Now().Unix(),
+		groupsJSON, time.Now().Unix(),
 	)
 	return err
 }
@@ -206,6 +215,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		devicesJSON, tmpfsJSON                              string
 		entrypointJSON, commandsJSON                        *string
 		readOnlyRoot                                        int
+		supplementalGroupsJSON                              string
 	)
 
 	err := rows.Scan(
@@ -221,6 +231,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 		&modelsJSON, &knowledgeJSON, &sysctlsJSON, &ulimitsJSON, &devicesJSON, &tmpfsJSON,
 		&entrypointJSON, &commandsJSON, &ms.RunAsGroup, &readOnlyRoot,
 		&ms.Cpus, &ms.MemoryReservation, &ms.MemorySwap, &ms.ShmSize, &ms.WorkingDir,
+		&supplementalGroupsJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -258,6 +269,7 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 	_ = json.Unmarshal([]byte(ulimitsJSON), &ms.Ulimits)
 	_ = json.Unmarshal([]byte(devicesJSON), &ms.Devices)
 	_ = json.Unmarshal([]byte(tmpfsJSON), &ms.Tmpfs)
+	ms.SupplementalGroups = decodeSupplementalGroups(supplementalGroupsJSON)
 	ms.Entrypoint = decodeOptionalArgv(entrypointJSON)
 	ms.Commands = decodeOptionalArgv(commandsJSON)
 
@@ -288,6 +300,18 @@ func scanMicroservice(rows *sql.Rows) (*models.Microservice, error) {
 	}
 
 	return ms, nil
+}
+
+func decodeSupplementalGroups(raw string) []int64 {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "null" {
+		return []int64{}
+	}
+	var groups []int64
+	if err := json.Unmarshal([]byte(trimmed), &groups); err != nil || groups == nil {
+		return []int64{}
+	}
+	return groups
 }
 
 func boolToInt(b bool) int {

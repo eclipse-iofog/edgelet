@@ -5,6 +5,24 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Microservices accept `supplementalGroups`, a list of numeric host group IDs, on 
+local deploy and on controller-managed workloads. A non-root process can join the 
+group that owns a device node. Omitting the field leaves existing workloads 
+unchanged. Changing the list recreates that workload.
+- Software bill of materials. The repository root carries `SBOM.md`, `LICENSE-3RD-PARTY.md`, `sbom.cdx.json`, and `sbom.spdx.json` for the source tree. Each published binary also ships `edgelet-<os>-<arch>[.exe].cdx.json` and `.spdx.json` with that binary's SHA-256. Linux release SBOMs include the staged embed file hashes. `portainer/pause` is pinned to index digest `sha256:df6d2fb5cff97c4070a12953a34a56422879f1e02b43400f1caf1cbd530458b1`; the CRI sandbox ref stays `portainer/pause:latest`.
+
+### Changed
+
+- Controller exec sessions accept a resize control frame, `{"type":"resize","cols":N,"rows":M}` (columns 2–4096, rows 1–4096). The resize waits until the shell has started, and a later size replaces one still in progress. The `close` control command is unchanged.
+
+### Fixed
+
+- When a controller exec shell finishes or errors, remaining output is sent before an exec close frame, so the client can restore the local terminal. The close frame is not written into the shell.
+
 ## [v1.1.2] - 21-10-2026
 
 ### Added

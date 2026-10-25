@@ -386,7 +386,9 @@ func parseMicroservice(data map[string]any) (*models.Microservice, error) {
 	}
 
 	applyMicroserviceProcessArgv(microservice, data)
-	applyMicroserviceContainerExtras(microservice, data)
+	if err := applyMicroserviceContainerExtras(microservice, data); err != nil {
+		return nil, err
+	}
 
 	// Parse cdiDevices
 	if cdiDevices, ok := data["cdiDevices"].([]any); ok {

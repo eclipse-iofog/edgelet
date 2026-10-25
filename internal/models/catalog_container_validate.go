@@ -221,6 +221,9 @@ func validateManifestContainerFields(m *LocalDeployManifest) error {
 	if err := validateRunAsUserGroup(c.RunAsUser, c.RunAsGroup); err != nil {
 		return err
 	}
+	if _, err := NormalizeSupplementalGroups(c.SupplementalGroups); err != nil {
+		return fmt.Errorf("spec.container.%w", err)
+	}
 	if err := validateSysctls(c.Sysctls, c.HostNetworkMode, ipcModeIsHost(c.IpcMode)); err != nil {
 		return err
 	}
@@ -274,6 +277,11 @@ func validateMicroserviceContainerFields(m *Microservice) error {
 	if err := validateRunAsUserGroup(runAsUser, runAsGroup); err != nil {
 		return err
 	}
+	groups, err := NormalizeSupplementalGroups(m.SupplementalGroups)
+	if err != nil {
+		return err
+	}
+	m.SupplementalGroups = groups
 	ipcMode := ""
 	if m.IpcMode != nil {
 		ipcMode = *m.IpcMode

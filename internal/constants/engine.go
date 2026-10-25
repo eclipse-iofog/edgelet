@@ -62,6 +62,7 @@ const (
 	EdgeletContainerdNamespace = "k8s.io"
 
 	// Sandbox (pause) image for CRI podsandbox. portainer/pause is lightweight and multi-arch (incl. riscv64).
+	// The embedded archive is pinned by digest in scripts/version.sh and retagged to this ref on import.
 	EdgeletSandboxImage = "portainer/pause:latest"
 
 	// PodmanDefaultDockerURL is the default socket URL for containerEngine podman.

@@ -200,6 +200,53 @@ func TestMatchesLabelIgnoresMissingEnvHash(t *testing.T) {
 	}
 }
 
+func TestFingerprintEmptySupplementalGroups(t *testing.T) {
+	unset := models.NewMicroservice("ms-unset", "alpine:3.19")
+	emptyList := models.NewMicroservice("ms-empty", "alpine:3.19")
+	emptyList.SupplementalGroups = []int64{}
+	if !FromMicroservice(unset).Empty() || !FromMicroservice(emptyList).Empty() {
+		t.Fatal("a nil or empty supplemental group list must leave the fingerprint empty")
+	}
+	unsetJSON, err := Marshal(FromMicroservice(unset))
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyJSON, err := Marshal(FromMicroservice(emptyList))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unsetJSON != emptyJSON {
+		t.Fatalf("workloads with no supplemental groups must match:\n%s\n%s", unsetJSON, emptyJSON)
+	}
+	if !MatchesLabel(unsetJSON, emptyList) {
+		t.Fatal("empty supplemental groups must still match a fingerprint with none")
+	}
+}
+
+func TestFingerprintSupplementalGroupsChange(t *testing.T) {
+	one := models.NewMicroservice("ms-1", "alpine:3.19")
+	one.SupplementalGroups = []int64{44}
+	two := models.NewMicroservice("ms-1", "alpine:3.19")
+	two.SupplementalGroups = []int64{44, 993}
+	oneJSON, err := Marshal(FromMicroservice(one))
+	if err != nil {
+		t.Fatal(err)
+	}
+	twoJSON, err := Marshal(FromMicroservice(two))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oneJSON == twoJSON {
+		t.Fatal("adding a supplemental group must change the fingerprint")
+	}
+	if FromMicroservice(one).Empty() || FromMicroservice(two).Empty() {
+		t.Fatal("a non-empty supplemental group list must make the fingerprint non-empty")
+	}
+	if MatchesLabel(oneJSON, two) {
+		t.Fatal("a stored fingerprint must not match a longer supplemental group list")
+	}
+}
+
 func TestPOSIXRlimitsUnlimited(t *testing.T) {
 	limits := map[string]models.Ulimit{
 		"nofile":  {Soft: 65536, Hard: 65536},

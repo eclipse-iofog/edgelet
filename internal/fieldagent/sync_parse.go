@@ -36,12 +36,19 @@ func applyMicroserviceProcessArgv(ms *models.Microservice, data map[string]any) 
 	ms.Entrypoint = entrypoint
 }
 
-func applyMicroserviceContainerExtras(ms *models.Microservice, data map[string]any) {
+func applyMicroserviceContainerExtras(ms *models.Microservice, data map[string]any) error {
 	if ms == nil || data == nil {
-		return
+		return nil
 	}
 	if runAsGroup, ok := data["runAsGroup"].(string); ok && strings.TrimSpace(runAsGroup) != "" {
 		ms.RunAsGroup = &runAsGroup
+	}
+	if raw, ok := data["supplementalGroups"]; ok {
+		groups, err := models.NormalizeSupplementalGroups(raw)
+		if err != nil {
+			return err
+		}
+		ms.SupplementalGroups = groups
 	}
 	if workingDir, ok := data["workingDir"].(string); ok && strings.TrimSpace(workingDir) != "" {
 		ms.WorkingDir = &workingDir
@@ -79,6 +86,7 @@ func applyMicroserviceContainerExtras(ms *models.Microservice, data map[string]a
 	if raw, ok := data["knowledge"].(map[string]any); ok {
 		ms.Knowledge = parseKnowledgeCatalog(raw)
 	}
+	return nil
 }
 
 func parseOptionalArgv(data map[string]any, key string) (*[]string, bool) {

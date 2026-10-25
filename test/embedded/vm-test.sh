@@ -1174,6 +1174,7 @@ spec:
   container:
     runAsUser: \"0\"
     runAsGroup: \"65534\"
+    supplementalGroups: [65534]
     readOnlyRootFilesystem: true
     workingDir: /tmp
     entrypoint:

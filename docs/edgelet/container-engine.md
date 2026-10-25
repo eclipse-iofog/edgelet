@@ -175,13 +175,16 @@ spec:
 
 Edgelet maps `cdiDevices` → CRI `CDIDevices` on the embedded engine and to Docker `DeviceRequest` (`driver: cdi`) when `containerEngine: docker`. **Podman** does not wire `cdiDevices` today.
 
+`supplementalGroups` is the workload list of numeric host group IDs. A non-root process uses it to join the group that owns a device node. A raw `/dev` bind (`devices`) needs that list. A CDI vendor spec can still inject its own extra group IDs; that injection is separate from `supplementalGroups`. Group names are rejected. The number is the host group, not the group of the same name inside the image. `runAsGroup` stays the primary group. Omitting the field changes nothing. Changing the list recreates that workload.
+
 ### Podman field coverage
 
-Podman create reuses the Docker HostConfig mapping (catalog bind, entrypoint/commands/workingDir, runAsGroup, read-only root, tmpfs, shm, cpus, memory reservation/swap, sysctls, ulimits, and `/dev` devices). Inspect shows whatever the Podman API stored; Edgelet does not invent applied state that inspect omitted.
+Podman create reuses the Docker HostConfig mapping (catalog bind, entrypoint/commands/workingDir, runAsGroup, supplementalGroups, read-only root, tmpfs, shm, cpus, memory reservation/swap, sysctls, ulimits, and `/dev` devices). Inspect shows whatever the Podman API stored; Edgelet does not invent applied state that inspect omitted.
 
 | Field | Podman |
 |-------|--------|
 | Catalog bind, process, resources, sysctls, ulimits, devices | Sent as Docker HostConfig (same as `containerEngine: docker`) |
+| `supplementalGroups` | Sent as Docker `GroupAdd` with the other HostConfig fields |
 | `cdiDevices` | Not wired |
 | Engine recreate | Uses the stored apply snapshot (bindPath and catalog permissions, not catalog item membership) |
 

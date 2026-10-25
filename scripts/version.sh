@@ -23,7 +23,11 @@ fi
 
 VERSION_CNIPLUGINS="v1.9.1-k3s1"
 VERSION_CRUN="1.28"
-VERSION_PAUSE="portainer/pause:latest"
+# Multi-arch index digest of portainer/pause. build-embedded pulls this digest
+# per arch, then retags the archive portainer/pause:latest for the CRI sandbox ref.
+VERSION_PAUSE_REPO="portainer/pause"
+VERSION_PAUSE_DIGEST="sha256:df6d2fb5cff97c4070a12953a34a56422879f1e02b43400f1caf1cbd530458b1"
+VERSION_PAUSE="${VERSION_PAUSE_REPO}@${VERSION_PAUSE_DIGEST}"
 
 # k3s-root: static net aux (iptables, ip, busybox) — selective stage into embed tar.
 VERSION_ROOT="v0.15.0"

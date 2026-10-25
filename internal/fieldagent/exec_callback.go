@@ -268,7 +268,9 @@ func (c *ExecSessionCallback) OnActivation() {
 	// The WebSocket handler will handle activation separately
 }
 
-// OnComplete is called when the exec session completes
+// OnComplete is called when the exec session completes.
+// Stdout is drained before the close frame so the client still receives the
+// shell's final output.
 func (c *ExecSessionCallback) OnComplete() {
 	logging.LogInfo(execCallbackModuleName, "Exec session completed")
 	c.mu.RLock()
@@ -279,12 +281,28 @@ func (c *ExecSessionCallback) OnComplete() {
 		onClose()
 	}
 	c.Close()
+	c.notifyShellExit()
 }
 
 // OnError is called when the exec session encounters an error
 func (c *ExecSessionCallback) OnError(err error) {
 	logging.LogError(execCallbackModuleName, "Exec session error", err)
 	c.Close()
+	c.notifyShellExit()
+}
+
+// notifyShellExit tells the controller the PTY process has ended so the client
+// can restore its local terminal. Bytes are not written to the shell.
+func (c *ExecSessionCallback) notifyShellExit() {
+	c.mu.RLock()
+	handler := c.webSocketHandler
+	c.mu.RUnlock()
+	if handler == nil || !handler.IsConnected() || !handler.IsActive() {
+		return
+	}
+	if err := handler.SendMessage(ExecTypeClose, []byte{}); err != nil {
+		logging.LogWarn(execCallbackModuleName, fmt.Sprintf("Failed to notify exec session close: %v", err))
+	}
 }
 
 // Close closes the exec session callback

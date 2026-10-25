@@ -18,6 +18,7 @@ type Microservice struct {
 	Config                 *string           `json:"config,omitempty" yaml:"config,omitempty"`
 	RunAsUser              *string           `json:"runAsUser,omitempty" yaml:"runAsUser,omitempty"`
 	RunAsGroup             *string           `json:"runAsGroup,omitempty" yaml:"runAsGroup,omitempty"`
+	SupplementalGroups     []int64           `json:"supplementalGroups,omitempty" yaml:"supplementalGroups,omitempty"`
 	Platform               *string           `json:"platform,omitempty" yaml:"platform,omitempty"`
 	Runtime                *string           `json:"runtime,omitempty" yaml:"runtime,omitempty"`
 	ContainerID            string            `json:"containerId" yaml:"containerId"`

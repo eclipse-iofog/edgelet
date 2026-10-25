@@ -135,6 +135,7 @@ fi
 
 echo "Pulling pause image ${VERSION_PAUSE} for ${OS}/${PAUSE_ARCH}"
 crane pull --platform "${OS}/${PAUSE_ARCH}" "${VERSION_PAUSE}" build/images/pause.tar
+python3 ./scripts/retag-pause-archive.py build/images/pause.tar
 gzip -f build/images/pause.tar
 
 echo "Build-embedded complete: ${INSTALLBIN}"

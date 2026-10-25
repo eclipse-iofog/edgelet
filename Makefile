@@ -265,6 +265,15 @@ lint-fix: $(GOLANGCI_LINT) ## Run linters and auto-fix issues where possible
 fmt: ## Format code
 	@echo "Formatting code..."
 	@go fmt ./...
+	@gofmt -w licensegen/*.go
+
+.PHONY: sbom sbom-check
+sbom: ## Regenerate root SBOM documents
+	cd licensegen && go run . -root ..
+
+sbom-check: ## Fail if root SBOM documents are stale
+	cd licensegen && go test ./...
+	cd licensegen && go run . -root .. -check
 
 vet: ## Run go vet
 	@echo "Running go vet..."

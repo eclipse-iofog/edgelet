@@ -16,7 +16,8 @@ mkdir -p "$OUT"
 rm -f "${OUT}"/edgelet-* "${OUT}"/SHA256SUMS \
     "${OUT}/edgelet-config.yaml.sample" \
     "${OUT}/edgelet-controller-ca.crt.sample" \
-    "${OUT}/install.sh" "${OUT}/uninstall.sh"
+    "${OUT}/install.sh" "${OUT}/uninstall.sh" \
+    "${OUT}/LICENSE-3RD-PARTY.md"
 
 copy_binary() {
   local _src="$1" _dst="$2"
@@ -24,6 +25,21 @@ copy_binary() {
   cp "$_src" "$_dst"
   chmod 755 "$_dst" 2>/dev/null || true
   echo "Wrote ${_dst}"
+  copy_sbom "$(basename "$_dst")"
+}
+
+copy_sbom() {
+  local _base="$1" _ext
+  for _ext in cdx.json spdx.json; do
+    local _src="${ROOT}/build/${_base}.${_ext}"
+    if [ ! -f "${_src}" ]; then
+      echo "ERROR: missing ${_src}" >&2
+      echo "Generate it with: cd licensegen && go run . -root .. -release -binary ../build/${_base} -version <tag> -out ../build" >&2
+      exit 1
+    fi
+    cp "${_src}" "${OUT}/${_base}.${_ext}"
+    echo "Wrote ${OUT}/${_base}.${_ext}"
+  done
 }
 
 for _arch in amd64 arm64 arm riscv64; do
@@ -49,10 +65,13 @@ cp "${ROOT}/uninstall.sh" "${OUT}/uninstall.sh"
 chmod 755 "${OUT}/install.sh" "${OUT}/uninstall.sh"
 echo "Wrote ${OUT}/install.sh and ${OUT}/uninstall.sh"
 
+cp "${ROOT}/LICENSE-3RD-PARTY.md" "${OUT}/LICENSE-3RD-PARTY.md"
+echo "Wrote ${OUT}/LICENSE-3RD-PARTY.md"
+
 (
   cd "$OUT"
   sha256sum edgelet-* edgelet-config.yaml.sample edgelet-controller-ca.crt.sample \
-    install.sh uninstall.sh 2>/dev/null > SHA256SUMS || true
+    install.sh uninstall.sh LICENSE-3RD-PARTY.md 2>/dev/null > SHA256SUMS || true
 )
 
 echo "Release ${VERSION}: checksums at ${OUT}/SHA256SUMS"

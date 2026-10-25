@@ -55,6 +55,7 @@ type Fingerprint struct {
 	Commands             []string                 `json:"commands,omitempty"`
 	WorkingDir           string                   `json:"workingDir,omitempty"`
 	RunAsGroup           string                   `json:"runAsGroup,omitempty"`
+	SupplementalGroups   []int64                  `json:"supplementalGroups,omitempty"`
 	ReadOnlyRoot         bool                     `json:"readOnlyRoot,omitempty"`
 	Tmpfs                []models.TmpfsMount      `json:"tmpfs,omitempty"`
 	ShmSize              *int64                   `json:"shmSize,omitempty"`
@@ -112,6 +113,9 @@ func FromMicroservice(ms *models.Microservice) Fingerprint {
 	if ms.RunAsGroup != nil {
 		fp.RunAsGroup = strings.TrimSpace(*ms.RunAsGroup)
 	}
+	if len(ms.SupplementalGroups) > 0 {
+		fp.SupplementalGroups = append([]int64(nil), ms.SupplementalGroups...)
+	}
 	return fp
 }
 
@@ -125,6 +129,7 @@ func (f Fingerprint) Empty() bool {
 		len(f.Commands) == 0 &&
 		f.WorkingDir == "" &&
 		f.RunAsGroup == "" &&
+		len(f.SupplementalGroups) == 0 &&
 		!f.ReadOnlyRoot &&
 		len(f.Tmpfs) == 0 &&
 		f.ShmSize == nil &&

@@ -15,6 +15,7 @@ import (
 
 	"github.com/eclipse-iofog/edgelet/internal/auth"
 	"github.com/eclipse-iofog/edgelet/internal/config"
+	"github.com/eclipse-iofog/edgelet/internal/processmanager"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 	"github.com/gorilla/websocket"
 	"github.com/vmihailenco/msgpack/v5"
@@ -453,6 +454,50 @@ func TestExecHandler_readWaitDuration(t *testing.T) {
 	h.isActive.Store(true)
 	if got := h.readWaitDuration(); got != 0 {
 		t.Fatalf("active readWaitDuration = %v, want 0 (disabled)", got)
+	}
+}
+
+func TestParseExecResize(t *testing.T) {
+	cols, rows, ok := parseExecResize([]byte(`{"type":"resize","cols":120,"rows":32}`))
+	if !ok || cols != 120 || rows != 32 {
+		t.Fatalf("parseExecResize() = (%d, %d, %v), want (120, 32, true)", cols, rows, ok)
+	}
+
+	if _, _, ok := parseExecResize([]byte(`{"type":"RESIZE","cols":80,"rows":24}`)); !ok {
+		t.Fatal("expected case-insensitive resize type")
+	}
+
+	cases := []string{
+		`{"type":"resize","cols":1,"rows":24}`,
+		`{"type":"resize","cols":80,"rows":0}`,
+		`{"type":"resize","cols":4097,"rows":24}`,
+		`{"type":"resize","cols":80,"rows":4097}`,
+		"close",
+		"keepalive",
+		`{"type":"keepalive"}`,
+		"",
+	}
+	for _, raw := range cases {
+		if _, _, ok := parseExecResize([]byte(raw)); ok {
+			t.Fatalf("parseExecResize(%q) = ok, want reject", raw)
+		}
+	}
+}
+
+func TestApplyResizeBeforeSessionStarted(t *testing.T) {
+	pm := &processmanager.ProcessManager{}
+	esm := &ExecSessionManager{processManager: pm}
+	handler := &ExecSessionWebSocketHandler{
+		sessionID:          "sess-1",
+		execSessionManager: esm,
+	}
+	if err := handler.applyResize(80, 24); err == nil {
+		t.Fatal("expected resize to wait until the exec session is started")
+	}
+
+	handler.execSessionManager = &ExecSessionManager{}
+	if err := handler.applyResize(80, 24); err == nil {
+		t.Fatal("expected resize to fail when the process manager is unset")
 	}
 }
 

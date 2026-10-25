@@ -17,6 +17,7 @@ formatters:
       - ^\.cursor/
       - ^build/
       - ^vendor/
+      - ^licensegen/
 
 linters:
   default: none
@@ -69,6 +70,7 @@ linters:
       - ^\.cursor/
       - ^build/
       - ^vendor/
+      - ^licensegen/
     presets:
       - comments
       - common-false-positives

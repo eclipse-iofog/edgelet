@@ -58,7 +58,7 @@ Per tag on GitHub **`eclipse-iofog/edgelet`** (override with `EDGELET_GITHUB_REP
 | darwin amd64 / arm64 | `edgelet-darwin-<arch>` |
 | windows amd64 | `edgelet-windows-amd64.exe` |
 
-Also published: `SHA256SUMS`, `edgelet-config.yaml.sample`, `edgelet-controller-ca.crt.sample`, `install.sh`, `uninstall.sh`.
+Also published: `SHA256SUMS`, `edgelet-config.yaml.sample`, `edgelet-controller-ca.crt.sample`, `install.sh`, `uninstall.sh`, `LICENSE-3RD-PARTY.md`, and per-binary `edgelet-<os>-<arch>[.exe].cdx.json` and `.spdx.json` SBOMs. The source-tree inventory is [`SBOM.md`](../../SBOM.md) in the repository.
 
 Download URL pattern:
 

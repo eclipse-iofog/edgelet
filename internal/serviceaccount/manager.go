@@ -92,7 +92,7 @@ func (m *Manager) ReconcileManagedMicroservices(microservices []*models.Microser
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := os.MkdirAll(m.stagingRoot, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(m.stagingRoot, bindMountDirMode); err != nil { // #nosec G301 -- service-account projection dirs must be traversable by non-root containers
 		return fmt.Errorf("failed to create staging root: %w", err)
 	}
 
@@ -297,21 +297,21 @@ func normalizeServiceAccountRules(ms *models.Microservice) models.RBACEnvelopeV1
 }
 
 func (m *Manager) writeProjectionAtomic(projectionDir, token string, caPEM, jwkJSON []byte) error {
-	if err := os.MkdirAll(projectionDir, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(projectionDir, bindMountDirMode); err != nil { // #nosec G301 -- service-account projection dirs must be traversable by non-root containers
 		return fmt.Errorf("failed to create projection dir: %w", err)
 	}
 	versionDir := fmt.Sprintf("..%d", time.Now().UnixNano())
 	versionPath := filepath.Join(projectionDir, versionDir)
-	if err := os.MkdirAll(versionPath, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(versionPath, bindMountDirMode); err != nil { // #nosec G301 -- service-account projection dirs must be traversable by non-root containers
 		return fmt.Errorf("failed to create service-account version dir: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(versionPath, projectionTokenFilename), []byte(token), bindMountFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(versionPath, projectionTokenFilename), []byte(token), bindMountFileMode); err != nil { // #nosec G306 -- projected service-account files are readable inside the container
 		return fmt.Errorf("failed to write service-account token projection: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(versionPath, projectionCAFilename), caPEM, bindMountFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(versionPath, projectionCAFilename), caPEM, bindMountFileMode); err != nil { // #nosec G306 -- projected service-account files are readable inside the container
 		return fmt.Errorf("failed to write service-account ca projection: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(versionPath, projectionSigningJWKFilename), jwkJSON, bindMountFileMode); err != nil {
+	if err := os.WriteFile(filepath.Join(versionPath, projectionSigningJWKFilename), jwkJSON, bindMountFileMode); err != nil { // #nosec G306 -- projected service-account files are readable inside the container
 		return fmt.Errorf("failed to write service-account signing JWK projection: %w", err)
 	}
 	tmpData := filepath.Join(projectionDir, "..data.tmp")

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSchemaV3FixtureUpgradesToV4(t *testing.T) {
+func TestSchemaV3FixtureUpgradesToV5(t *testing.T) {
 	dir := t.TempDir()
 	writeStoreFixtureThrough(t, dir, 3)
 
@@ -16,9 +16,11 @@ func TestSchemaV3FixtureUpgradesToV4(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 4 {
-		t.Fatalf("expected schema version 4 after upgrade, got %d", maxVersion)
+	if maxVersion != 5 {
+		t.Fatalf("expected schema version 5 after upgrade, got %d", maxVersion)
 	}
+	msHeadCols := tableColumns(t, db, "controller_microservices")
+	assertHasColumns(t, "controller_microservices", msHeadCols, []string{"supplemental_groups", "knowledge"})
 
 	for _, table := range []string{"local_knowledge", "controller_knowledge", "knowledge_refs"} {
 		if !tableExists(t, db, table) {
@@ -60,7 +62,7 @@ func TestSchemaV4_KnowledgeTablesExist(t *testing.T) {
 	assertHasColumns(t, "controller_microservices", msCols, []string{"knowledge", "models"})
 }
 
-func TestSchemaVersionIs4(t *testing.T) {
+func TestSchemaVersionIs5(t *testing.T) {
 	entries, err := migrationFiles.ReadDir("migrations")
 	if err != nil {
 		t.Fatalf("read migrations: %v", err)
@@ -73,8 +75,8 @@ func TestSchemaVersionIs4(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse %s: %v", entry.Name(), err)
 		}
-		if version > 4 {
-			t.Fatalf("schema version must stay at 4; found %s", entry.Name())
+		if version > 5 {
+			t.Fatalf("schema version must stay at 5; found %s", entry.Name())
 		}
 	}
 
@@ -83,8 +85,8 @@ func TestSchemaVersionIs4(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 4 {
-		t.Fatalf("expected schema version 4, got %d", maxVersion)
+	if maxVersion != 5 {
+		t.Fatalf("expected schema version 5, got %d", maxVersion)
 	}
 
 	var description string
@@ -95,6 +97,15 @@ func TestSchemaVersionIs4(t *testing.T) {
 	}
 	if description != "004_edgelet_schema_v4.sql" {
 		t.Fatalf("unexpected v4 migration description: %q", description)
+	}
+
+	if err := db.Conn().QueryRow(
+		`SELECT description FROM schema_versions WHERE version = 5`,
+	).Scan(&description); err != nil {
+		t.Fatalf("schema v5 row: %v", err)
+	}
+	if description != "005_edgelet_schema_v5.sql" {
+		t.Fatalf("unexpected v5 migration description: %q", description)
 	}
 
 	if filepath.Base(description) != description {

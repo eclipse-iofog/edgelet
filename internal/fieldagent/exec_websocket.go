@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -29,7 +30,26 @@ const (
 	maxFrameSize                  = 65536
 	maxBufferSize                 = 1024 * 1024 // 1MB
 	maxBufferedFrames             = 1000
+	minExecCols                   = 2
+	maxExecCols                   = 4096
+	minExecRows                   = 1
+	maxExecRows                   = 4096
+	execResizeRetryAttempts       = 25
+	execResizeRetryInterval       = 200 * time.Millisecond
 )
+
+var errExecResizeNotReady = errors.New("exec session is not ready to resize")
+
+type resizeReq struct {
+	cols uint32
+	rows uint32
+}
+
+type execResizeControl struct {
+	Type string `json:"type"`
+	Cols uint32 `json:"cols"`
+	Rows uint32 `json:"rows"`
+}
 
 // ExecMessageType constants
 const (
@@ -80,6 +100,8 @@ type ExecSessionWebSocketHandler struct {
 	controllerTLS      *tls.Config
 	execSessionManager *ExecSessionManager
 	lifecycleMu        sync.Mutex
+	resizeMu           sync.Mutex
+	resizeCh           chan resizeReq
 }
 
 var (
@@ -166,6 +188,9 @@ func (h *ExecSessionWebSocketHandler) resetLocked() {
 	h.isActive.Store(false)
 	h.state.Store(StateDisconnected)
 	drainExecOutputBuffer(h)
+	h.resizeMu.Lock()
+	h.resizeCh = nil
+	h.resizeMu.Unlock()
 	recreateHandlerContext(&h.ctx, &h.cancel)
 }
 
@@ -628,8 +653,27 @@ func (h *ExecSessionWebSocketHandler) handleStdin(data []byte) {
 	}
 }
 
+func parseExecResize(data []byte) (uint32, uint32, bool) {
+	var ctrl execResizeControl
+	if err := json.Unmarshal(data, &ctrl); err != nil {
+		return 0, 0, false
+	}
+	if !strings.EqualFold(strings.TrimSpace(ctrl.Type), "resize") {
+		return 0, 0, false
+	}
+	if ctrl.Cols < minExecCols || ctrl.Cols > maxExecCols || ctrl.Rows < minExecRows || ctrl.Rows > maxExecRows {
+		return 0, 0, false
+	}
+	return ctrl.Cols, ctrl.Rows, true
+}
+
 func (h *ExecSessionWebSocketHandler) handleControl(data []byte) {
 	if data == nil {
+		return
+	}
+
+	if cols, rows, ok := parseExecResize(data); ok {
+		h.requestResize(cols, rows)
 		return
 	}
 
@@ -637,9 +681,116 @@ func (h *ExecSessionWebSocketHandler) handleControl(data []byte) {
 	if controlCmd == "close" {
 		logging.LogInfo(execWebSocketModuleName, fmt.Sprintf("Received close control command for exec session: %s", h.sessionID))
 		h.handleSessionClose()
-	} else {
-		logging.LogWarn(execWebSocketModuleName, fmt.Sprintf("Unknown control command: %s", controlCmd))
+		return
 	}
+
+	logging.LogWarn(execWebSocketModuleName, fmt.Sprintf("Unknown control command: %s", controlCmd))
+}
+
+func (h *ExecSessionWebSocketHandler) requestResize(cols, rows uint32) {
+	h.resizeMu.Lock()
+	ctx := h.ctx
+	if ctx == nil || ctx.Err() != nil {
+		h.resizeMu.Unlock()
+		return
+	}
+	if h.resizeCh == nil {
+		h.resizeCh = make(chan resizeReq, 1)
+		go h.resizeWorker(ctx, h.resizeCh)
+	}
+	ch := h.resizeCh
+	h.resizeMu.Unlock()
+
+	req := resizeReq{cols: cols, rows: rows}
+	select {
+	case ch <- req:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- req:
+	default:
+	}
+}
+
+func (h *ExecSessionWebSocketHandler) resizeWorker(ctx context.Context, ch <-chan resizeReq) {
+	var pending *resizeReq
+	attempts := 0
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
+	schedule := func(delay time.Duration) {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(delay)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case req := <-ch:
+			copied := req
+			pending = &copied
+			attempts = 0
+			schedule(time.Millisecond)
+		case <-timer.C:
+			if pending == nil {
+				continue
+			}
+			err := h.applyResize(pending.cols, pending.rows)
+			if err == nil {
+				pending = nil
+				attempts = 0
+				continue
+			}
+			attempts++
+			if attempts >= execResizeRetryAttempts {
+				logging.LogWarn(execWebSocketModuleName, fmt.Sprintf(
+					"Giving up terminal resize for session %s (%dx%d): %v",
+					h.sessionID, pending.cols, pending.rows, err,
+				))
+				pending = nil
+				attempts = 0
+				continue
+			}
+			schedule(execResizeRetryInterval)
+		}
+	}
+}
+
+func (h *ExecSessionWebSocketHandler) applyResize(cols, rows uint32) error {
+	esm := h.execSessionManager
+	if esm == nil {
+		esm = GetExecSessionManager()
+	}
+	if esm == nil {
+		return errExecResizeNotReady
+	}
+
+	esm.mu.RLock()
+	pm := esm.processManager
+	esm.mu.RUnlock()
+	if pm == nil {
+		return errExecResizeNotReady
+	}
+
+	rec, ok := pm.GetSession(h.sessionID)
+	if !ok || rec == nil || strings.TrimSpace(rec.RuntimeExecID) == "" || !rec.Started {
+		return errExecResizeNotReady
+	}
+	return pm.ResizeExecSession(rec.RuntimeExecID, cols, rows)
 }
 
 func (h *ExecSessionWebSocketHandler) handleActivation(execID string) {

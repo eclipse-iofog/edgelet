@@ -92,7 +92,7 @@ func Project(diskDirectory, msUUID string, catalog *models.KnowledgeCatalog, ite
 		return &ProjectResult{HostDir: hostDir, MountChanged: mountChanged}, nil
 	}
 
-	if err := os.MkdirAll(hostDir, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(hostDir, bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 		return nil, fmt.Errorf("create catalog directory: %w", err)
 	}
 
@@ -139,7 +139,7 @@ func Project(diskDirectory, msUUID string, catalog *models.KnowledgeCatalog, ite
 
 	versionName := newVersionDirName()
 	versionDir := filepath.Join(hostDir, versionName)
-	if err := os.MkdirAll(versionDir, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(versionDir, bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 		return nil, fmt.Errorf("create catalog version directory: %w", err)
 	}
 
@@ -301,12 +301,12 @@ func projectContent(src, dst string) error {
 		return projectContent(resolved, dst)
 	}
 	if !info.IsDir() {
-		if err := os.MkdirAll(filepath.Dir(dst), bindMountDirMode); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 			return err
 		}
 		return linkOrCopyFile(src, dst)
 	}
-	if err := os.MkdirAll(dst, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(dst, bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 		return err
 	}
 	return filepath.Walk(src, func(path string, walkInfo os.FileInfo, walkErr error) error {
@@ -332,17 +332,17 @@ func projectContent(src, dst string) error {
 				return stErr
 			}
 			if st.IsDir() {
-				return os.MkdirAll(target, bindMountDirMode)
+				return os.MkdirAll(target, bindMountDirMode) // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 			}
-			if err := os.MkdirAll(filepath.Dir(target), bindMountDirMode); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 				return err
 			}
 			return linkOrCopyFile(resolved, target)
 		}
 		if walkInfo.IsDir() {
-			return os.MkdirAll(target, bindMountDirMode)
+			return os.MkdirAll(target, bindMountDirMode) // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 		}
-		if err := os.MkdirAll(filepath.Dir(target), bindMountDirMode); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), bindMountDirMode); err != nil { // #nosec G301 -- bind-mount parent must be traversable for non-root containers
 			return err
 		}
 		return linkOrCopyFile(path, target)

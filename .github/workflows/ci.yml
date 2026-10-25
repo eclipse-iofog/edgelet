@@ -17,6 +17,11 @@ on:
       - 'Dockerfile'
       - 'docs/cli/**'
       - '.github/**'
+      - 'SBOM.md'
+      - 'LICENSE-3RD-PARTY.md'
+      - 'sbom.cdx.json'
+      - 'sbom.spdx.json'
+      - 'licensegen/**'
   pull_request:
     branches: [ main, develop, edgelet/** ]
     paths:
@@ -33,6 +38,11 @@ on:
       - 'Dockerfile'
       - 'docs/cli/**'
       - '.github/**'
+      - 'SBOM.md'
+      - 'LICENSE-3RD-PARTY.md'
+      - 'sbom.cdx.json'
+      - 'sbom.spdx.json'
+      - 'licensegen/**'
   workflow_dispatch:
 
 permissions: read-all
@@ -104,7 +114,11 @@ jobs:
       - name: Check formatting
         run: |
           go fmt ./...
+          gofmt -w licensegen/*.go
           git diff --exit-code
+
+      - name: SBOM drift gate
+        run: make sbom-check
 
   embed-ci-amd64:
     name: Embed pipeline amd64

@@ -59,6 +59,9 @@ func BuildMicroserviceFromLocalManifest(doc *LocalDeployManifest, deploymentID, 
 		group := strings.TrimSpace(doc.Spec.Container.RunAsGroup)
 		ms.RunAsGroup = &group
 	}
+	if groups, err := NormalizeSupplementalGroups(doc.Spec.Container.SupplementalGroups); err == nil {
+		ms.SupplementalGroups = groups
+	}
 	if strings.TrimSpace(doc.Spec.Container.WorkingDir) != "" {
 		wd := strings.TrimSpace(doc.Spec.Container.WorkingDir)
 		ms.WorkingDir = &wd
@@ -255,6 +258,7 @@ type localRecreateSnapshot struct {
 	Schedule                 int               `json:"schedule,omitempty"`
 	RunAsUser                string            `json:"runAsUser,omitempty"`
 	RunAsGroup               string            `json:"runAsGroup,omitempty"`
+	SupplementalGroups       []int64           `json:"supplementalGroups,omitempty"`
 	WorkingDir               string            `json:"workingDir,omitempty"`
 	Runtime                  string            `json:"runtime,omitempty"`
 	Platform                 string            `json:"platform,omitempty"`
@@ -317,6 +321,9 @@ func localDeployRecreateSnapshot(ms *Microservice) (string, error) {
 	}
 	snap.RunAsUser = derefTrim(ms.RunAsUser)
 	snap.RunAsGroup = derefTrim(ms.RunAsGroup)
+	if len(ms.SupplementalGroups) > 0 {
+		snap.SupplementalGroups = append([]int64(nil), ms.SupplementalGroups...)
+	}
 	snap.WorkingDir = derefTrim(ms.WorkingDir)
 	snap.Runtime = derefTrim(ms.Runtime)
 	snap.Platform = derefTrim(ms.Platform)

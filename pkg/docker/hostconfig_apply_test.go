@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -151,6 +152,37 @@ func TestApplyWorkloadCreateConfig_ReadOnlyWithoutTmpWarns(t *testing.T) {
 	warnings := applyWorkloadCreateConfig(&container.Config{}, &container.HostConfig{}, ms, "")
 	if len(warnings) != 1 {
 		t.Fatalf("expected read-only /tmp warning, got %v", warnings)
+	}
+}
+
+func TestApplyWorkloadCreateConfig_SupplementalGroups(t *testing.T) {
+	ms := models.NewMicroservice("ms-groups", "alpine:3.19")
+	user := "1000"
+	ms.RunAsUser = &user
+	ms.SupplementalGroups = []int64{44, 993}
+	cfg := &container.Config{}
+	hc := &container.HostConfig{}
+	applyWorkloadCreateConfig(cfg, hc, ms, "")
+	if !slices.Equal(hc.GroupAdd, []string{"44", "993"}) {
+		t.Fatalf("GroupAdd = %v", hc.GroupAdd)
+	}
+	if cfg.User != "1000" {
+		t.Fatalf("user = %q, supplemental groups must stay on GroupAdd", cfg.User)
+	}
+
+	ms.SupplementalGroups = nil
+	hcEmpty := &container.HostConfig{}
+	cfgEmpty := &container.Config{}
+	applyWorkloadCreateConfig(cfgEmpty, hcEmpty, ms, "")
+	if hcEmpty.GroupAdd != nil {
+		t.Fatalf("empty list must leave GroupAdd unset, got %v", hcEmpty.GroupAdd)
+	}
+
+	ms.SupplementalGroups = []int64{}
+	hcBlank := &container.HostConfig{}
+	applyWorkloadCreateConfig(&container.Config{}, hcBlank, ms, "")
+	if hcBlank.GroupAdd != nil {
+		t.Fatalf("empty slice must leave GroupAdd unset, got %v", hcBlank.GroupAdd)
 	}
 }
 

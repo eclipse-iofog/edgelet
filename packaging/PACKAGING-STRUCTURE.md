@@ -23,7 +23,10 @@ No DEB/RPM. Install via **`install.sh`**; remove via **`uninstall.sh`**.
 | `edgelet-linux-{amd64,arm64,arm,riscv64}` | Linux thin binaries |
 | `edgelet-darwin-{amd64,arm64}` | macOS binaries |
 | `edgelet-windows-amd64.exe` | Windows binary |
-| `SHA256SUMS` | Checksums for all of the above + samples |
+| `SHA256SUMS` | Checksums for all of the above + samples + SBOMs |
+| `LICENSE-3RD-PARTY.md` | Third-party license texts |
+| `edgelet-<os>-<arch>[.exe].cdx.json` | CycloneDX SBOM for that binary |
+| `edgelet-<os>-<arch>[.exe].spdx.json` | SPDX SBOM for that binary |
 | `edgelet-config.yaml.sample` | Default config template |
 | `edgelet-controller-ca.crt.sample` | Lab bootstrap CA |
 | `install.sh` / `uninstall.sh` | **Self-contained** on-node lifecycle monoliths (curl-safe; no sibling helper tree) |

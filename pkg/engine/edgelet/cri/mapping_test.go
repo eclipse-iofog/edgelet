@@ -3,6 +3,7 @@
 package cri
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/eclipse-iofog/edgelet/internal/containerapply"
@@ -191,6 +192,40 @@ func TestContainerConfigFromMicroservice_OmitEntrypointCommands(t *testing.T) {
 	}
 	if len(cfg.Args) != 0 {
 		t.Fatalf("empty commands must not set Args, got %v", cfg.Args)
+	}
+}
+
+func TestContainerConfigFromMicroservice_SupplementalGroups(t *testing.T) {
+	ms := models.NewMicroservice("ms-groups", "docker.io/library/alpine:3.19")
+	ms.SupplementalGroups = []int64{44, 993}
+	cfg, err := ContainerConfigFromMicroservice(ms, "host", nil, "0.log", "", "", "sandbox-groups", "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := cfg.Linux.SecurityContext
+	if !slices.Equal(sec.SupplementalGroups, []int64{44, 993}) {
+		t.Fatalf("supplementalGroups = %v", sec.SupplementalGroups)
+	}
+	if sec.RunAsUser != nil || sec.RunAsUsername != "" {
+		t.Fatalf("supplemental groups must not require a run-as user, got user=%+v username=%q", sec.RunAsUser, sec.RunAsUsername)
+	}
+
+	ms.SupplementalGroups = nil
+	empty, err := ContainerConfigFromMicroservice(ms, "host", nil, "0.log", "", "", "sandbox-groups", "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Linux.SecurityContext.SupplementalGroups != nil {
+		t.Fatalf("empty list must leave SupplementalGroups unset, got %v", empty.Linux.SecurityContext.SupplementalGroups)
+	}
+
+	ms.SupplementalGroups = []int64{}
+	blank, err := ContainerConfigFromMicroservice(ms, "host", nil, "0.log", "", "", "sandbox-groups", "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blank.Linux.SecurityContext.SupplementalGroups != nil {
+		t.Fatalf("empty slice must leave SupplementalGroups unset, got %v", blank.Linux.SecurityContext.SupplementalGroups)
 	}
 }
 

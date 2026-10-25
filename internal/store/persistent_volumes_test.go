@@ -33,6 +33,7 @@ func writeStoreFixtureThrough(t *testing.T, dir string, maxVersion int) {
 		"001_edgelet_schema_v1.sql",
 		"002_edgelet_schema_v2.sql",
 		"003_edgelet_schema_v3.sql",
+		"004_edgelet_schema_v4.sql",
 	}
 	if maxVersion < 1 || maxVersion > len(files) {
 		t.Fatalf("unsupported fixture version %d", maxVersion)
@@ -97,9 +98,11 @@ func TestPersistentVolumeSchemaV2FixtureUpgradesToV3(t *testing.T) {
 	if err := db.Conn().QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_versions`).Scan(&maxVersion); err != nil {
 		t.Fatalf("schema version: %v", err)
 	}
-	if maxVersion != 4 {
-		t.Fatalf("expected schema version 4, got %d", maxVersion)
+	if maxVersion != 5 {
+		t.Fatalf("expected schema version 5, got %d", maxVersion)
 	}
+	msCols := tableColumns(t, db, "controller_microservices")
+	assertHasColumns(t, "controller_microservices", msCols, []string{"supplemental_groups"})
 	if !tableExists(t, db, "persistent_volumes") {
 		t.Fatal("expected persistent_volumes table")
 	}

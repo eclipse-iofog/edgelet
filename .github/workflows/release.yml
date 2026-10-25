@@ -76,13 +76,21 @@ jobs:
             ARCH=${{ matrix.arch }} ./scripts/package-data
           fi
           ARCH=${{ matrix.arch }} ./scripts/build-edgelet
+          (cd licensegen && go run . -root .. -release \
+            -binary "../build/edgelet-linux-${{ matrix.arch }}" \
+            -stage ../build/stage \
+            -version "${VERSION}" \
+            -out ../build)
           ARCH=${{ matrix.arch }} ./scripts/binary_size_check.sh
           test -f "build/edgelet-linux-${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: edgelet-linux-${{ matrix.arch }}
-          path: build/edgelet-linux-${{ matrix.arch }}
+          path: |
+            build/edgelet-linux-${{ matrix.arch }}
+            build/edgelet-linux-${{ matrix.arch }}.cdx.json
+            build/edgelet-linux-${{ matrix.arch }}.spdx.json
           if-no-files-found: error
 
   build-desktop:
@@ -133,11 +141,18 @@ jobs:
             -ldflags "${LDFLAGS}" \
             -o "${{ matrix.out }}" ./cmd/edgelet
           test -f "${{ matrix.out }}"
+          (cd licensegen && go run . -root .. -release \
+            -binary "../${{ matrix.out }}" \
+            -version "${VERSION}" \
+            -out ../build)
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: edgelet-${{ matrix.id }}
-          path: ${{ matrix.out }}
+          path: |
+            ${{ matrix.out }}
+            ${{ matrix.out }}.cdx.json
+            ${{ matrix.out }}.spdx.json
           if-no-files-found: error
 
   package:
@@ -175,7 +190,7 @@ jobs:
           (
             cd dist
             sha256sum edgelet-* edgelet-config.yaml.sample edgelet-controller-ca.crt.sample \
-              install.sh uninstall.sh > SHA256SUMS
+              install.sh uninstall.sh LICENSE-3RD-PARTY.md > SHA256SUMS
           )
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -238,7 +253,7 @@ jobs:
             '' \
             '## Downloads' \
             '' \
-            'Raw binaries, `SHA256SUMS`, sample config/CA, and install scripts — no tarballs or DEB/RPM packages.' \
+            'Raw binaries, per-binary CycloneDX and SPDX SBOMs, `LICENSE-3RD-PARTY.md`, `SHA256SUMS`, sample config/CA, and install scripts — no tarballs or DEB/RPM packages.' \
             '' \
             '### Binaries' \
             '- `edgelet-linux-amd64`, `edgelet-linux-arm64`, `edgelet-linux-arm`, `edgelet-linux-riscv64`' \

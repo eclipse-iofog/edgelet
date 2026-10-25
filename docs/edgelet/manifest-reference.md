@@ -109,7 +109,8 @@ Local deploy binds **local** Knowledge only. The start gate waits for every name
 | `hostNetworkMode` | bool | Host network — disables bridge DNS |
 | `isPrivileged` | bool | Privileged container |
 | `runAsUser` | string | User ID or name. Must not contain `:` when `runAsGroup` is set |
-| `runAsGroup` | string | Group ID or name (separate from `runAsUser`) |
+| `runAsGroup` | string | Group ID or name (separate from `runAsUser`). Stays the primary group |
+| `supplementalGroups` | []int | YAML integers. At most **16** unique numeric **host** group IDs. Names are rejected. Controller JSON uses the same name on the microservice object, not nested under `container` |
 | `readOnlyRootFilesystem` | bool | Applied. Edgelet does not auto-inject `/tmp`; add a `tmpfs` at `/tmp` if the image needs it |
 | `runtime` | string | OCI runtime name (embed engine + RuntimeClass) |
 | `cdiDevices` | []string | CDI device IDs (GPU, etc.); see [container-engine.md](container-engine.md#cdi-devices-gpu--accelerators) |
@@ -137,6 +138,10 @@ Local deploy binds **local** Knowledge only. The start gate waits for every name
 | `healthCheck` | object | **Applied.** `test` argv; `interval`, `timeout`, `startPeriod`, `retries` in **seconds** |
 
 There is no per-microservice `stopSignal`. The image STOPSIGNAL and engine default SIGTERM apply.
+
+#### Supplemental groups
+
+`supplementalGroups` is a list of numeric group IDs from the host. A non-root process uses it to join the group that owns a device node. Group names are not accepted. The number has to be the host group, not the group of the same name inside the image. `runAsGroup` is still the primary group. Leaving the field out changes nothing. Changing the list recreates that workload so the new groups apply. A controller that does not send the field leaves the list empty.
 
 #### Volume `scope`
 

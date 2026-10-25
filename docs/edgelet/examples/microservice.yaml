@@ -49,6 +49,8 @@ spec:
     isPrivileged: false          # optional — privileged container
     runAsUser: "0"               # optional — UID or username (do not use uid:gid when runAsGroup is set)
     runAsGroup: "0"              # optional — GID or group name
+    # supplementalGroups:        # numeric host GIDs, for a device group such as a render node
+    #   - 993
     readOnlyRootFilesystem: false # optional — true = read-only root; add a /tmp tmpfs if the image needs it
 
     ipcMode: ""                  # optional — e.g. host, shareable, container:<id>

@@ -247,6 +247,9 @@ func ContainerConfigFromMicroservice(ms *models.Microservice, hostname string, e
 			secCtx.RunAsGroup = &runtimeapi.Int64Value{Value: gid}
 		}
 	}
+	if len(ms.SupplementalGroups) > 0 {
+		secCtx.SupplementalGroups = append([]int64(nil), ms.SupplementalGroups...)
+	}
 	secCtx.ReadonlyRootfs = ms.ReadOnlyRootFilesystem
 
 	secCtx.NamespaceOptions = linuxNamespaceOptionsFromMicroservice(ms)

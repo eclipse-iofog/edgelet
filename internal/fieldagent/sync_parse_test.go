@@ -165,6 +165,79 @@ func TestParseMicroservice_CatalogAndUnknownKeysIgnored(t *testing.T) {
 	}
 }
 
+func TestParseMicroservice_SupplementalGroupsSorted(t *testing.T) {
+	ms, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-groups",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{float64(44), float64(993)},
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(ms.SupplementalGroups) != 2 || ms.SupplementalGroups[0] != 44 || ms.SupplementalGroups[1] != 993 {
+		t.Fatalf("groups=%v", ms.SupplementalGroups)
+	}
+
+	reversed, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-groups-rev",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{float64(993), float64(44)},
+	})
+	if err != nil {
+		t.Fatalf("parse reversed: %v", err)
+	}
+	if len(reversed.SupplementalGroups) != 2 || reversed.SupplementalGroups[0] != 44 || reversed.SupplementalGroups[1] != 993 {
+		t.Fatalf("reversed groups=%v", reversed.SupplementalGroups)
+	}
+
+	omitted, err := parseMicroservice(map[string]any{
+		"uuid":    "ms-omit",
+		"imageId": "alpine:3.19",
+	})
+	if err != nil {
+		t.Fatalf("parse omitted: %v", err)
+	}
+	if len(omitted.SupplementalGroups) != 0 {
+		t.Fatalf("omitted groups=%v", omitted.SupplementalGroups)
+	}
+}
+
+func TestParseMicroservice_SupplementalGroupsNumbers(t *testing.T) {
+	whole, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-whole",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{float64(44)},
+	})
+	if err != nil {
+		t.Fatalf("parse 44.0: %v", err)
+	}
+	if len(whole.SupplementalGroups) != 1 || whole.SupplementalGroups[0] != 44 {
+		t.Fatalf("groups=%v", whole.SupplementalGroups)
+	}
+
+	if _, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-fraction",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{44.5},
+	}); err == nil {
+		t.Fatal("expected 44.5 to be rejected")
+	}
+	if _, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-string-number",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{"44"},
+	}); err == nil {
+		t.Fatal(`expected "44" to be rejected`)
+	}
+	if _, err := parseMicroservice(map[string]any{
+		"uuid":               "ms-name",
+		"imageId":            "alpine:3.19",
+		"supplementalGroups": []any{"render"},
+	}); err == nil {
+		t.Fatal(`expected "render" to be rejected`)
+	}
+}
+
 func TestParseMicroservice_VolumeScope(t *testing.T) {
 	ms, err := parseMicroservice(map[string]any{
 		"uuid":    "ms-vol",

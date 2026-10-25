@@ -33,6 +33,7 @@ type LocalDeployManifest struct {
 			PidMode                string            `yaml:"pidMode,omitempty" json:"pidMode,omitempty"`
 			RunAsUser              string            `yaml:"runAsUser,omitempty" json:"runAsUser,omitempty"`
 			RunAsGroup             string            `yaml:"runAsGroup,omitempty" json:"runAsGroup,omitempty"`
+			SupplementalGroups     []any             `yaml:"supplementalGroups,omitempty" json:"supplementalGroups,omitempty"`
 			ReadOnlyRootFilesystem bool              `yaml:"readOnlyRootFilesystem,omitempty" json:"readOnlyRootFilesystem,omitempty"`
 			Platform               string            `yaml:"platform,omitempty" json:"platform,omitempty"`
 			Runtime                string            `yaml:"runtime,omitempty" json:"runtime,omitempty"`

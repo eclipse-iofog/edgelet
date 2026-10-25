@@ -288,6 +288,42 @@ func TestLocalDeployNeedsRecreate_KnowledgeCatalogItemsOnly(t *testing.T) {
 	}
 }
 
+func TestLocalRecreateSnapshotIncludesSupplementalGroups(t *testing.T) {
+	doc := validLocalDeployManifestForTest("groups")
+	doc.Spec.Container.SupplementalGroups = []any{993, 44}
+	ms := BuildMicroserviceFromLocalManifest(doc, "dep-1", "nginx:latest")
+	raw, err := localDeployRecreateSnapshot(ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap localRecreateSnapshot
+	if err := json.Unmarshal([]byte(raw), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.SupplementalGroups) != 2 || snap.SupplementalGroups[0] != 44 || snap.SupplementalGroups[1] != 993 {
+		t.Fatalf("supplementalGroups = %v", snap.SupplementalGroups)
+	}
+
+	bare := BuildMicroserviceFromLocalManifest(validLocalDeployManifestForTest("groups"), "dep-1", "nginx:latest")
+	emptyRaw, err := localDeployRecreateSnapshot(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(emptyRaw, "supplementalGroups") {
+		t.Fatalf("empty list must stay out of the snapshot: %s", emptyRaw)
+	}
+	if !LocalDeployNeedsRecreate(bare, ms) {
+		t.Fatal("adding supplemental groups must recreate")
+	}
+
+	one := validLocalDeployManifestForTest("groups")
+	one.Spec.Container.SupplementalGroups = []any{44}
+	narrower := BuildMicroserviceFromLocalManifest(one, "dep-1", "nginx:latest")
+	if !LocalDeployNeedsRecreate(narrower, ms) {
+		t.Fatal("changing the supplemental group list must recreate")
+	}
+}
+
 func TestLocalDeployNeedsRecreate_ImageChange(t *testing.T) {
 	prev := BuildMicroserviceFromLocalManifest(validLocalDeployManifestForTest("img"), "dep-1", "nginx:1")
 	next := BuildMicroserviceFromLocalManifest(validLocalDeployManifestForTest("img"), "dep-1", "nginx:2")

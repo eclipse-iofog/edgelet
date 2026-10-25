@@ -3,6 +3,7 @@ package docker
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/eclipse-iofog/edgelet/internal/containerapply"
@@ -31,6 +32,12 @@ func applyWorkloadCreateConfig(config *container.Config, hostConfig *container.H
 
 	if user := containerapply.DockerUser(ms.RunAsUser, ms.RunAsGroup); user != "" {
 		config.User = user
+	}
+	if len(ms.SupplementalGroups) > 0 {
+		hostConfig.GroupAdd = make([]string, len(ms.SupplementalGroups))
+		for i, gid := range ms.SupplementalGroups {
+			hostConfig.GroupAdd[i] = strconv.FormatInt(gid, 10)
+		}
 	}
 
 	hostConfig.ReadonlyRootfs = ms.ReadOnlyRootFilesystem

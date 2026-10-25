@@ -535,7 +535,7 @@ func copyVersionedDirRecursively(src, dst string, fileMode os.FileMode) error {
 		targetPath := filepath.Join(dst, relPath)
 
 		if info.IsDir() {
-			return os.MkdirAll(targetPath, bindMountDirMode)
+			return os.MkdirAll(targetPath, bindMountDirMode) // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 		}
 
 		data, err := os.ReadFile(path) // #nosec G304,G122 -- path is from filepath.Walk over a known system directory
@@ -543,7 +543,7 @@ func copyVersionedDirRecursively(src, dst string, fileMode os.FileMode) error {
 			return err
 		}
 
-		if err := os.MkdirAll(filepath.Dir(targetPath), bindMountDirMode); err != nil {
+		if err := os.MkdirAll(filepath.Dir(targetPath), bindMountDirMode); err != nil { // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 			return err
 		}
 
@@ -577,7 +577,7 @@ func createKeySymlinksRecursively(mountPath, versionedDir string) error {
 
 		symlinkPath := filepath.Join(mountPath, relPath)
 		// Bind-mount dirs need 0755 for non-root container traversal
-		symlinkDirErr := os.MkdirAll(filepath.Dir(symlinkPath), bindMountDirMode)
+		symlinkDirErr := os.MkdirAll(filepath.Dir(symlinkPath), bindMountDirMode) // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 		if symlinkDirErr != nil {
 			return symlinkDirErr
 		}
@@ -1011,7 +1011,7 @@ func (vmm *VolumeMountManager) PrepareMicroserviceVolumeMount(microserviceUUID, 
 
 	// Atomic directory creation (handles race conditions)
 	// Bind-mount targets use 0755 so non-root container processes can traverse
-	if err := os.MkdirAll(mountPath, bindMountDirMode); err != nil {
+	if err := os.MkdirAll(mountPath, bindMountDirMode); err != nil { // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 		logging.LogWarn(moduleName, fmt.Sprintf("Error creating microservice mount directory: %v", err))
 		return mountPath // Return path anyway
 	}
@@ -1427,7 +1427,7 @@ func (vmm *VolumeMountManager) ResolveHostPath(microserviceUUID, hostDestination
 		}
 		_, statErr := os.Stat(dir)
 		created := os.IsNotExist(statErr)
-		mkdirErr := os.MkdirAll(dir, bindMountDirMode)
+		mkdirErr := os.MkdirAll(dir, bindMountDirMode) // #nosec G301 -- bind-mount targets must be world-traversable for non-root uid
 		if mkdirErr != nil {
 			logging.LogWarn(moduleName, fmt.Sprintf("cannot create volume dir %s: %v", dir, mkdirErr))
 			created = false

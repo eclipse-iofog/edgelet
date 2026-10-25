@@ -27,6 +27,7 @@
 | Entrypoint / commands (omit or `[]` = image default) | ContainerConfig.Command / Args | DONE |
 | WorkingDir | ContainerConfig.WorkingDir | DONE |
 | RunAsGroup | LinuxContainerSecurityContext.RunAsGroup | DONE |
+| SupplementalGroups | LinuxContainerSecurityContext.SupplementalGroups | DONE |
 | ReadOnlyRootFilesystem | LinuxContainerSecurityContext.ReadonlyRootfs | DONE |
 | Tmpfs | Host tmpfs + CRI bind mount | DONE |
 | ShmSize | Sized host tmpfs bind at `/dev/shm` | DONE |
