@@ -27,7 +27,16 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	// go mod download records zip sums for every module in the build list,
+	// including modules no package imports. Those sums are not part of the
+	// SBOM output, and committing them makes OSV-Scanner report the modules.
+	sumBefore, sumErr := os.ReadFile(filepath.Join(repo, "go.sum"))
 	comps, subject, err := buildInventory(repo)
+	if sumErr == nil {
+		if werr := os.WriteFile(filepath.Join(repo, "go.sum"), sumBefore, 0o644); werr != nil && err == nil {
+			err = werr
+		}
+	}
 	if err != nil {
 		fail(err)
 	}
@@ -55,11 +64,14 @@ func main() {
 }
 
 func rootDocuments(subject Component, comps []Component) (map[string][]byte, error) {
-	cdx, err := renderCDX(subject, comps)
+	// OSV-Scanner matches every purl in the JSON files and does not read CycloneDX scope.
+	// SBOM.md and the license notices keep the full inventory.
+	published := publishedComponents(comps)
+	cdx, err := renderCDX(subject, published)
 	if err != nil {
 		return nil, err
 	}
-	spdx, err := renderSPDX(subject, comps)
+	spdx, err := renderSPDX(subject, published)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +81,21 @@ func rootDocuments(subject Component, comps []Component) (map[string][]byte, err
 		"sbom.cdx.json":        cdx,
 		"sbom.spdx.json":       spdx,
 	}, nil
+}
+
+// publishedComponents is the inventory written to sbom.cdx.json and sbom.spdx.json.
+// Excluded modules are not compiled into a shipped binary. Contained programs with
+// no version of their own, such as util-linux inside the pinned k3s-root tarball,
+// match upstream advisories by package name.
+func publishedComponents(comps []Component) []Component {
+	out := make([]Component, 0, len(comps))
+	for _, c := range comps {
+		if c.Scope == scopeExcluded || c.Version == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func writeRelease(comps []Component, binary, stage, version, outDir string) error {
