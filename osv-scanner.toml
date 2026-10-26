@@ -1,0 +1,5 @@
+# Scorecard / OSV presence scan only. govulncheck already reports no reachable use.
+# GO-2026-5932 is golang.org/x/crypto/openpgp (all versions, no fixed release).
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "edgelet requires golang.org/x/crypto but does not import golang.org/x/crypto/openpgp; govulncheck reports no call-path finding and the advisory has no fixed version"
