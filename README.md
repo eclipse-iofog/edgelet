@@ -10,6 +10,8 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13141/badge)](https://www.bestpractices.dev/en/projects/13141)
 [![codecov](https://img.shields.io/badge/codecov-post--beta-lightgrey)](https://codecov.io/gh/eclipse-iofog/edgelet)
 
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/eclipse-iofog/edgelet/total?logo=github)
+
 [![Linux amd64](https://img.shields.io/badge/linux--amd64-supported-2ea44f?style=flat&logo=linux&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
 [![Linux arm64](https://img.shields.io/badge/linux--arm64-supported-2ea44f?style=flat&logo=linux&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
 [![Linux armv7](https://img.shields.io/badge/linux--armv7-supported-2ea44f?style=flat&logo=linux&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
@@ -20,6 +22,8 @@
 [![macOS arm64](https://img.shields.io/badge/macos--arm64-supported-2ea44f?style=flat&logo=apple&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
 [![macOS amd64](https://img.shields.io/badge/macos--amd64-supported-2ea44f?style=flat&logo=apple&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
 [![Windows amd64](https://img.shields.io/badge/windows--amd64-supported-2ea44f?style=flat&logo=windows&logoColor=white)](https://github.com/eclipse-iofog/edgelet/releases)
+
+
 
 **Upstream:** [eclipse-iofog/edgelet](https://github.com/eclipse-iofog/edgelet) · **Datasance distribution:** [Datasance/edgelet](https://github.com/Datasance/edgelet)
 
@@ -137,7 +141,7 @@ RELEASE_FRESH_CI_IMAGE=1 ./test/release/build-all.sh
 
 ```bash
 make build-desktop-darwin build-desktop-windows
-scripts/release-binaries.sh v1.1.2
+scripts/release-binaries.sh v1.1.3
 ```
 
 Local / single-target builds:
@@ -149,7 +153,7 @@ make deps                     # embed pipeline before linux thin build
 make build-linux-amd64        # deps + thin for amd64
 make build-linux-arm64        # deps + thin for arm64
 make build-desktop-darwin     # darwin monolithic
-make release-binaries VERSION=v1.1.2
+make release-binaries VERSION=v1.1.3
 ```
 
 ## Testing
@@ -185,18 +189,18 @@ Identical builds and tags; choose the channel that matches your fleet docs. Over
 ### Eclipse (canonical)
 
 ```bash
-curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.2/install.sh -o install.sh
+curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.3/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.2
+sudo ./install.sh --version=v1.1.3
 # dev / CI: sudo ./install.sh --bin-path=build/edgelet-linux-amd64 --version=dev
 ```
 
 ### Datasance mirror
 
 ```bash
-curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.2/install.sh -o install.sh
+curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.3/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.2
+sudo ./install.sh --version=v1.1.3
 ```
 
 Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), a CycloneDX and SPDX SBOM beside each binary, `LICENSE-3RD-PARTY.md`, `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples. The source-tree inventory is `SBOM.md` at the repository root.
