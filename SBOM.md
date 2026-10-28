@@ -101,7 +101,7 @@ Required 169, optional 0, excluded 223.
 | github.com/k3s-io/containerd/v2 | v2.3.2-k3s2 | Apache-2.0 | linux-fat |
 | containerd-shim-runc-v2 | v2.3.2-k3s2 | Apache-2.0 | linux |
 | github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api | v1.36.2-k3s2 | Apache-2.0 | linux-fat |
-| github.com/klauspost/compress | v1.20.1 | Apache-2.0 OR BSD-3-Clause OR MIT | linux-fat, linux-thin |
+| github.com/klauspost/compress | v1.20.3 | Apache-2.0 OR BSD-3-Clause OR MIT | linux-fat, linux-thin |
 | github.com/knqyf263/go-plugin | v0.9.0 | MIT | linux-fat |
 | github.com/mattn/go-colorable | v0.1.2 | MIT | darwin, linux-thin, windows |
 | github.com/mattn/go-isatty | v0.0.24 | MIT | darwin, linux-thin, windows |
@@ -163,13 +163,13 @@ Required 169, optional 0, excluded 223.
 | go.opentelemetry.io/otel | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
 | go.yaml.in/yaml/v2 | v2.4.3 | Apache-2.0 | linux-fat |
 | go.yaml.in/yaml/v3 | v3.0.5 | Apache-2.0 OR MIT | darwin, linux-fat, linux-thin, windows |
-| golang.org/x/crypto | v0.57.0 | BSD-3-Clause | darwin, linux-fat, windows |
+| golang.org/x/crypto | v0.58.0 | BSD-3-Clause | darwin, linux-fat, windows |
 | golang.org/x/mod | v0.41.0 | BSD-3-Clause | linux-fat |
-| golang.org/x/net | v0.60.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
-| golang.org/x/sync | v0.23.0 | BSD-3-Clause | darwin, linux-fat, windows |
+| golang.org/x/net | v0.62.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
+| golang.org/x/sync | v0.24.0 | BSD-3-Clause | darwin, linux-fat, windows |
 | golang.org/x/sys | v0.49.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
 | golang.org/x/term | v0.47.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
-| golang.org/x/text | v0.42.0 | BSD-3-Clause | linux-fat |
+| golang.org/x/text | v0.43.0 | BSD-3-Clause | linux-fat |
 | golang.org/x/time | v0.15.0 | BSD-3-Clause | linux-fat |
 | google.golang.org/genproto/googleapis/rpc | v0.0.0-20260706201446-f0a921348800 | Apache-2.0 | linux-fat |
 | google.golang.org/grpc | v1.83.2 | Apache-2.0 | linux-fat |
@@ -187,7 +187,7 @@ Required 169, optional 0, excluded 223.
 | modernc.org/mathutil | v1.7.1 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/memory | v1.12.1 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/sqlite | v1.60.1 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
-| oras.land/oras-go/v2 | v2.6.2 | Apache-2.0 | darwin, linux-fat, windows |
+| oras.land/oras-go/v2 | v2.7.0 | Apache-2.0 | darwin, linux-fat, windows |
 | sigs.k8s.io/json | v0.0.0-20250730193827-2d320260d730 | Apache-2.0 OR BSD-3-Clause | linux-fat |
 | sigs.k8s.io/yaml | v1.6.0 | Apache-2.0 OR BSD-3-Clause OR MIT | linux-fat |
 | tags.cncf.io/container-device-interface/specs-go | v1.1.0 | Apache-2.0 | linux-fat |
@@ -390,7 +390,7 @@ Required 169, optional 0, excluded 223.
 | golang.org/x/lint | v0.0.0-20190313153728-d0100b6bd8b3 | BSD-3-Clause | — |
 | golang.org/x/oauth2 | v0.36.0 | BSD-3-Clause | — |
 | golang.org/x/telemetry | v0.0.0-20240228155512-f48c80bd79b2 | BSD-3-Clause | — |
-| golang.org/x/tools | v0.50.0 | BSD-3-Clause | — |
+| golang.org/x/tools | v0.51.0 | BSD-3-Clause | — |
 | golang.org/x/xerrors | v0.0.0-20200804184101-5ec99f83aff1 | BSD-3-Clause | — |
 | gonum.org/v1/gonum | v0.17.0 | BSD-3-Clause | — |
 | google.golang.org/appengine | v1.6.8 | Apache-2.0 | — |

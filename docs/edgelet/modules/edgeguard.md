@@ -71,9 +71,11 @@ Comparison uses `auth.EdgeGuardHashFromJWT()` on the stored JWT vs newly compute
 
 ## What counts as a hardware change
 
-A hardware change is any difference in the canonical fingerprint JSON. Edge Guard lowercases and trims strings, sorts device lists, then SHA-256 hashes that JSON. The stored Edge Guard JWT is compared by its `hash` claim. A new JWT whose only changes are `iat`, `exp`, or `jti` is not a hardware change.
+A hardware change is a difference in the identity fingerprint. Edge Guard lowercases and trims strings, sorts device lists, then SHA-256 hashes that JSON. The stored Edge Guard JWT is compared by its `hash` claim. A new JWT whose only changes are `iat`, `exp`, or `jti` is not a hardware change.
 
-The next attestation tick that samples a different hash sets daemon status to `WARNING`, sets `warningMessage` to `HW signature changed` (20 characters), `PUT`s that status to the controller, then deprovisions. `securityViolationInfo` is not sent by Edgelet. The controller builds that field from the warning.
+The identity hash does not include NIC link state or the TPM PCR file. Link state is stored separately as a `links` claim on the same JWT and is the lock taken when the baseline was stored. A stored JWT with no `links` claim is re-baselined on the next check and does not deprovision.
+
+An identity-hash mismatch, a new or removed MAC, a USB change, or a locked-down port becoming up sets daemon status to `WARNING`, sets `warningMessage` to `HW signature changed` (20 characters), `PUT`s that status to the controller, then deprovisions. `securityViolationInfo` is not sent by Edgelet. The controller builds that field from the warning.
 
 ### Fields that change the hash
 
@@ -86,9 +88,9 @@ The next attestation tick that samples a different hash sets daemon status to `W
 | PCI | Slot, class, vendor, device, subsystem vendor, subsystem device | Card added, removed, or moved to another slot |
 | GPU | Derived from PCI class `0x03` | Follows the PCI list |
 | Root disk | Device path, serial, WWN, model | Root disk replaced or the root device path changed |
-| NICs | Name, MAC, link state | See below |
+| NICs | Name and MAC. Link state is the separate lock below. | Adapter added or removed |
 | USB | Bus path, vendor, product, manufacturer, product name, serial | Plug, unplug, or a different port. USB hubs are skipped. |
-| Optional | Memory-module locator, serial, part number; secure boot; TPM present, EK hash, PCR hash; board serial; `/etc/machine-id` | DIMM, secure-boot, TPM, or machine-id change |
+| Optional | Memory-module locator, serial, part number; secure boot; TPM present and EK hash; board serial; `/etc/machine-id` | DIMM, secure-boot, TPM identity, or machine-id change. The PCR file hash is not part of the identity hash. |
 | ARM only | Device-tree model, compatible, serial | Board identity on arm and arm64 |
 
 Empty DMI placeholders (`none`, `not specified`, `not available`, `unknown`, `to be filled by o.e.m.`) are omitted before hashing.
@@ -103,19 +105,28 @@ Linux link state is `/sys/class/net/<iface>/carrier`. Edge Guard stores one of t
 | `0` | Interface is administratively up and the PHY has no carrier |
 | `unknown` | `carrier` could not be read, which is what Linux returns when the interface is administratively down |
 
-`1`, `0`, and `unknown` are different hashes. IP addresses, routes, and whether packets flow are not part of the fingerprint.
+IP addresses, routes, and whether packets flow are not part of the fingerprint.
 
 Included interfaces are those with a real MAC whose names start with `eth`, `en`, `em`, `eno`, `ens`, `enp`, `wlan`, `wlp`, or `wwan`. That includes USB Ethernet names such as `enx*`. Ignored names start with `lo`, `docker`, `br-`, `veth`, `virbr`, `tun`, `tap`, `vmnet`, `vnet`, `cni`, `flannel`, or `cali`.
 
-Any included NIC moving between `1`, `0`, and `unknown` deprovisions the agent if an attestation tick samples the new value. A short flap is invisible when the tick falls outside it.
+The lock is the link state stored when the baseline was taken. It is not rewritten when carrier drops, so the link coming back is not a new cable.
 
-**Ethernet cabled to a modem.** A direct cable into a modem that is powered off drops carrier from `1` to `0` while the host interface stays up. A switch left powered between the host and the modem keeps the host link up, so shutting the modem down does not change `linkState`.
+| Locked state | Live state | Result |
+|---|---|---|
+| `0` or `unknown` | `1` | Deprovision |
+| `1` | `0` or `unknown` | Local log only. The node stays provisioned. |
+| `0` | `unknown`, or the reverse | No deprovision |
+| any | same | No deprovision |
 
-**USB modem.** The hashed link is the USB-Ethernet connection to the modem, not the cellular session inside it. Powering the modem off removes the interface or moves it to `unknown`. Losing cellular data while the stick stays plugged in and enumerated leaves `linkState` unchanged.
+A downward change is logged once per transition for the life of the process. It does not set `warningMessage` and does not `POST` status. A restart may log one more line if the link is still down.
 
-**Wi-Fi (`wlp*`, `wlan*`).** Losing association (access point gone, radio off, out of range) normally moves carrier from `1` to `0`. Staying associated while only the upstream path dies leaves `linkState` at `1`.
+**Ethernet cabled to a modem.** A direct cable into a modem that is powered off moves a locked-up port from `1` to `0` or `unknown` while the host interface stays in the baseline. The node stays provisioned. A switch left powered between the host and the modem keeps the host link up, so shutting the modem down does not change `linkState`. Plugging a cable into a port that was locked down (`0` or `unknown` to `1`) deprovisions.
 
-**WWAN (`wwan*`).** When the driver ties carrier to the data session, a session drop changes the hash. Bringing the interface down is stored as `unknown`, which also changes the hash. An interface that stays up with carrier while packets stop does not change `linkState`.
+**USB modem.** The hashed identity is the adapter name and MAC, not the cellular session inside the modem. Unplugging the stick removes that NIC and deprovisions. Losing cellular data while the stick stays plugged in and enumerated leaves the MAC in place. If that port was locked up, carrier loss only logs. If it was locked down, carrier becoming `1` deprovisions.
+
+**Wi-Fi (`wlp*`, `wlan*`).** Losing association normally moves carrier from `1` to `0` or `unknown` and does not deprovision when the port was locked up. Staying associated while only the upstream path dies leaves `linkState` at `1`.
+
+**WWAN (`wwan*`).** A session drop that only changes carrier on an already locked-up interface does not deprovision. The interface disappearing, or a locked-down interface becoming `1`, does.
 
 ## Configuration
 
@@ -151,7 +162,7 @@ No direct HTTP. Side effects:
 
 | Symptom | Typical cause |
 |---------|----------------|
-| Unexpected deprovision | Hardware change; NIC link flap (`1` / `0` / `unknown`); USB plug or unplug; TPM PCR change; VM migration; fingerprint source drift |
+| Unexpected deprovision | Hardware change; locked-down port becoming up; USB plug or unplug; new or removed NIC; VM migration; fingerprint source drift |
 | Attestation skipped | Frequency 0 or unprovisioned |
 | Start error | DB signature load failure on enabled config |
 

@@ -112,6 +112,54 @@ func (p *ProcessManagerStatus) SetMicroserviceStatusWait(microserviceUUID, messa
 	return p
 }
 
+// SetImagePullMiss records a registry failure beside the real runtime state.
+// restartCount is left unchanged.
+func (p *ProcessManagerStatus) SetImagePullMiss(microserviceUUID string, state MicroserviceState, message string) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	status := p.MicroservicesStatus[microserviceUUID]
+	if status == nil {
+		status = NewMicroserviceStatus()
+		p.MicroservicesStatus[microserviceUUID] = status
+	}
+	status.Status = state
+	status.ErrorMessage = &message
+	status.ImagePullStatus = ImagePullStatusFailed
+	if strings.TrimSpace(message) != "" {
+		status.LastError = message
+		status.LastErrorAt = time.Now().UnixMilli()
+	}
+	return p
+}
+
+// ClearImagePullStatus omits imagePullStatus. The current error text is kept.
+func (p *ProcessManagerStatus) ClearImagePullStatus(microserviceUUID string) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if status := p.MicroservicesStatus[microserviceUUID]; status != nil {
+		status.ImagePullStatus = ""
+	}
+	return p
+}
+
+// ResolveImagePull clears a pull failure once the desired image is the one running.
+// A crash error is left for the running grace period.
+func (p *ProcessManagerStatus) ResolveImagePull(microserviceUUID string, pullTracked bool) *ProcessManagerStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	status := p.MicroservicesStatus[microserviceUUID]
+	if status == nil {
+		return p
+	}
+	failed := status.ImagePullStatus == ImagePullStatusFailed
+	status.ImagePullStatus = ""
+	if failed || pullTracked {
+		empty := ""
+		status.ErrorMessage = &empty
+	}
+	return p
+}
+
 // SetMicroservicesStatusErrorMessage sets the error message for a microservice and returns the status for chaining
 func (p *ProcessManagerStatus) SetMicroservicesStatusErrorMessage(microserviceUUID string, message string) *ProcessManagerStatus {
 	p.mu.Lock()
@@ -222,6 +270,7 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 		LastError         string   `json:"lastError,omitempty"`
 		LastErrorAt       int64    `json:"lastErrorAt,omitempty"`
 		RestartCount      int      `json:"restartCount,omitempty"`
+		ImagePullStatus   string   `json:"imagePullStatus,omitempty"`
 	}
 
 	statuses := make([]MicroserviceStatusJSON, 0, len(p.MicroservicesStatus))
@@ -265,6 +314,9 @@ func (p *ProcessManagerStatus) GetJSONMicroservicesStatus() string {
 		}
 		if status.RestartCount > 0 {
 			msStatus.RestartCount = status.RestartCount
+		}
+		if status.ImagePullStatus == ImagePullStatusFailed {
+			msStatus.ImagePullStatus = status.ImagePullStatus
 		}
 
 		statuses = append(statuses, msStatus)

@@ -23,7 +23,7 @@ var (
 
 // OCIRef is a resolved OCI artifact reference derived from spec.repo and spec.revision.
 type OCIRef struct {
-	// Repo is the repository path without a registry host.
+	// Repo is the repository path. A registry host, when present, is resolved by the pull adapter.
 	Repo string
 	// Reference is the tag or digest passed to the registry (e.g. "latest" or "sha256:…").
 	Reference string

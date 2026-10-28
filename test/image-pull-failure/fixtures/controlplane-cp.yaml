@@ -1,0 +1,20 @@
+apiVersion: edgelet.iofog.org/v1
+kind: ControlPlane
+metadata:
+  name: pull-miss-cp
+  namespace: default
+spec:
+  controller:
+    image: ghcr.io/eclipse-iofog/controller:3.9.3
+    registry: 1
+    port: 51121
+    publicUrl: http://localhost:51121
+  console:
+    port: 8008
+    url: http://localhost
+  auth:
+    mode: embedded
+    insecureAllowHttp: true
+    bootstrap:
+      username: admin
+      password: AdminPass123!

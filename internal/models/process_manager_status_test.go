@@ -158,6 +158,41 @@ func TestGetJSONMicroservicesStatus_DurabilityFieldsOmitempty(t *testing.T) {
 	if byID["ms-full"]["restartCount"] != float64(4) {
 		t.Fatalf("expected restartCount 4, got %#v", byID["ms-full"]["restartCount"])
 	}
+	if _, ok := byID["ms-full"]["imagePullStatus"]; ok {
+		t.Fatalf("expected imagePullStatus omitted, got %#v", byID["ms-full"]["imagePullStatus"])
+	}
+}
+
+func TestGetJSONMicroservicesStatus_ImagePullFailedOnly(t *testing.T) {
+	pm := NewProcessManagerStatus()
+	pm.SetImagePullMiss("ms-pull", MicroserviceStateRunning, "unable to pull registry.example/app:2: denied")
+	pm.SetMicroservicesState("ms-ok", MicroserviceStateRunning)
+
+	raw := pm.GetJSONMicroservicesStatus()
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		t.Fatalf("parse: %v raw=%s", err, raw)
+	}
+	byID := map[string]map[string]any{}
+	for _, item := range items {
+		id, ok := item["id"].(string)
+		if !ok || id == "" {
+			t.Fatalf("microservice id missing in %#v", item)
+		}
+		byID[id] = item
+	}
+	if byID["ms-pull"]["status"] != "RUNNING" {
+		t.Fatalf("status %#v", byID["ms-pull"]["status"])
+	}
+	if byID["ms-pull"]["imagePullStatus"] != ImagePullStatusFailed {
+		t.Fatalf("imagePullStatus %#v", byID["ms-pull"]["imagePullStatus"])
+	}
+	if byID["ms-pull"]["errorMessage"] != "unable to pull registry.example/app:2: denied" {
+		t.Fatalf("errorMessage %#v", byID["ms-pull"]["errorMessage"])
+	}
+	if _, ok := byID["ms-ok"]["imagePullStatus"]; ok {
+		t.Fatalf("expected healthy status to omit imagePullStatus, got %#v", byID["ms-ok"])
+	}
 }
 
 func TestSetMicroservicesStatusErrorMessage_RecordsLastErrorExceptQueued(t *testing.T) {

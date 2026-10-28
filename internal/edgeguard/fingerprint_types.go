@@ -228,6 +228,23 @@ func canonicalizeFingerprintPayload(payload FingerprintPayload) (string, error) 
 	return string(data), nil
 }
 
+// canonicalizeIdentityFingerprint hashes the fingerprint without live carrier
+// or the TPM PCR file. Those values change when the far end drops or the
+// platform reboots, and they are not a hardware identity change.
+func canonicalizeIdentityFingerprint(payload FingerprintPayload) (string, error) {
+	identity := payload
+	if len(payload.PrimaryNICs) > 0 {
+		nics := make([]NICIdentity, len(payload.PrimaryNICs))
+		copy(nics, payload.PrimaryNICs)
+		for i := range nics {
+			nics[i].LinkState = ""
+		}
+		identity.PrimaryNICs = nics
+	}
+	identity.Optional.TPM.PCRPolicyHash = ""
+	return canonicalizeFingerprintPayload(identity)
+}
+
 func deriveGPUDevices(pciDevices []PCIDeviceIdentity) []GPUDeviceIdentity {
 	gpus := make([]GPUDeviceIdentity, 0)
 	for _, dev := range pciDevices {

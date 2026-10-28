@@ -134,6 +134,9 @@ func TestRecreateContainer_ImageNotInCache(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when image not in cache")
 	}
+	if eng.removeCalls != 0 {
+		t.Fatalf("missing image must not remove the container, removes=%d", eng.removeCalls)
+	}
 }
 
 func TestRecreateContainer_EmitsLifecycleEvents(t *testing.T) {

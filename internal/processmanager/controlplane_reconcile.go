@@ -12,7 +12,6 @@ import (
 	"github.com/eclipse-iofog/edgelet/internal/statusreporter"
 	"github.com/eclipse-iofog/edgelet/internal/store"
 	"github.com/eclipse-iofog/edgelet/pkg/engine"
-	"github.com/eclipse-iofog/edgelet/pkg/imageref"
 )
 
 // SetControlPlanePullOnRecreate requests an image pull on the next control plane generation recreate.
@@ -139,13 +138,21 @@ func (pm *ProcessManager) reconcileControlPlaneDesiredRunning(item *models.Contr
 			)
 			return
 		}
+		if !GetRestartStuckChecker().PullReady(item.ControllerUUID, controlPlaneDesiredImage(item), recreateSkipNone) {
+			pm.delayImagePull(item.ControllerUUID, "ADD")
+			return
+		}
 		pm.launchControlPlaneWithHook(item, now)
 		return
 	}
 
 	if item.Generation > item.ObservedGeneration {
+		if !GetRestartStuckChecker().PullReady(item.ControllerUUID, controlPlaneDesiredImage(item), recreateSkipNone) {
+			pm.delayImagePull(item.ControllerUUID, "UPDATE")
+			return
+		}
 		pullImage := pm.consumeControlPlanePullOnRecreate()
-		if err := pm.recreateControlPlaneDeployment(item, pullImage, now); err == nil || runtimeWaitErr(err) {
+		if err := pm.recreateControlPlaneDeployment(item, pullImage, now); err == nil || runtimeWaitErr(err) || isImagePullMiss(err) {
 			return
 		}
 	}
@@ -395,6 +402,12 @@ func (pm *ProcessManager) launchControlPlaneWithProgress(item *models.ControlPla
 			pm.noteControlPlaneVolumeHold(item)
 			return
 		}
+		if isImagePullMiss(err) {
+			pm.noteControlPlaneImagePullMiss(item, doc.ManifestControllerImage(), err, false)
+			item.LastTransitionAt = now
+			_ = store.GetInstance().UpsertSystemControlPlane(item)
+			return
+		}
 		item.RuntimeState = "failed"
 		item.State = item.RuntimeState
 		pm.bumpControlPlaneFailure(item, err, item.RuntimeState)
@@ -410,6 +423,7 @@ func (pm *ProcessManager) launchControlPlaneWithProgress(item *models.ControlPla
 	item.ObservedGeneration = item.Generation
 	item.FailureCount = 0
 	item.LastTransitionAt = now
+	clearImagePullFailure(item.ControllerUUID)
 	_ = store.GetInstance().UpsertSystemControlPlane(item)
 	pm.syncControlPlaneDNS(item, true)
 }
@@ -436,8 +450,13 @@ func (pm *ProcessManager) recreateControlPlaneDeploymentWithProgress(item *model
 		pm.noteControlPlaneVolumeHold(item)
 		return errVolumeInUse
 	}
-	if pullImage {
-		pm.pullControlPlaneImage(ms, registry)
+	if err := pm.ensureControllerImage(ms, registry, pullImage); err != nil {
+		if isImagePullMiss(err) {
+			pm.noteControlPlaneImagePullMiss(item, controlPlaneDesiredImage(item), err, true)
+			item.LastTransitionAt = now
+			_ = store.GetInstance().UpsertSystemControlPlane(item)
+		}
+		return err
 	}
 	if container, contErr := pm.containerForControlPlane(item.ControllerUUID, item.ContainerID); contErr == nil && container != nil {
 		_ = pm.removeLocalContainerByID(container.ID)
@@ -451,6 +470,16 @@ func (pm *ProcessManager) recreateControlPlaneDeploymentWithProgress(item *model
 			pm.noteControlPlaneVolumeHold(item)
 			return err
 		}
+		if isImagePullMiss(err) {
+			up := false
+			if live, liveErr := pm.containerForControlPlane(item.ControllerUUID, item.ContainerID); liveErr == nil && live != nil {
+				up = true
+			}
+			pm.noteControlPlaneImagePullMiss(item, controlPlaneDesiredImage(item), err, up)
+			item.LastTransitionAt = now
+			_ = store.GetInstance().UpsertSystemControlPlane(item)
+			return err
+		}
 		pm.bumpControlPlaneFailure(item, err, "failed")
 		return err
 	}
@@ -461,6 +490,7 @@ func (pm *ProcessManager) recreateControlPlaneDeploymentWithProgress(item *model
 	item.ObservedGeneration = item.Generation
 	item.FailureCount = 0
 	item.LastTransitionAt = now
+	clearImagePullFailure(item.ControllerUUID)
 	if err := store.GetInstance().UpsertSystemControlPlane(item); err != nil {
 		return err
 	}
@@ -489,23 +519,4 @@ func (pm *ProcessManager) buildControlPlaneLaunchSpec(item *models.ControlPlaneD
 		}
 	}
 	return doc, ms, registry, nil
-}
-
-func (pm *ProcessManager) pullControlPlaneImage(ms *models.Microservice, registry *models.Registry) {
-	if pm == nil || pm.engine == nil || ms == nil || registry == nil {
-		return
-	}
-	if err := models.RequireOCIForImagePull(registry); err != nil {
-		pm.logger.Warnf("control plane image pull rejected: %v", err)
-		return
-	}
-	pullRef, _, fromCache := imageref.ResolveForRegistry(ms.ImageName, registry.URL)
-	opts := &engine.PullImageOptions{Platform: msPlatform(ms)}
-	if !fromCache {
-		if err := pm.engine.PullImage(pullRef, registry, opts); err != nil {
-			pm.logger.Warnf("control plane recreate pull failed for %s, continuing with cache: %v", pullRef, err)
-			return
-		}
-	}
-	ms.ImageName = pullRef
 }

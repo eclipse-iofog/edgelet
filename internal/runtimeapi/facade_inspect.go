@@ -139,6 +139,11 @@ func attachDurabilityInspect(item map[string]any, status *models.MicroserviceSta
 		if status.ErrorMessage != nil {
 			item["errorMessage"] = status.ErrorMessage
 		}
+		if status.ImagePullStatus == models.ImagePullStatusFailed {
+			item["imagePullStatus"] = models.ImagePullStatusFailed
+		} else {
+			delete(item, "imagePullStatus")
+		}
 		if trimmed := strings.TrimSpace(status.LastError); trimmed != "" {
 			lastError = trimmed
 		}

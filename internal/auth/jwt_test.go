@@ -277,12 +277,12 @@ func TestEdgeGuardHashFromJWT_StableAcrossRegeneration(t *testing.T) {
 	manager.Reset()
 
 	wantHash := "dGVzdC1oYXNoLXN0YWJsZQ=="
-	token1, _, _, _, err := manager.GenerateEdgeGuardJWT(wantHash, 10*time.Minute)
+	token1, _, _, _, err := manager.GenerateEdgeGuardJWT(wantHash, nil, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("generate edgeguard jwt 1: %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	token2, _, _, _, err := manager.GenerateEdgeGuardJWT(wantHash, 10*time.Minute)
+	token2, _, _, _, err := manager.GenerateEdgeGuardJWT(wantHash, nil, 10*time.Minute)
 	if err != nil {
 		t.Fatalf("generate edgeguard jwt 2: %v", err)
 	}
@@ -303,5 +303,56 @@ func TestEdgeGuardHashFromJWT_StableAcrossRegeneration(t *testing.T) {
 	}
 	if got1 != got2 {
 		t.Fatalf("expected stable hash across JWTs, got1=%q got2=%q", got1, got2)
+	}
+
+	_, present, err := EdgeGuardLinksFromJWT(token1)
+	if err != nil {
+		t.Fatalf("links from token without claim: %v", err)
+	}
+	if present {
+		t.Fatal("expected no links claim when the slice is nil")
+	}
+}
+
+func TestEdgeGuardLinksRoundTrip(t *testing.T) {
+	openTestSQLite(t)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	seed := privateKey.Seed()
+	jwk := map[string]any{
+		"kty": "OKP",
+		"crv": "Ed25519",
+		"d":   base64.RawURLEncoding.EncodeToString(seed),
+		"x":   base64.RawURLEncoding.EncodeToString(publicKey),
+	}
+	jwkJSON, err := json.Marshal(jwk)
+	if err != nil {
+		t.Fatalf("marshal jwk: %v", err)
+	}
+
+	cfg := config.GetInstance()
+	cfg.PrivateKey = base64.StdEncoding.EncodeToString(jwkJSON)
+	cfg.IOFogUUID = "edgeguard-links-uuid"
+
+	manager := GetJWTManager()
+	manager.Reset()
+
+	want := []EdgeGuardLink{{Name: "eth0", MAC: "aa:bb:cc:dd:ee:ff", LinkState: "1"}}
+	token, _, _, _, err := manager.GenerateEdgeGuardJWT("aGFzaA==", want, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("generate edgeguard jwt: %v", err)
+	}
+	got, present, err := EdgeGuardLinksFromJWT(token)
+	if err != nil {
+		t.Fatalf("links from jwt: %v", err)
+	}
+	if !present {
+		t.Fatal("expected links claim")
+	}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("links = %+v, want %+v", got, want)
 	}
 }

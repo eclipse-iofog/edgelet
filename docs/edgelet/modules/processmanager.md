@@ -135,9 +135,10 @@ Process Manager publishes per-microservice status to StatusReporter. Field Agent
 
 | Field | Behavior |
 |-------|----------|
-| `errorMessage` | Current failure. Kept while the workload is failing, restarting, or has been RUNNING for less than **30 seconds** after a crash. After 30 seconds of continuous RUNNING, the current field is cleared to `""` |
+| `errorMessage` | Current failure. Kept while the workload is failing, restarting, or has been RUNNING for less than **30 seconds** after a crash. After 30 seconds of continuous RUNNING, the current field is cleared to `""`. A pull failure while the previous image is still serving is not cleared by that window |
 | `lastError` / `lastErrorAt` | Last crash text and unix-ms timestamp. Overwritten on a new failure. **Not** cleared on recovery or rebuild |
-| `restartCount` | Real restart events (RUNNING→EXITING, failed start, or a scheduled crash-driven recreate). Omit when 0. Reset to 0 on operator **rebuild** only |
+| `restartCount` | Real restart events (RUNNING→EXITING, failed start, or a scheduled crash-driven recreate). Omit when 0. Reset to 0 on operator **rebuild** only. A pull miss does not increase this count |
+| `imagePullStatus` | `failed` when the desired image could not be downloaded. Omitted otherwise, including while a pull is in progress and after the desired image is the one running |
 
 Crash text:
 
@@ -147,6 +148,10 @@ Crash text:
 | Embedded (`edgelet`) | `CRI reason=… exitCode=… message=…` |
 
 Crash loops delay recreate (**10s, 20s, … up to 5 minutes**). Status stays the real runtime state (`EXITING`, `CREATED`, `QUEUED` if the container is gone) — there is no extra state name for “waiting to recreate”. Operator rebuild, catalog becoming Ready, and a single non-restartable CRI recreate skip the delay.
+
+A missing image is not that crash path. If a new image cannot be downloaded and the workload is already running, it keeps running. Status stays `RUNNING`. If nothing is running yet, status stays `QUEUED`. In both cases `imagePullStatus` is `failed`, with the reason in `errorMessage`. The field is omitted while a pull is in progress and once the desired image is the one running. Edgelet tries the download again on the same schedule (**10s, 20s, … up to 5 minutes**) until it works or the image is changed. Rebuild tries once immediately. Leaving rebuild on does not retry on every pass. When the download works, the pull failure disappears and the workload is replaced. A crash, a busy volume, or a container that fails to start is unchanged. Pull misses do not increase `restartCount`, do not mark `STUCK_IN_RESTART`, and do not become `FAILED`. Thirty seconds of `RUNNING` on the previous image does not clear this error or this delay. Field Agent posts the same `imagePullStatus` on each `microserviceStatus` element. Older controllers ignore the unknown key.
+
+On the edgelet engine, containerd deletes the task after the process exits. Status then follows the CRI state. `CONTAINER_EXITED` is `EXITING` and reconcile recreates it on the backoff above. `CONTAINER_RUNNING` stays `RUNNING`. `CONTAINER_UNKNOWN` stays `UNKNOWN`. A container that has never started stays `CREATED` and is started in place.
 
 `STUCK_IN_RESTART` means **10 real restarts in 10 minutes**, not monitor ticks. Operator **rebuild** retries. After five exhausted lifecycle tasks the workload stays **FAILED** until rebuild (existing skip-until-rebuild).
 
@@ -160,7 +165,8 @@ Last crash text for controller-managed workloads is **in-memory**. An agent rest
 | Crash text missing after agent restart | Controller-managed last crash is in-memory; wait for the next exit or inspect |
 | Recreate not immediate after a crash | Crash-loop backoff (10s … 5 min); status is still `EXITING` (or similar), not a new state |
 | `STUCK_IN_RESTART` | Ten real restarts in ten minutes; use operator rebuild |
-| Local deploy failures | `failure_count` threshold; image pull errors |
+| New image will not download | Missing image; a running container stays up, or the workload stays queued when none exists. `imagePullStatus` is `failed`. Same 10s … 5 minute delay |
+| Local deploy failures | Five failures for a crash, a busy volume, or a create error. A missing image does not use that cap |
 | CP container recreated | Row still in `system_control_plane`; external `docker rm` |
 | `ms rm` on CP rejected | By design — use `edgelet controlplane delete` |
 
@@ -180,4 +186,4 @@ Last crash text for controller-managed workloads is **in-memory**. An agent rest
 | `quiesce.go` | Engine restart quiesce flag |
 | `lifecycle_*.go` | Start/stop/restart implementations |
 
-Related: [fieldagent.md](fieldagent.md), [store.md](store.md), [../container-engine.md](../container-engine.md), [../troubleshooting.md](../troubleshooting.md#microservice-crash--restart-loop).
+Related: [fieldagent.md](fieldagent.md), [store.md](store.md), [../container-engine.md](../container-engine.md), [crash loop](../troubleshooting.md#microservice-crash--restart-loop), [image will not download](../troubleshooting.md#image-will-not-download).

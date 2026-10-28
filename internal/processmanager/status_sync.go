@@ -110,6 +110,9 @@ func AdvanceRunningErrorClear() {
 			if st.ErrorMessage == nil || strings.TrimSpace(*st.ErrorMessage) == "" {
 				continue
 			}
+			if st.ImagePullStatus == models.ImagePullStatusFailed {
+				continue
+			}
 			if !statusGrace.elapsed(uuid) {
 				continue
 			}
@@ -132,6 +135,7 @@ func syncMicroserviceStatusToReporter(pmStatus *models.ProcessManagerStatus, uui
 	prevLast := ""
 	prevLastAt := int64(0)
 	prevRestarts := 0
+	prevPull := ""
 	if prev != nil {
 		prevState = prev.Status
 		prevCID = prev.ContainerID
@@ -139,11 +143,16 @@ func syncMicroserviceStatusToReporter(pmStatus *models.ProcessManagerStatus, uui
 		prevLast = prev.LastError
 		prevLastAt = prev.LastErrorAt
 		prevRestarts = prev.RestartCount
+		prevPull = strings.TrimSpace(prev.ImagePullStatus)
 	}
 
 	statusGrace.observe(uuid, prevState, prevCID, status)
 
 	status.RestartCount = prevRestarts
+	if strings.TrimSpace(status.ImagePullStatus) == "" {
+		status.ImagePullStatus = prevPull
+	}
+	pullMiss := status.ImagePullStatus == models.ImagePullStatusFailed
 	engineMsg := ""
 	if status.ErrorMessage != nil {
 		engineMsg = strings.TrimSpace(*status.ErrorMessage)
@@ -154,7 +163,7 @@ func syncMicroserviceStatusToReporter(pmStatus *models.ProcessManagerStatus, uui
 	} else {
 		status.LastError = prevLast
 		status.LastErrorAt = prevLastAt
-		if status.Status == models.MicroserviceStateRunning && statusGrace.elapsed(uuid) {
+		if status.Status == models.MicroserviceStateRunning && statusGrace.elapsed(uuid) && !pullMiss {
 			status.ErrorMessage = explicitEmptyErrorMessage()
 		} else {
 			status.ErrorMessage = prevErr

@@ -8,7 +8,6 @@
 [![govulncheck](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/eclipse-iofog/edgelet/actions/workflows/govulncheck.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/eclipse-iofog/edgelet/badge)](https://securityscorecards.dev/viewer/?uri=github.com/eclipse-iofog/edgelet)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13141/badge)](https://www.bestpractices.dev/en/projects/13141)
-[![codecov](https://img.shields.io/badge/codecov-post--beta-lightgrey)](https://codecov.io/gh/eclipse-iofog/edgelet)
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/eclipse-iofog/edgelet/total?logo=github)
 
@@ -141,7 +140,7 @@ RELEASE_FRESH_CI_IMAGE=1 ./test/release/build-all.sh
 
 ```bash
 make build-desktop-darwin build-desktop-windows
-scripts/release-binaries.sh v1.1.3
+scripts/release-binaries.sh v1.1.4
 ```
 
 Local / single-target builds:
@@ -153,7 +152,7 @@ make deps                     # embed pipeline before linux thin build
 make build-linux-amd64        # deps + thin for amd64
 make build-linux-arm64        # deps + thin for arm64
 make build-desktop-darwin     # darwin monolithic
-make release-binaries VERSION=v1.1.3
+make release-binaries VERSION=v1.1.4
 ```
 
 ## Testing
@@ -189,18 +188,18 @@ Identical builds and tags; choose the channel that matches your fleet docs. Over
 ### Eclipse (canonical)
 
 ```bash
-curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.3/install.sh -o install.sh
+curl -fsSL https://github.com/eclipse-iofog/edgelet/releases/download/v1.1.4/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.3
+sudo ./install.sh --version=v1.1.4
 # dev / CI: sudo ./install.sh --bin-path=build/edgelet-linux-amd64 --version=dev
 ```
 
 ### Datasance mirror
 
 ```bash
-curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.3/install.sh -o install.sh
+curl -fsSL https://github.com/Datasance/edgelet/releases/download/v1.1.4/install.sh -o install.sh
 chmod +x install.sh
-sudo ./install.sh --version=v1.1.3
+sudo ./install.sh --version=v1.1.4
 ```
 
 Release artifacts per tag: seven binaries (`edgelet-linux-<arch>`, `edgelet-darwin-<arch>`, `edgelet-windows-amd64.exe`), a CycloneDX and SPDX SBOM beside each binary, `LICENSE-3RD-PARTY.md`, `SHA256SUMS`, `install.sh`, `uninstall.sh`, and config/CA samples. The source-tree inventory is `SBOM.md` at the repository root.

@@ -129,6 +129,33 @@ func TestHandleLatestMicroservices_CatalogReadySkipsDelay(t *testing.T) {
 	}
 }
 
+func TestHandleLatestMicroservices_ExitedCRIRecreatesAfterBackoff(t *testing.T) {
+	clk := withRestartClock(t)
+	pm, _, eng := newBackoffReconcilePM(t, "ms-cri-error")
+	pm.engineName = "edgelet"
+	eng.status = exitingStatus("cid-cri-error", "CRI reason=Error exitCode=139 message=")
+
+	stats := &reconcileCycleStats{}
+	pm.handleLatestMicroservices(stats)
+	if eng.startCalls != 0 {
+		t.Fatalf("exited container must not be started in place, starts=%d", eng.startCalls)
+	}
+	if stats.scheduledUpdate != 0 || len(drainTasks(pm.taskQueue)) != 0 {
+		t.Fatal("first crash must wait 10s")
+	}
+
+	clk.Advance(10 * time.Second)
+	stats = &reconcileCycleStats{}
+	pm.handleLatestMicroservices(stats)
+	tasks := drainTasks(pm.taskQueue)
+	if eng.startCalls != 0 {
+		t.Fatalf("recreate must not start the exited container, starts=%d", eng.startCalls)
+	}
+	if stats.scheduledUpdate != 1 || len(tasks) != 1 || tasks[0].Action != TaskActionUpdate {
+		t.Fatalf("expected UPDATE after 10s, stats=%+v tasks=%d", stats, len(tasks))
+	}
+}
+
 func TestHandleLatestMicroservices_FirstNonRestartableSkipsDelay(t *testing.T) {
 	withRestartClock(t)
 	pm, ms, eng := newBackoffReconcilePM(t, "ms-cri")

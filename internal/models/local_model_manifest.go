@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -137,17 +136,10 @@ func validateModelRepo(repo string) error {
 		return errors.New("spec.repo is required")
 	}
 	if strings.Contains(trimmed, "://") {
-		return errors.New("spec.repo must not include a URL scheme or host")
-	}
-	if parsed, err := url.Parse(trimmed); err == nil && parsed.Scheme != "" {
-		return errors.New("spec.repo must not include a URL scheme or host")
+		return errors.New("spec.repo must not include a URL scheme")
 	}
 	if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "//") {
-		return errors.New("spec.repo must not include a URL scheme or host")
-	}
-	first, _, _ := strings.Cut(trimmed, "/")
-	if first == "" || strings.Contains(first, ".") || strings.Contains(first, ":") || strings.EqualFold(first, "localhost") {
-		return errors.New("spec.repo must not include a URL scheme or host")
+		return errors.New("spec.repo must not include a URL scheme")
 	}
 	return nil
 }

@@ -51,16 +51,13 @@ func TestLocalModelManifestValidate_NameDNS1123(t *testing.T) {
 	}
 }
 
-func TestLocalModelManifestValidate_RepoRejectsSchemeAndHost(t *testing.T) {
+func TestLocalModelManifestValidate_RepoRejectsScheme(t *testing.T) {
 	invalidRepos := []string{
 		"",
 		"https://huggingface.co/org/repo",
 		"http://example.com/org/repo",
-		"huggingface.co/org/repo",
-		"docker.io/ai/gemma3",
-		"localhost/org/repo",
 		"/org/repo",
-		"host:443/org/repo",
+		"//org/repo",
 	}
 	for _, repo := range invalidRepos {
 		doc := validLocalModelManifest()
@@ -73,11 +70,23 @@ func TestLocalModelManifestValidate_RepoRejectsSchemeAndHost(t *testing.T) {
 			t.Fatalf("expected spec.repo error for %q, got: %v", repo, err)
 		}
 	}
+}
 
-	doc := validLocalModelManifest()
-	doc.Spec.Repo = "ai/gemma3"
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("expected path-only repo to pass, got: %v", err)
+func TestLocalModelManifestValidate_RepoAllowsRegistryHost(t *testing.T) {
+	repos := []string{
+		"ai/gemma3",
+		"docker.io/ai/gemma3",
+		"ghcr.io/org/repo",
+		"huggingface.co/org/repo",
+		"localhost/org/repo",
+		"host:443/org/repo",
+	}
+	for _, repo := range repos {
+		doc := validLocalModelManifest()
+		doc.Spec.Repo = repo
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("expected repo %q to pass, got: %v", repo, err)
+		}
 	}
 }
 

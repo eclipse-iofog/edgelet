@@ -365,18 +365,18 @@ Public License instead of this License.
 Components:
 
 - Go@1.26.10 (BSD-3-Clause)
-- golang.org/x/crypto@v0.57.0 (BSD-3-Clause)
+- golang.org/x/crypto@v0.58.0 (BSD-3-Clause)
 - golang.org/x/exp/typeparams@v0.0.0-20260209203927-2842357ff358 (BSD-3-Clause)
 - golang.org/x/exp@v0.0.0-20241108190413-2d47ceb2692f (BSD-3-Clause)
 - golang.org/x/mod@v0.41.0 (BSD-3-Clause)
-- golang.org/x/net@v0.60.0 (BSD-3-Clause)
+- golang.org/x/net@v0.62.0 (BSD-3-Clause)
 - golang.org/x/oauth2@v0.36.0 (BSD-3-Clause)
-- golang.org/x/sync@v0.23.0 (BSD-3-Clause)
+- golang.org/x/sync@v0.24.0 (BSD-3-Clause)
 - golang.org/x/sys@v0.49.0 (BSD-3-Clause)
 - golang.org/x/term@v0.47.0 (BSD-3-Clause)
-- golang.org/x/text@v0.42.0 (BSD-3-Clause)
+- golang.org/x/text@v0.43.0 (BSD-3-Clause)
 - golang.org/x/time@v0.15.0 (BSD-3-Clause)
-- golang.org/x/tools@v0.50.0 (BSD-3-Clause)
+- golang.org/x/tools@v0.51.0 (BSD-3-Clause)
 
 ```
 Copyright 2009 The Go Authors.
@@ -10839,7 +10839,7 @@ See also https://www.apache.org/dev/crypto.html and/or seek legal counsel.
 
 Components:
 
-- github.com/klauspost/compress@v1.20.1 (Apache-2.0 OR BSD-3-Clause OR MIT)
+- github.com/klauspost/compress@v1.20.3 (Apache-2.0 OR BSD-3-Clause OR MIT)
 
 ```
 Copyright (c) 2012 The Go Authors. All rights reserved.
@@ -20275,7 +20275,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Components:
 
-- oras.land/oras-go/v2@v2.6.2 (Apache-2.0)
+- oras.land/oras-go/v2@v2.7.0 (Apache-2.0)
 
 ```
                                  Apache License

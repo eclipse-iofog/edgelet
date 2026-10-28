@@ -17,7 +17,7 @@ kind: Model
 metadata:
   name: llama-2-7b-q2k           # required — DNS-1123 label; on-disk directory name
 spec:
-  repo: second-state/Llama-2-7B-Chat-GGUF   # required — upstream path, no host
+  repo: second-state/Llama-2-7B-Chat-GGUF   # required — path or host/path; no URL scheme
   revision: 064fe43ea8c1e1f93477ef4a170bdc2b244ef02c  # HF commit (pinned)
   registry: 3                    # required — built-in Hugging Face Hub (type hf)
   files:                         # HF only; ignored for oci

@@ -1255,11 +1255,30 @@ func (e *Engine) GetContainerStatus(containerID, _ string) (*models.Microservice
 
 	task, err := c.Task(ctx, nil)
 	if err != nil {
-		// Container created but not yet started — report Created, not Exiting
-		status.Status = models.MicroserviceStateCreated
-		if reason, exitCode, message := e.readCRIContainerFailure(ctx, containerID); reason != "" || message != "" || exitCode != 0 {
-			enriched := fmt.Sprintf("CRI reason=%s exitCode=%d message=%s", reasonOrUnknown(reason), exitCode, strings.TrimSpace(message))
-			status.ErrorMessage = &enriched
+		// Containerd removes the task when the container exits. CRI state decides
+		// whether that container is still running, already finished, or not started.
+		criState := runtimeapi.ContainerState_CONTAINER_CREATED
+		reason, exitCode, message := "", int32(0), ""
+		if e.criClient != nil {
+			if resp, stErr := e.criClient.ContainerStatus(ctx, containerID); stErr == nil && resp != nil && resp.Status != nil {
+				criState = resp.Status.State
+				reason, exitCode, message = criStatusDetails(resp.Status)
+			}
+		}
+		msState, failure := classifyMissingTask(criState, reason, exitCode, message)
+		status.Status = msState
+		if failure != "" {
+			status.ErrorMessage = &failure
+		}
+		if msState == models.MicroserviceStateExiting || msState == models.MicroserviceStateRunning {
+			if startTime, stErr := e.GetContainerStartedAt(containerID); stErr == nil && startTime > 0 {
+				status.StartTime = startTime
+			}
+		}
+		if msState == models.MicroserviceStateRunning {
+			if ip, ipErr := e.GetContainerIPAddress(containerID); ipErr == nil && ip != "" {
+				status.IPAddress = &ip
+			}
 		}
 		return status, nil
 	}
@@ -1310,14 +1329,6 @@ func criStatusDetails(st *runtimeapi.ContainerStatus) (reason string, exitCode i
 		return "", 0, ""
 	}
 	return strings.TrimSpace(st.Reason), st.ExitCode, strings.TrimSpace(st.Message)
-}
-
-func reasonOrUnknown(reason string) string {
-	trimmed := strings.TrimSpace(reason)
-	if trimmed == "" {
-		return "UNKNOWN"
-	}
-	return trimmed
 }
 
 func fallbackMessage(primary, fallback string) string {

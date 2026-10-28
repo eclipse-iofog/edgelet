@@ -50,7 +50,7 @@ Collected in `internal/edgeguard/fingerprint_linux.go`:
 | CPU | vendor, model, core count (gopsutil) |
 | PCI devices | slot, class, vendor/device IDs |
 | Root disk | device id |
-| Primary NICs | name, MAC, link state |
+| Primary NICs | name, MAC. Link state is a separate lock |
 | USB devices | bus path, vendor/product id |
 | Optional | machine-id, TPM, secure boot, memory modules |
 
@@ -69,7 +69,7 @@ When the fingerprint hash changes:
 3. Agent **deprovision** (`Deprovision(false)` — credentials cleared via normal deprovision path)
 4. Stored baseline JWT **deleted**
 
-Operators must investigate physical changes before reprovisioning. A NIC link-state change (`1`, `0`, or `unknown`), USB plug or unplug, disk change, or VM identity drift is enough to mismatch. See [What counts as a hardware change](modules/edgeguard.md#what-counts-as-a-hardware-change).
+Operators must investigate physical changes before reprovisioning. A locked-down port becoming up, a USB plug or unplug, a new or removed NIC, a disk change, or VM identity drift is enough to mismatch. A locked-up port losing carrier is logged locally and does not deprovision. See [What counts as a hardware change](modules/edgeguard.md#what-counts-as-a-hardware-change).
 
 ---
 

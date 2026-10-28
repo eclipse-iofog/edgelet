@@ -51,16 +51,13 @@ func TestLocalKnowledgeManifestValidate_NameDNS1123(t *testing.T) {
 	}
 }
 
-func TestLocalKnowledgeManifestValidate_RepoRejectsSchemeAndHost(t *testing.T) {
+func TestLocalKnowledgeManifestValidate_RepoRejectsScheme(t *testing.T) {
 	invalidRepos := []string{
 		"",
 		"https://huggingface.co/org/dataset",
 		"http://example.com/org/dataset",
-		"huggingface.co/org/dataset",
-		"docker.io/acme/docs",
-		"localhost/org/dataset",
 		"/org/dataset",
-		"host:443/org/dataset",
+		"//org/dataset",
 	}
 	for _, repo := range invalidRepos {
 		doc := validLocalKnowledgeManifest()
@@ -73,11 +70,23 @@ func TestLocalKnowledgeManifestValidate_RepoRejectsSchemeAndHost(t *testing.T) {
 			t.Fatalf("expected spec.repo error for %q, got: %v", repo, err)
 		}
 	}
+}
 
-	doc := validLocalKnowledgeManifest()
-	doc.Spec.Repo = "acme/product-manuals"
-	if err := doc.Validate(); err != nil {
-		t.Fatalf("expected path-only repo to pass, got: %v", err)
+func TestLocalKnowledgeManifestValidate_RepoAllowsRegistryHost(t *testing.T) {
+	repos := []string{
+		"acme/product-manuals",
+		"docker.io/acme/docs",
+		"ghcr.io/acme/docs",
+		"huggingface.co/org/dataset",
+		"localhost/org/dataset",
+		"host:443/org/dataset",
+	}
+	for _, repo := range repos {
+		doc := validLocalKnowledgeManifest()
+		doc.Spec.Repo = repo
+		if err := doc.Validate(); err != nil {
+			t.Fatalf("expected repo %q to pass, got: %v", repo, err)
+		}
 	}
 }
 

@@ -432,7 +432,7 @@ OpenRC: `rc-service edgelet-containerd stop`, then `start`, after `drain --direc
 
 ## Microservice crash / restart loop
 
-**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`. `Cannot lock file` on a persistent volume is a leftover process, not this crash loop — see [Leftover process holding a volume](#leftover-process-holding-a-volume).
+**Symptoms:** dashboard `errorMessage` empty during a crash; Docker/Podman exit looks silent; recreate hammers the node; `STUCK_IN_RESTART` after a container sat in `EXITING`. `Cannot lock file` on a persistent volume is a leftover process, not this crash loop — see [Leftover process holding a volume](#leftover-process-holding-a-volume). A running service whose new image will not download is not this crash loop — see [Image will not download](#image-will-not-download).
 
 **Checks:**
 
@@ -446,11 +446,35 @@ OpenRC: `rc-service edgelet-containerd stop`, then `start`, after `drain --direc
    - `lastError` / `lastErrorAt` is the last crash text (unix ms). It is **not** cleared on recovery. Operator **rebuild** resets `restartCount` to 0 and keeps `lastError`.
    - Docker/Podman text looks like `exitCode=N oomKilled=…` (plus `error=…` when the engine error is set). The embedded engine keeps `CRI reason=…`.
 
-2. Crash loops delay recreate (**10s, 20s, … up to 5 minutes**). Status stays the real runtime state (`EXITING`, and so on) — there is no extra “waiting” state. Operator rebuild, catalog becoming Ready, and a single non-restartable CRI recreate skip the delay.
+2. Crash loops delay recreate (**10s, 20s, … up to 5 minutes**). Status stays the real runtime state (`EXITING`, and so on) — there is no extra “waiting” state. Operator rebuild, catalog becoming Ready, and a single non-restartable CRI recreate skip the delay. On the edgelet engine, containerd deletes the task after exit and status follows the CRI state. `CONTAINER_EXITED` is `exiting` and reconcile recreates it on this backoff. `CONTAINER_RUNNING` stays `running`. A container that has never started stays `created`.
 
 3. `STUCK_IN_RESTART` means **10 real restarts in 10 minutes**, not status-poll ticks. Use operator **rebuild** to retry.
 
 4. Last crash text for controller-managed workloads is in-memory. Restarting `edgelet` may drop it until the next failure.
+
+---
+
+## Image will not download
+
+**Symptoms:** a service stays running after its image changes, or stays queued when nothing has started. `errorMessage` names a registry or pull error. Status is running or queued, not `FAILED`. This is not a crash loop.
+
+**Checks:**
+
+1. Inspect the workload. The field is on `GET /v1/ms/{id}` and `edgelet ms inspect`:
+
+   ```bash
+   edgelet ms inspect <uuid|namespace.name> --summary
+   ```
+
+   - If the workload is already running, it keeps running. Status stays running. `imagePullStatus` is `failed`, with the reason in `errorMessage`.
+   - If nothing is running yet, status stays queued, with the same pull failure.
+   - `imagePullStatus` is omitted while a pull is in progress and once the desired image is the one running.
+
+2. Edgelet tries the download again, waiting longer each time (**10s, 20s, … up to 5 minutes**), until it works or the image is changed. Rebuild tries once immediately. Leaving rebuild on does not retry on every pass.
+
+3. When the download works, the pull failure disappears and the workload is replaced.
+
+4. A crash, a busy volume, or a container that fails to start is unchanged. See [Microservice crash / restart loop](#microservice-crash--restart-loop) and [Leftover process holding a volume](#leftover-process-holding-a-volume).
 
 ---
 

@@ -18,7 +18,7 @@ kind: Knowledge
 metadata:
   name: product-docs             # required — DNS-1123 label; on-disk directory name
 spec:
-  repo: acme/product-manuals     # required — Hub dataset id or OCI path, no host
+  repo: acme/product-manuals     # required — path or host/path; no URL scheme
   revision: 9f3c111122223333444455556666777788889999  # HF commit (pinned)
   registry: 3                    # required — built-in Hugging Face Hub (type hf)
   files:                         # HF only; ignored for oci

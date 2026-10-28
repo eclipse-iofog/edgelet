@@ -27,7 +27,7 @@ edgelet model pull tiny-gpt2 --repo hf-internal-testing/tiny-random-gpt2 --revis
       --format string       Format hint (gguf, safetensors, onnx, pytorch, tensorrt, unknown)
   -h, --help                help for pull
   -r, --registry int        Registry id
-      --repo string         Repository path without host
+      --repo string         Repository path, with or without a registry host
       --revision string     Tag, digest, branch, or commit
 ```
 

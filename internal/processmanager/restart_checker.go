@@ -1,6 +1,7 @@
 package processmanager
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -27,11 +28,15 @@ const (
 )
 
 type uuidRestartState struct {
-	n             int
-	nextAttemptAt time.Time
-	pending       bool
-	criSkipUsed   bool
-	catalogWait   bool
+	n               int
+	nextAttemptAt   time.Time
+	pending         bool
+	criSkipUsed     bool
+	catalogWait     bool
+	pullN           int
+	pullNextAt      time.Time
+	pullImage       string
+	rebuildSkipUsed bool
 }
 
 // RestartStuckChecker tracks real crash/recreate events and consecutive-failure backoff.
@@ -185,22 +190,136 @@ func (r *RestartStuckChecker) ObserveRunning(microserviceUUID string) {
 	}
 }
 
-// ResetBackoff clears consecutive-failure delay after stable running or rebuild.
+// ResetBackoff clears a crash delay after the running container matches the desired spec.
+// An image-pull wait and the one-time rebuild skip are left in place.
 func (r *RestartStuckChecker) ResetBackoff(microserviceUUID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.state, microserviceUUID)
+	delete(r.parked, microserviceUUID)
+	st := r.state[microserviceUUID]
+	if st == nil {
+		return
+	}
+	st.n = 0
+	st.nextAttemptAt = time.Time{}
+	st.pending = false
+	st.criSkipUsed = false
+	st.catalogWait = false
+}
+
+// ConsumeRebuildSkip grants one immediate recreate for the current rebuild request.
+// Later passes keep waiting until rebuild is cleared and set again.
+func (r *RestartStuckChecker) ConsumeRebuildSkip(microserviceUUID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.currentState(microserviceUUID)
+	st.rebuildSkipUsed = true
+	st.pullNextAt = time.Time{}
+	st.n = 0
+	st.nextAttemptAt = time.Time{}
+	st.pending = false
+	st.criSkipUsed = false
+	delete(r.restarts, microserviceUUID)
+	delete(r.containerCreation, microserviceUUID)
 	delete(r.parked, microserviceUUID)
 }
 
-// ResetAfterRebuild clears stuck timestamps and backoff so the operator retry can proceed.
-func (r *RestartStuckChecker) ResetAfterRebuild(microserviceUUID string) {
+// RebuildSkipAvailable reports whether this rebuild request has not yet skipped the wait.
+func (r *RestartStuckChecker) RebuildSkipAvailable(microserviceUUID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.restarts, microserviceUUID)
-	delete(r.containerCreation, microserviceUUID)
-	delete(r.state, microserviceUUID)
-	delete(r.parked, microserviceUUID)
+	st := r.state[microserviceUUID]
+	return st == nil || !st.rebuildSkipUsed
+}
+
+// NoteRebuildCleared arms the one-time rebuild skip again after rebuild is turned off.
+func (r *RestartStuckChecker) NoteRebuildCleared(microserviceUUID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if st := r.state[microserviceUUID]; st != nil {
+		st.rebuildSkipUsed = false
+	}
+}
+
+// ArmPullMiss schedules the next image download. It does not record a crash.
+func (r *RestartStuckChecker) ArmPullMiss(microserviceUUID, image string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.currentState(microserviceUUID)
+	image = strings.TrimSpace(image)
+	if image != "" && st.pullImage != "" && image != st.pullImage {
+		st.pullN = 0
+	}
+	if image != "" {
+		st.pullImage = image
+	}
+	st.pullN++
+	delay := restartDelay(st.pullN)
+	st.pullNextAt = r.now().Add(delay)
+	return delay
+}
+
+// PullReady reports whether reconcile may queue another image pull.
+// A new image reference tries immediately. A rebuild or catalog-ready skip does too.
+func (r *RestartStuckChecker) PullReady(microserviceUUID, image string, skip recreateSkip) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.currentState(microserviceUUID)
+	image = strings.TrimSpace(image)
+	if image != "" && st.pullImage != "" && image != st.pullImage {
+		st.pullN = 0
+		st.pullNextAt = time.Time{}
+		st.pullImage = ""
+		return true
+	}
+	switch skip {
+	case recreateSkipRebuild, recreateSkipCatalogReady:
+		st.pullNextAt = time.Time{}
+		return true
+	}
+	if !st.pullNextAt.IsZero() && r.now().Before(st.pullNextAt) {
+		return false
+	}
+	return true
+}
+
+// RemainingPullDelay is how long the next image pull should still wait.
+func (r *RestartStuckChecker) RemainingPullDelay(microserviceUUID string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.state[microserviceUUID]
+	if st == nil || st.pullNextAt.IsZero() {
+		return 0
+	}
+	rem := st.pullNextAt.Sub(r.now())
+	if rem < 0 {
+		return 0
+	}
+	return rem
+}
+
+// HasPullTracking reports whether a pull miss is still remembered for this workload.
+func (r *RestartStuckChecker) HasPullTracking(microserviceUUID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.state[microserviceUUID]
+	if st == nil {
+		return false
+	}
+	return st.pullN > 0 || !st.pullNextAt.IsZero() || strings.TrimSpace(st.pullImage) != ""
+}
+
+// ClearPullWait forgets the image-pull delay after the desired image is running.
+func (r *RestartStuckChecker) ClearPullWait(microserviceUUID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.state[microserviceUUID]
+	if st == nil {
+		return
+	}
+	st.pullN = 0
+	st.pullNextAt = time.Time{}
+	st.pullImage = ""
 }
 
 // Ready reports whether a crash-driven recreate may be enqueued now.

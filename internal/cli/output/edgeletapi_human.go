@@ -141,6 +141,7 @@ var msInspectOrder = []string{
 	"state",
 	"statusText",
 	"errorMessage",
+	"imagePullStatus",
 	"lastError",
 	"lastErrorAt",
 	"containerId",

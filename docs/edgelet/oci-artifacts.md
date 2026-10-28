@@ -112,7 +112,7 @@ kind: Knowledge
 metadata:
   name: wiki-faiss
 spec:
-  repo: acme/wiki-index          # no host
+  repo: acme/wiki-index          # path; a host here is the registry contacted
   revision: sha256:<manifest-digest>
   registry: 10
   files: []                      # ignored for oci

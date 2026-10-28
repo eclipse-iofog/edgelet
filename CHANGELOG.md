@@ -5,6 +5,21 @@ All notable changes to Edgelet are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.4]
+
+### Fixed
+
+- **Image pull:** when a new image cannot be downloaded, a workload that is already running stays up, and a workload that has not started stays queued. Status keeps that real state and sets `imagePullStatus` to `failed`, with the registry error in `errorMessage`. Edgelet retries on the existing 10-second to 5-minute delay until the pull succeeds or the image changes. A rebuild tries once immediately. The controller container is not stopped when its new image is not on the machine.
+- **Model and Knowledge pull:** a registry host in `spec.repo` is the registry that is contacted. `docker.io/org/name` with the Docker Hub registry is pulled once. `ghcr.io/org/name` with registry id 1 is pulled from GHCR over normal HTTPS, without that row's credentials or TLS settings. A path with no host still uses the selected registry. A Hugging Face registry strips its own host and rejects a different host. A URL scheme in `spec.repo` is still rejected.
+- **Container update:** an image change or rebuild pulls once while the current container is still running. After that container is stopped, create and start use the image already on disk and do not pull again.
+- **Edgelet engine:** a container whose task is gone is classified from the CRI state. `CONTAINER_EXITED` is `EXITING` and recreated under the normal crash backoff, including a crash while NATS or DNS is briefly down. `CONTAINER_RUNNING` stays running. A container that has never started still starts in place.
+- **Edge Guard:** a NIC that was locked up and later loses carrier (`1` to `0` or `unknown`) is logged locally and does not deprovision the agent, so a modem or peer outage leaves the node provisioned. A locked-down port becoming up, a new or removed MAC, and a USB change still deprovision. The TPM PCR file is not part of the identity hash. The first attestation after upgrade stores a new link lock and does not deprovision.
+
+### Changed
+
+- **Security / vulncheck:** bump `golang.org/x/net` to **v0.62.0** (with `golang.org/x/crypto` **v0.58.0** and `golang.org/x/text` **v0.43.0**) for **GO-2026-6866** and **GO-2026-6860**. Bump `github.com/klauspost/compress` to **v1.20.3** for **GHSA-fpmh-frq8-7rj8**. Bump `oras.land/oras-go/v2` to **v2.7.0** for the auth and file-store fixes; private bearer token realms stay allowed.
+- **Go dependencies:** `golang.org/x/sync` **v0.24.0**. No edgelet API changes. Regenerated `SBOM.md`, `LICENSE-3RD-PARTY.md`, `sbom.cdx.json`, and `sbom.spdx.json`.
+
 ## [v1.1.3]
 
 ### Added

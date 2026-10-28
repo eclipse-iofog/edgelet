@@ -113,8 +113,10 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 	}
 	pullRef, lookupRefs, fromCache := imageref.ResolveForRegistry(ms.ImageName, registry.URL)
 	pullSucceeded := false
+	var pullErr error
 
 	if !fromCache {
+		clearImagePullStatus(ms.MicroserviceUUID)
 		cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
 			Event:   runtimeops.EventContainerUpdatePhase,
 			MsUUID:  ms.MicroserviceUUID,
@@ -133,6 +135,7 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 		}
 		pullStart := time.Now()
 		if err := cm.engine.PullImage(pullRef, registry, opts); err != nil {
+			pullErr = err
 			cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
 				Event:      runtimeops.EventContainerPullCompleted,
 				Level:      runtimeops.LevelWarn,
@@ -171,7 +174,10 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 	}
 	if !exists {
 		ms.SetIsUpdating(false)
-		return fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+		if pullErr == nil {
+			pullErr = fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+		}
+		return newImagePullMiss(pullRef, pullErr)
 	}
 	effectiveRunRef := matchedRef
 	if pullSucceeded {
@@ -194,7 +200,8 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 		// Continue anyway
 	}
 
-	// Step 3: Create and start new container (can use same ports now)
+	// Step 3: Create and start from the image already on disk.
+	// The registry pull finished while the old container was still running.
 	ms.ImageName = effectiveRunRef
 	cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
 		Event:   runtimeops.EventContainerUpdatePhase,
@@ -204,7 +211,7 @@ func (cm *ContainerManager) UpdateContainer(ctx context.Context, ms *models.Micr
 		Source:  runtimeops.SourceTask,
 		Message: "update create phase",
 	})
-	return cm.createContainer(ctx, ms)
+	return cm.createContainerWithPull(ctx, ms, false)
 }
 
 // RemoveContainerByMicroserviceUUID removes a container by microservice UUID.
@@ -531,13 +538,16 @@ func (cm *ContainerManager) RecreateContainer(ctx context.Context, ms *models.Mi
 	if err != nil {
 		return "", err
 	}
+	if err := cm.ensureImageLocal(ms, opts.PullImage); err != nil {
+		return "", err
+	}
 	if container != nil {
 		if err := cm.RemoveContainerByMicroserviceUUID(ctx, ms.MicroserviceUUID, opts.WithCleanup, opts.RemoveImage); err != nil {
 			return "", err
 		}
 	}
 
-	if err := cm.createContainerWithPull(ctx, ms, opts.PullImage); err != nil {
+	if err := cm.createContainerWithPull(ctx, ms, false); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(ms.ContainerID) == "" {
@@ -553,15 +563,16 @@ func (cm *ContainerManager) createContainer(ctx context.Context, ms *models.Micr
 
 // createContainerWithPull creates a container, optionally pulling the image first
 func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *models.Microservice, pullImage bool) error {
+	return cm.createContainerWithPullCause(ctx, ms, pullImage, nil)
+}
+
+func (cm *ContainerManager) createContainerWithPullCause(ctx context.Context, ms *models.Microservice, pullImage bool, pullCause error) error {
 	if err := cm.applyCatalogStartGate(ms); err != nil {
 		return err
 	}
 	if cm.volumeHeld(ms) {
 		return errVolumeInUse
 	}
-	statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
-		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStatePulling)
-	})
 
 	registry, err := resolveRegistryForMicroservice(cm.microserviceManager, ms)
 	if err != nil {
@@ -571,6 +582,10 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 	pullSucceeded := false
 
 	if !fromCache && pullImage {
+		clearImagePullStatus(ms.MicroserviceUUID)
+		statusreporter.GetInstance().UpdateProcessManagerStatus(func(status *models.ProcessManagerStatus) {
+			status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStatePulling)
+		})
 		cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
 			Event:   runtimeops.EventContainerPulling,
 			MsUUID:  ms.MicroserviceUUID,
@@ -602,7 +617,7 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 				Message:    "pull failed, trying local cache",
 			})
 			cm.logger.Warnf("Unable to pull \"%s\" from registry. Trying local cache: %v", pullRef, err)
-			return cm.createContainerWithPull(ctx, ms, false)
+			return cm.createContainerWithPullCause(ctx, ms, false, err)
 		}
 		pullSucceeded = true
 		cm.emitFromCM(ctx, runtimeops.RuntimeEvent{
@@ -635,7 +650,10 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+		if pullCause == nil {
+			pullCause = fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+		}
+		return newImagePullMiss(pullRef, pullCause)
 	}
 	effectiveRunRef := matchedRef
 	if pullSucceeded {
@@ -787,9 +805,52 @@ func (cm *ContainerManager) createContainerWithPull(ctx context.Context, ms *mod
 				msStatus.IPAddress = ms.ContainerIPAddress
 			}
 		}
+		status.ResolveImagePull(ms.MicroserviceUUID, GetRestartStuckChecker().HasPullTracking(ms.MicroserviceUUID))
 	})
+	GetRestartStuckChecker().ClearPullWait(ms.MicroserviceUUID)
 	_ = cfg
 
+	return nil
+}
+
+// ensureImageLocal pulls when asked, then requires the image to be on disk.
+// The current container is left running when the image is still absent.
+func (cm *ContainerManager) ensureImageLocal(ms *models.Microservice, pull bool) error {
+	if ms == nil {
+		return errors.New("microservice is nil")
+	}
+	registry, err := resolveRegistryForMicroservice(cm.microserviceManager, ms)
+	if err != nil {
+		return err
+	}
+	pullRef, lookupRefs, fromCache := imageref.ResolveForRegistry(ms.ImageName, registry.URL)
+	var pullErr error
+	pullSucceeded := false
+	if pull && !fromCache {
+		clearImagePullStatus(ms.MicroserviceUUID)
+		opts := &engine.PullImageOptions{Platform: cm.platformForPull(ms)}
+		if err := cm.engine.PullImage(pullRef, registry, opts); err != nil {
+			pullErr = err
+			cm.logger.Warnf("Unable to pull \"%s\" from registry. Trying local cache: %v", pullRef, err)
+		} else {
+			pullSucceeded = true
+		}
+	}
+	matchedRef, exists, err := cm.findFirstLocalImageRef(lookupRefs, registry)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if pullErr == nil {
+			pullErr = fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+		}
+		return newImagePullMiss(pullRef, pullErr)
+	}
+	if pullSucceeded {
+		ms.ImageName = pullRef
+	} else if strings.TrimSpace(matchedRef) != "" {
+		ms.ImageName = matchedRef
+	}
 	return nil
 }
 

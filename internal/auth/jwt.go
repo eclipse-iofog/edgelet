@@ -318,8 +318,18 @@ func (j *JWTManager) GenerateServiceAccountJWT(subject string, ttl time.Duration
 	return j.signPurposeJWTLocked(subject, serviceAccountAudience, ttl, tokenUseServiceAccount, extraClaims)
 }
 
+// EdgeGuardLink is the locked link state of one NIC stored in the Edge Guard JWT.
+// The identity hash does not include link state. This claim is the baseline used to
+// tell a dark port becoming up from a locked-up port losing carrier.
+type EdgeGuardLink struct {
+	Name      string `json:"name"`
+	MAC       string `json:"mac"`
+	LinkState string `json:"linkState"`
+}
+
 // GenerateEdgeGuardJWT creates a dedicated JWT for edgeguard attestation payloads.
-func (j *JWTManager) GenerateEdgeGuardJWT(hash string, ttl time.Duration) (string, string, int64, int64, error) {
+// A nil links slice omits the claim. A non-nil slice, including empty, stores the link lock.
+func (j *JWTManager) GenerateEdgeGuardJWT(hash string, links []EdgeGuardLink, ttl time.Duration) (string, string, int64, int64, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	cfg, err := j.ensureProvisionedSignerLocked()
@@ -327,6 +337,9 @@ func (j *JWTManager) GenerateEdgeGuardJWT(hash string, ttl time.Duration) (strin
 		return "", "", 0, 0, err
 	}
 	extra := map[string]any{"hash": hash}
+	if links != nil {
+		extra["links"] = links
+	}
 	return j.signPurposeJWTLocked("system:edgeguard:"+cfg.IOFogUUID, edgeGuardAudience, ttl, tokenUseEdgeGuard, extra)
 }
 
@@ -354,6 +367,38 @@ func EdgeGuardHashFromJWT(tokenString string) (string, error) {
 		return "", errors.New("edgeguard jwt hash claim is invalid")
 	}
 	return hash, nil
+}
+
+// EdgeGuardLinksFromJWT returns the locked NIC link states from a stored Edge Guard JWT.
+// present is false when the token has no links claim, which is the pre-lock baseline.
+func EdgeGuardLinksFromJWT(tokenString string) (links []EdgeGuardLink, present bool, err error) {
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return nil, false, errors.New("edgeguard jwt is empty")
+	}
+	token, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		return nil, false, fmt.Errorf("parse edgeguard jwt: %w", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, false, errors.New("edgeguard jwt claims are invalid")
+	}
+	raw, ok := claims["links"]
+	if !ok || raw == nil {
+		return nil, false, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, true, fmt.Errorf("encode edgeguard link claim: %w", err)
+	}
+	if err := json.Unmarshal(encoded, &links); err != nil {
+		return nil, true, fmt.Errorf("decode edgeguard link claim: %w", err)
+	}
+	if links == nil {
+		links = []EdgeGuardLink{}
+	}
+	return links, true, nil
 }
 
 // TokenSHA256 computes the stable hash used for persisted token metadata.

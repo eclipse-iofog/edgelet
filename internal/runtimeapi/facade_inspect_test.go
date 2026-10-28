@@ -255,6 +255,15 @@ func TestAttachDurabilityInspect_OmitemptyAndFallback(t *testing.T) {
 	if !ok || gotErr == nil || *gotErr != "" {
 		t.Fatalf("expected explicit empty errorMessage pointer, got %#v", item["errorMessage"])
 	}
+	if _, ok := item["imagePullStatus"]; ok {
+		t.Fatalf("expected imagePullStatus omitted, got %#v", item["imagePullStatus"])
+	}
+
+	status.ImagePullStatus = models.ImagePullStatusFailed
+	attachDurabilityInspect(item, status, "db crash", 3)
+	if item["imagePullStatus"] != models.ImagePullStatusFailed {
+		t.Fatalf("expected imagePullStatus failed, got %#v", item["imagePullStatus"])
+	}
 }
 
 func TestFacadeGetRuntimeMicroservice_LocalDurabilityFromDB(t *testing.T) {

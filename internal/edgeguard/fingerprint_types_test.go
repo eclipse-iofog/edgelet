@@ -117,9 +117,69 @@ func TestTamperSensitiveFieldsChangeCanonicalFingerprint(t *testing.T) {
 		t.Fatalf("canonicalize usb tampered: %v", err)
 	}
 	if baseCanonical == nicCanonical {
-		t.Fatal("expected NIC link-state change to alter canonical fingerprint")
+		t.Fatal("expected NIC link-state change to alter the full canonical fingerprint")
 	}
 	if baseCanonical == usbCanonical {
 		t.Fatal("expected USB identity change to alter canonical fingerprint")
+	}
+
+	baseIdentity, err := canonicalizeIdentityFingerprint(base)
+	if err != nil {
+		t.Fatalf("identity base: %v", err)
+	}
+	nicIdentity, err := canonicalizeIdentityFingerprint(nicTampered)
+	if err != nil {
+		t.Fatalf("identity nic: %v", err)
+	}
+	usbIdentity, err := canonicalizeIdentityFingerprint(usbTampered)
+	if err != nil {
+		t.Fatalf("identity usb: %v", err)
+	}
+	if baseIdentity != nicIdentity {
+		t.Fatal("expected NIC link-state change to leave the identity fingerprint unchanged")
+	}
+	if baseIdentity == usbIdentity {
+		t.Fatal("expected USB identity change to alter the identity fingerprint")
+	}
+}
+
+func TestIdentityFingerprintIgnoresPCRAndKeepsEK(t *testing.T) {
+	base := FingerprintPayload{
+		System: SystemIdentity{UUID: "uuid"},
+		Optional: OptionalFingerprintSignals{
+			TPM: TPMIdentity{Present: true, EKFingerprint: "ek-1", PCRPolicyHash: "pcr-a"},
+		},
+	}
+	pcrChanged := base
+	pcrChanged.Optional.TPM.PCRPolicyHash = "pcr-b"
+	ekChanged := base
+	ekChanged.Optional.TPM.EKFingerprint = "ek-2"
+	macChanged := base
+	macChanged.PrimaryNICs = []NICIdentity{{Name: "eth0", MAC: "11:22:33:44:55:66", LinkState: "1"}}
+
+	baseIdentity, err := canonicalizeIdentityFingerprint(base)
+	if err != nil {
+		t.Fatalf("identity base: %v", err)
+	}
+	pcrIdentity, err := canonicalizeIdentityFingerprint(pcrChanged)
+	if err != nil {
+		t.Fatalf("identity pcr: %v", err)
+	}
+	ekIdentity, err := canonicalizeIdentityFingerprint(ekChanged)
+	if err != nil {
+		t.Fatalf("identity ek: %v", err)
+	}
+	macIdentity, err := canonicalizeIdentityFingerprint(macChanged)
+	if err != nil {
+		t.Fatalf("identity mac: %v", err)
+	}
+	if baseIdentity != pcrIdentity {
+		t.Fatal("expected PCR file hash change to leave the identity fingerprint unchanged")
+	}
+	if baseIdentity == ekIdentity {
+		t.Fatal("expected EK certificate change to alter the identity fingerprint")
+	}
+	if baseIdentity == macIdentity {
+		t.Fatal("expected NIC MAC change to alter the identity fingerprint")
 	}
 }

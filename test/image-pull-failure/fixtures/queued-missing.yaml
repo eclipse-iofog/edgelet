@@ -1,0 +1,12 @@
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: pull-miss-queued
+spec:
+  image: docker.io/library/alpine:edgelet-pull-miss-missing
+  registry: 1
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 86400

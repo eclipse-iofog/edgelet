@@ -239,7 +239,7 @@ func TestFacadeListGetModel_SourceAndInspectExtras(t *testing.T) {
 	}
 }
 
-func TestFacadeParseAndValidateLocalModelManifests_RejectsHostRepo(t *testing.T) {
+func TestFacadeParseAndValidateLocalModelManifests_RejectsSchemeRepo(t *testing.T) {
 	f := NewFacade()
 	if err := f.db.Open(t.TempDir()); err != nil {
 		t.Fatalf("open store: %v", err)
@@ -251,7 +251,7 @@ kind: Model
 metadata:
   name: llama-2-7b-q2k
 spec:
-  repo: huggingface.co/org/repo
+  repo: https://huggingface.co/org/repo
   registry: 5
 `)
 	if err == nil || !strings.Contains(err.Error(), "spec.repo") {

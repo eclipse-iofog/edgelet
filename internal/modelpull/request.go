@@ -10,7 +10,7 @@ import (
 type Request struct {
 	// Name is metadata.name and the on-disk directory under the models root.
 	Name string
-	// Repo is spec.repo (path only, no host).
+	// Repo is spec.repo. A registry host may be included; the pull adapter resolves it.
 	Repo string
 	// Revision is spec.revision (tag, digest, or empty).
 	Revision string

@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,63 @@ func TestParseRegistryEndpoint(t *testing.T) {
 		Build()
 	if _, err := parseRegistryEndpoint(blocked, "ai/gemma3"); err == nil {
 		t.Fatal("expected http without insecure to fail")
+	}
+}
+
+func TestParseRegistryEndpoint_StripsMatchingHost(t *testing.T) {
+	reg := models.NewRegistryBuilder().SetURL("https://docker.io/").SetType(models.RegistryTypeOCI).Build()
+	ep, err := parseRegistryEndpoint(reg, "Docker.IO/ai/gemma3")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if ep.RepoRef != "docker.io/ai/gemma3" || ep.Host != "docker.io" || !ep.ApplyRegistryConfig || ep.PlainHTTP {
+		t.Fatalf("expected one docker.io prefix, got %+v", ep)
+	}
+	if ep.AuthHost != "docker.io" {
+		t.Fatalf("auth host: %q", ep.AuthHost)
+	}
+}
+
+func TestParseRegistryEndpoint_ForeignHostUsesThatRegistry(t *testing.T) {
+	reg := models.NewRegistryBuilder().
+		SetURL("http://registry.internal:5000").
+		SetType(models.RegistryTypeOCI).
+		SetInsecure(true).
+		Build()
+	ep, err := parseRegistryEndpoint(reg, "ghcr.io/ai/gemma3")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if ep.RepoRef != "ghcr.io/ai/gemma3" || ep.Host != "ghcr.io" {
+		t.Fatalf("expected ghcr target, got %+v", ep)
+	}
+	if ep.ApplyRegistryConfig || ep.PlainHTTP || ep.Scheme != "https" {
+		t.Fatalf("foreign host must not inherit registry TLS settings, got %+v", ep)
+	}
+	if ep.AuthHost != "registry.internal:5000" {
+		t.Fatalf("auth host: %q", ep.AuthHost)
+	}
+}
+
+func TestParseRegistryEndpoint_MatchingHostKeepsPlainHTTP(t *testing.T) {
+	reg := models.NewRegistryBuilder().
+		SetURL("http://registry.internal:5000").
+		SetType(models.RegistryTypeOCI).
+		SetInsecure(true).
+		Build()
+	ep, err := parseRegistryEndpoint(reg, "registry.internal:5000/ai/gemma3")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if ep.RepoRef != "registry.internal:5000/ai/gemma3" || !ep.PlainHTTP || !ep.ApplyRegistryConfig {
+		t.Fatalf("expected matching host:port to keep plain HTTP, got %+v", ep)
+	}
+}
+
+func TestParseRegistryEndpoint_RejectsScheme(t *testing.T) {
+	reg := models.NewRegistryBuilder().SetURL("docker.io").SetType(models.RegistryTypeOCI).Build()
+	if _, err := parseRegistryEndpoint(reg, "https://ghcr.io/ai/gemma3"); err == nil || !strings.Contains(err.Error(), "spec.repo") {
+		t.Fatalf("expected scheme rejection, got %v", err)
 	}
 }
 

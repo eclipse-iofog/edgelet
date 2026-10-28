@@ -75,7 +75,7 @@ func newModelPullCommand() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: runModelPull,
 	}
-	cmd.Flags().String("repo", "", "Repository path without host")
+	cmd.Flags().String("repo", "", "Repository path, with or without a registry host")
 	cmd.Flags().String("revision", "", "Tag, digest, branch, or commit")
 	cmd.Flags().IntP("registry", "r", 0, "Registry id")
 	cmd.Flags().StringArray("files", nil, "HF file path or glob (repeatable)")

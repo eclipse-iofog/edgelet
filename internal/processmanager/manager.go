@@ -923,6 +923,10 @@ func (pm *ProcessManager) reconcileLocalDesiredRunning(item *models.LocalDeploye
 		return
 	}
 	if container == nil {
+		if !GetRestartStuckChecker().PullReady(item.LocalUUID, localDesiredImage(item), recreateSkipNone) {
+			pm.delayImagePull(item.LocalUUID, "ADD")
+			return
+		}
 		pm.launchLocalDeploymentWithHook(item, now)
 		return
 	}
@@ -1101,6 +1105,11 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 			pm.noteLocalVolumeHold(item)
 			return
 		}
+		if isImagePullMiss(err) {
+			pm.noteLocalImagePullMiss(item, image, err, false)
+			item.LastTransitionAt = now
+			return
+		}
 		if errors.Is(err, modelcatalog.ErrWaiting) {
 			item.RuntimeState = "queued"
 			item.State = item.RuntimeState
@@ -1123,6 +1132,7 @@ func (pm *ProcessManager) launchLocalDeployment(item *models.LocalDeployedMicros
 	item.ObservedGeneration = item.Generation
 	item.FailureCount = 0
 	item.LastTransitionAt = now
+	clearImagePullFailure(item.LocalUUID)
 	_ = persistLocalWorkloadIfPresent(item)
 }
 
@@ -1175,41 +1185,51 @@ func (pm *ProcessManager) checkTasks() {
 		}
 
 		if err := pm.executeTask(task); err != nil {
-			if errors.Is(err, engine.ErrReconcilePaused) {
-				if pm.microserviceManager != nil {
-					if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
-						ms.SetIsUpdating(false)
-					}
-				}
-				continue
-			}
-			if errors.Is(err, errVolumeInUse) {
-				pm.noteVolumeInUse(task.MicroserviceUUID)
-				if pm.microserviceManager != nil {
-					if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
-						ms.SetIsUpdating(false)
-					}
-				}
-				continue
-			}
-			pm.logger.Errorf("Error executing task %s for microservice %s: %v", task.Action, task.MicroserviceUUID, err)
-			if task.Retries < maxTaskRetries {
-				pm.retryTask(task)
-			} else {
-				pm.emitTaskFailed(task, err)
-				pm.logger.Errorf("Task %s for microservice %s failed after %d retries, giving up", task.Action, task.MicroserviceUUID, task.Retries)
-				// Set FAILED status and error message so controller receives it
-				statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
-					s.SetMicroservicesState(task.MicroserviceUUID, models.MicroserviceStateFailed)
-					errMsg := fmt.Sprintf("Container %s %s operation failed after 5 attempts: %v", task.MicroserviceUUID, task.Action, err)
-					s.SetMicroservicesStatusErrorMessage(task.MicroserviceUUID, errMsg)
-				})
-				// Release the in-flight lock so the reconciliation loop can run
-				if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
-					ms.SetIsUpdating(false)
-				}
+			pm.finishTask(task, err)
+		}
+	}
+}
+
+func (pm *ProcessManager) finishTask(task *ContainerTask, err error) {
+	if task == nil || err == nil {
+		return
+	}
+	if errors.Is(err, engine.ErrReconcilePaused) {
+		if pm.microserviceManager != nil {
+			if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+				ms.SetIsUpdating(false)
 			}
 		}
+		return
+	}
+	if errors.Is(err, errVolumeInUse) {
+		pm.noteVolumeInUse(task.MicroserviceUUID)
+		if pm.microserviceManager != nil {
+			if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+				ms.SetIsUpdating(false)
+			}
+		}
+		return
+	}
+	if isImagePullMiss(err) {
+		pm.logger.Warnf("image pull failed for %s: %v", task.MicroserviceUUID, err)
+		pm.noteImagePullMiss(task.MicroserviceUUID, err)
+		return
+	}
+	pm.logger.Errorf("Error executing task %s for microservice %s: %v", task.Action, task.MicroserviceUUID, err)
+	if task.Retries < maxTaskRetries {
+		pm.retryTask(task)
+		return
+	}
+	pm.emitTaskFailed(task, err)
+	pm.logger.Errorf("Task %s for microservice %s failed after %d retries, giving up", task.Action, task.MicroserviceUUID, task.Retries)
+	statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+		s.SetMicroservicesState(task.MicroserviceUUID, models.MicroserviceStateFailed)
+		errMsg := fmt.Sprintf("Container %s %s operation failed after 5 attempts: %v", task.MicroserviceUUID, task.Action, err)
+		s.SetMicroservicesStatusErrorMessage(task.MicroserviceUUID, errMsg)
+	})
+	if ms := pm.microserviceManager.FindLatestMicroserviceByUUID(task.MicroserviceUUID); ms != nil {
+		ms.SetIsUpdating(false)
 	}
 }
 
@@ -1494,6 +1514,13 @@ func (pm *ProcessManager) reconcileControllerMicroservices(only map[string]struc
 			if crashDrivenMissing(existing) && !ms.Rebuild && !released {
 				pm.recordRestart(ms.MicroserviceUUID)
 			}
+			if !GetRestartStuckChecker().PullReady(ms.MicroserviceUUID, ms.ImageName, skip) {
+				pm.delayImagePull(ms.MicroserviceUUID, "ADD")
+				statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
+					s.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateQueued)
+				})
+				continue
+			}
 			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
 				pm.emitRestartBackoff(ms.MicroserviceUUID, "ADD")
 				statusreporter.GetInstance().UpdateProcessManagerStatus(func(s *models.ProcessManagerStatus) {
@@ -1501,6 +1528,7 @@ func (pm *ProcessManager) reconcileControllerMicroservices(only map[string]struc
 				})
 				continue
 			}
+			pm.consumeRebuildSkip(ms, skip)
 			// Container is missing — schedule creation. Clear stuck flag when Rebuild=true.
 			if stats != nil {
 				stats.scheduledAdd++
@@ -1688,6 +1716,7 @@ func (pm *ProcessManager) addMicroservice(ms *models.Microservice) {
 		if ms.Rebuild {
 			status.ResetMicroservicesRestartCount(ms.MicroserviceUUID)
 		}
+		status.ClearImagePullStatus(ms.MicroserviceUUID)
 		status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateQueued)
 	})
 	pm.addTask(NewContainerTask(TaskActionAdd, ms.MicroserviceUUID))
@@ -1723,6 +1752,13 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 	ms.ContainerIPAddress = &ip
 
 	shouldUpdate := pm.shouldContainerBeUpdated(ms, container, status)
+	if !shouldUpdate {
+		if status.Status == models.MicroserviceStateRunning {
+			clearImagePullFailure(ms.MicroserviceUUID)
+		}
+		pm.logger.Debug("Finished update microservice")
+		return
+	}
 	if shouldUpdate {
 		// A running container is stopped before replacement. The create that
 		// follows still refuses to start while a host process holds the volume.
@@ -1738,13 +1774,22 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 			ms.IsStuckInRestart = false
 		}
 		skip := pm.recreateSkipReason(ms)
-		if status.Status != models.MicroserviceStateRunning && !ms.Rebuild && !released {
-			pm.recordRestart(ms.MicroserviceUUID)
-			if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
-				pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
-				return
+		if !GetRestartStuckChecker().PullReady(ms.MicroserviceUUID, ms.ImageName, skip) {
+			pm.delayImagePull(ms.MicroserviceUUID, "UPDATE")
+			return
+		}
+		if status.Status != models.MicroserviceStateRunning && !released {
+			if !ms.Rebuild {
+				pm.recordRestart(ms.MicroserviceUUID)
+			}
+			if !ms.Rebuild || skip != recreateSkipRebuild {
+				if !GetRestartStuckChecker().Ready(ms.MicroserviceUUID, skip) {
+					pm.emitRestartBackoff(ms.MicroserviceUUID, "UPDATE")
+					return
+				}
 			}
 		}
+		pm.consumeRebuildSkip(ms, skip)
 		reason := reconcileUpdateReason(ms, status)
 		if stats != nil {
 			stats.scheduledUpdate++
@@ -1756,6 +1801,7 @@ func (pm *ProcessManager) updateMicroservice(container *engine.Container, ms *mo
 			if ms.Rebuild {
 				status.ResetMicroservicesRestartCount(ms.MicroserviceUUID)
 			}
+			status.ClearImagePullStatus(ms.MicroserviceUUID)
 			status.SetMicroservicesState(ms.MicroserviceUUID, models.MicroserviceStateUpdating)
 		})
 		pm.addTask(NewContainerTask(TaskActionUpdate, ms.MicroserviceUUID))
@@ -1854,9 +1900,12 @@ func (pm *ProcessManager) recreateSkipReason(ms *models.Microservice) recreateSk
 	}
 	checker := GetRestartStuckChecker()
 	if ms.Rebuild {
-		checker.ResetAfterRebuild(ms.MicroserviceUUID)
-		return recreateSkipRebuild
+		if checker.RebuildSkipAvailable(ms.MicroserviceUUID) {
+			return recreateSkipRebuild
+		}
+		return recreateSkipNone
 	}
+	checker.NoteRebuildCleared(ms.MicroserviceUUID)
 	if checker.ConsumeCatalogReadySkip(ms.MicroserviceUUID) {
 		return recreateSkipCatalogReady
 	}
@@ -2223,6 +2272,15 @@ func (pm *ProcessManager) recreateLocalDeployment(item *models.LocalDeployedMicr
 			pm.noteLocalVolumeHold(item)
 			return err
 		}
+		if isImagePullMiss(err) {
+			up := false
+			if live, liveErr := pm.containerManager.GetContainerForMicroservice(item.LocalUUID); liveErr == nil && live != nil {
+				up = true
+			}
+			pm.noteLocalImagePullMiss(item, localDesiredImage(item), err, up)
+			item.LastTransitionAt = now
+			return err
+		}
 		pm.bumpLocalFailure(item, err, "failed")
 		return err
 	}
@@ -2508,9 +2566,11 @@ func (pm *ProcessManager) launchLocalMicroserviceWithProgressLocked(ms *models.M
 		emitLocalDeployProgress(progress, "pulling", "resolving and preparing image")
 		pullRef, lookupRefs, fromCache := imageref.ResolveForRegistry(ms.ImageName, registry.URL)
 		pullSucceeded := false
+		var pullErr error
 		opts := &engine.PullImageOptions{Platform: msPlatform(ms)}
 		if !fromCache {
 			if err := pm.engine.PullImage(pullRef, registry, opts); err != nil {
+				pullErr = err
 				pm.logger.Warnf("local pull failed for %s, continuing with cache: %v", pullRef, err)
 			} else {
 				pullSucceeded = true
@@ -2529,7 +2589,10 @@ func (pm *ProcessManager) launchLocalMicroserviceWithProgressLocked(ms *models.M
 			}
 		}
 		if matchedRef == "" {
-			return "", fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+			if pullErr == nil {
+				pullErr = fmt.Errorf("image not found in local cache for refs: %v", lookupRefs)
+			}
+			return "", newImagePullMiss(pullRef, pullErr)
 		}
 		if pullSucceeded {
 			ms.ImageName = pullRef

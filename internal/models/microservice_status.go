@@ -2,22 +2,27 @@ package models
 
 import "time"
 
+// ImagePullStatusFailed reports that the desired image is not on this machine.
+// Every other outcome omits the field.
+const ImagePullStatusFailed = "failed"
+
 // MicroserviceStatus represents the status of a microservice
 type MicroserviceStatus struct {
-	Status         MicroserviceState `json:"status" yaml:"status"`
-	StartTime      int64             `json:"startTime" yaml:"startTime"`
-	CPUUsage       float32           `json:"cpuUsage" yaml:"cpuUsage"`
-	MemoryUsage    int64             `json:"memoryUsage" yaml:"memoryUsage"`
-	ContainerID    string            `json:"containerId" yaml:"containerId"`
-	PodID          string            `json:"podId,omitempty" yaml:"podId,omitempty"`
-	Percentage     float32           `json:"percentage" yaml:"percentage"`
-	ErrorMessage   *string           `json:"errorMessage,omitempty" yaml:"errorMessage,omitempty"`
-	LastError      string            `json:"lastError,omitempty" yaml:"lastError,omitempty"`
-	LastErrorAt    int64             `json:"lastErrorAt,omitempty" yaml:"lastErrorAt,omitempty"`
-	RestartCount   int               `json:"restartCount,omitempty" yaml:"restartCount,omitempty"`
-	IPAddress      *string           `json:"ipAddress,omitempty" yaml:"ipAddress,omitempty"`
-	ExecSessionIDs []string          `json:"execSessionIds,omitempty" yaml:"execSessionIds,omitempty"`
-	HealthStatus   *string           `json:"healthStatus,omitempty" yaml:"healthStatus,omitempty"`
+	Status          MicroserviceState `json:"status" yaml:"status"`
+	StartTime       int64             `json:"startTime" yaml:"startTime"`
+	CPUUsage        float32           `json:"cpuUsage" yaml:"cpuUsage"`
+	MemoryUsage     int64             `json:"memoryUsage" yaml:"memoryUsage"`
+	ContainerID     string            `json:"containerId" yaml:"containerId"`
+	PodID           string            `json:"podId,omitempty" yaml:"podId,omitempty"`
+	Percentage      float32           `json:"percentage" yaml:"percentage"`
+	ErrorMessage    *string           `json:"errorMessage,omitempty" yaml:"errorMessage,omitempty"`
+	LastError       string            `json:"lastError,omitempty" yaml:"lastError,omitempty"`
+	LastErrorAt     int64             `json:"lastErrorAt,omitempty" yaml:"lastErrorAt,omitempty"`
+	RestartCount    int               `json:"restartCount,omitempty" yaml:"restartCount,omitempty"`
+	ImagePullStatus string            `json:"imagePullStatus,omitempty" yaml:"imagePullStatus,omitempty"`
+	IPAddress       *string           `json:"ipAddress,omitempty" yaml:"ipAddress,omitempty"`
+	ExecSessionIDs  []string          `json:"execSessionIds,omitempty" yaml:"execSessionIds,omitempty"`
+	HealthStatus    *string           `json:"healthStatus,omitempty" yaml:"healthStatus,omitempty"`
 }
 
 // NewMicroserviceStatus creates a new MicroserviceStatus with UNKNOWN state

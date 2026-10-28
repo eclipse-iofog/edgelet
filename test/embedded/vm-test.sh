@@ -2,7 +2,7 @@
 # test/embedded/vm-test.sh
 #
 # Runs the full embedded-containerd integration test suite inside the Lima VM.
-# Tests are grouped into 12 phases:
+# Tests are grouped into 13 phases:
 #
 #   Phase 1 — Extracted embedded binaries
 #   Phase 2 — containerd socket & health
@@ -16,6 +16,7 @@
 #   Phase 10 — Catalog bind + expanded container fields (keeps Phase 9 models until cleanup)
 #   Phase 11 — Persistent VOLUME scope, retain across restart/prune, explicit reclaim
 #   Phase 12 — Tiny HF Knowledge pull + catalog bind (dataset API; models store untouched)
+#   Phase 13 — Image pull failure (queued when nothing is running; a running controller stays up)
 #
 # Usage:
 #   ./test/embedded/vm-test.sh [--vm-name=iofog-test]
@@ -2142,6 +2143,213 @@ assert_ok "remove tiny Hugging Face model after dual catalog" \
 
 assert_ok "prune models after dual catalog" \
     R "edgelet model prune"
+
+###############################################################################
+# Phase 13 — Image pull failure
+###############################################################################
+log_step "Phase 13: Image pull failure"
+
+assert_ok_verbose "pull-miss fixtures are clear and host ports 80 and 51121 are free" \
+    R "set -e
+edgelet controlplane delete >/dev/null 2>&1 || true
+edgelet ms rm edgelet.pull-miss-queued >/dev/null 2>&1 || true
+busy=\$(ss -H -ltn 'sport = :80' 2>/dev/null || true)
+busy=\"\${busy}\$(ss -H -ltn 'sport = :51121' 2>/dev/null || true)\"
+if [ -n \"\${busy}\" ]; then
+  echo \"\${busy}\" >&2
+  echo 'host port 80 or 51121 is in use' >&2
+  exit 1
+fi
+cat >/tmp/pull-miss-queued.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: Microservice
+metadata:
+  name: pull-miss-queued
+spec:
+  image: docker.io/library/alpine:edgelet-pull-miss-missing
+  registry: 1
+  container:
+    commands:
+      - /bin/sh
+      - -lc
+      - sleep 86400
+EOF
+cat >/tmp/pull-miss-cp-nginx.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: ControlPlane
+metadata:
+  name: pull-miss-cp
+  namespace: default
+spec:
+  controller:
+    image: ghcr.io/eclipse-iofog/controller:3.9.3
+    registry: 1
+    port: 51121
+    publicUrl: http://localhost:51121
+  console:
+    port: 8008
+    url: http://localhost
+  auth:
+    mode: embedded
+    insecureAllowHttp: true
+    bootstrap:
+      username: admin
+      password: AdminPass123!
+EOF
+cat >/tmp/pull-miss-cp-missing.yaml <<'EOF'
+apiVersion: edgelet.iofog.org/v1
+kind: ControlPlane
+metadata:
+  name: pull-miss-cp
+  namespace: default
+spec:
+  controller:
+    image: ghcr.io/eclipse-iofog/controller:edgelet-pull-miss-absent
+    registry: 1
+    port: 51121
+    publicUrl: http://localhost:51121
+  console:
+    port: 8008
+    url: http://localhost
+  auth:
+    mode: embedded
+    insecureAllowHttp: true
+    bootstrap:
+      username: admin
+      password: AdminPass123!
+EOF"
+
+assert_ok_verbose "a missing image leaves the new workload queued with no container" \
+    R "set -e
+edgelet --no-color --timeout 4m deploy -f /tmp/pull-miss-queued.yaml >/tmp/pull-miss-queued.deploy 2>&1 || true
+for i in \$(seq 1 60); do
+  inspect=\$(edgelet ms inspect edgelet.pull-miss-queued 2>/dev/null || true)
+  state=\$(echo \"\${inspect}\" | sed -n 's/^  \"state\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  pull=\$(echo \"\${inspect}\" | sed -n 's/^  \"imagePullStatus\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  if [ \"\${state}\" = queued ] && [ \"\${pull}\" = failed ] && echo \"\${inspect}\" | grep -q 'unable to pull'; then
+    if [ -n \"\${cid}\" ] && [ \"\${cid}\" != '-' ]; then
+      echo \"queued workload has containerId \${cid}\" >&2
+      exit 1
+    fi
+    if echo \"\${inspect}\" | grep -Eq '\"restartCount\": [1-9]'; then
+      echo 'restartCount incremented for a pull miss' >&2
+      echo \"\${inspect}\" >&2
+      exit 1
+    fi
+    ids=\$(ctr --address /run/edgelet/containerd.sock -n k8s.io containers ls -q 2>/dev/null || true)
+    for id in \${ids}; do
+      if ctr --address /run/edgelet/containerd.sock -n k8s.io containers info \"\${id}\" 2>/dev/null | grep -Fq 'pull-miss-queued'; then
+        echo \"container \${id} exists for pull-miss-queued\" >&2
+        exit 1
+      fi
+    done
+    exit 0
+  fi
+  sleep 3
+done
+echo 'queued pull miss was not reported' >&2
+echo '--- deploy ---' >&2
+cat /tmp/pull-miss-queued.deploy >&2 || true
+echo '--- inspect ---' >&2
+edgelet ms inspect edgelet.pull-miss-queued >&2 || true
+exit 1"
+
+assert_ok_verbose "controller reaches running on ghcr.io/eclipse-iofog/controller:3.9.3" \
+    R "set -e
+edgelet --no-color --timeout 8m deploy -f /tmp/pull-miss-cp-nginx.yaml
+for i in \$(seq 1 30); do
+  inspect=\$(edgelet ms inspect default.pull-miss-cp 2>/dev/null || true)
+  state=\$(echo \"\${inspect}\" | sed -n 's/^  \"state\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  if [ \"\${state}\" = running ] && [ -n \"\${cid}\" ] && [ \"\${cid}\" != '-' ]; then
+    info=\$(ctr --address /run/edgelet/containerd.sock -n k8s.io containers info \"\${cid}\")
+    echo \"\${info}\" | grep -Fq 'ghcr.io/eclipse-iofog/controller:3.9.3'
+    printf '%s\n' \"\${cid}\" >/tmp/pull-miss-cp.cid
+    exit 0
+  fi
+  sleep 2
+done
+echo 'controller did not reach running' >&2
+edgelet ms inspect default.pull-miss-cp >&2 || true
+exit 1"
+
+assert_ok_verbose "a missing controller image leaves that container running" \
+    R "set -e
+before=\$(cat /tmp/pull-miss-cp.cid)
+test -n \"\${before}\"
+edgelet --no-color --timeout 4m deploy -f /tmp/pull-miss-cp-missing.yaml >/tmp/pull-miss-cp.deploy 2>&1 || true
+for i in \$(seq 1 40); do
+  inspect=\$(edgelet ms inspect default.pull-miss-cp 2>/dev/null || true)
+  state=\$(echo \"\${inspect}\" | sed -n 's/^  \"state\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  pull=\$(echo \"\${inspect}\" | sed -n 's/^  \"imagePullStatus\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+  if [ \"\${state}\" = running ] && [ \"\${pull}\" = failed ] && echo \"\${inspect}\" | grep -q 'unable to pull'; then
+    if [ -z \"\${cid}\" ] || [ \"\${cid}\" = '-' ]; then
+      echo 'controller container id is empty after the pull miss' >&2
+      exit 1
+    fi
+    case \"\${cid}\" in
+      \"\${before}\"*) ;;
+      *)
+        case \"\${before}\" in
+          \"\${cid}\"*) ;;
+          *)
+            echo \"controller container changed: before=\${before} after=\${cid}\" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+    esac
+    info=\$(ctr --address /run/edgelet/containerd.sock -n k8s.io containers info \"\${before}\")
+    echo \"\${info}\" | grep -Fq 'ghcr.io/eclipse-iofog/controller:3.9.3'
+    if echo \"\${info}\" | grep -Fq 'edgelet-pull-miss-absent'; then
+      echo 'controller is running the missing tag' >&2
+      exit 1
+    fi
+    exit 0
+  fi
+  sleep 3
+done
+echo 'running controller did not keep the pull miss' >&2
+echo '--- deploy ---' >&2
+cat /tmp/pull-miss-cp.deploy >&2 || true
+echo '--- inspect ---' >&2
+edgelet ms inspect default.pull-miss-cp >&2 || true
+exit 1"
+
+assert_ok_verbose "the next retry still leaves that controller running" \
+    R "set -e
+before=\$(cat /tmp/pull-miss-cp.cid)
+sleep 25
+inspect=\$(edgelet ms inspect default.pull-miss-cp)
+state=\$(echo \"\${inspect}\" | sed -n 's/^  \"state\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+pull=\$(echo \"\${inspect}\" | sed -n 's/^  \"imagePullStatus\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+cid=\$(echo \"\${inspect}\" | sed -n 's/^  \"containerId\": \"\\([^\"]*\\)\".*/\\1/p' | head -n1)
+test \"\${state}\" = running
+test \"\${pull}\" = failed
+if [ -z \"\${cid}\" ] || [ \"\${cid}\" = '-' ]; then
+  echo 'controller container id is empty after retry' >&2
+  exit 1
+fi
+case \"\${cid}\" in
+  \"\${before}\"*) ;;
+  *)
+    case \"\${before}\" in
+      \"\${cid}\"*) ;;
+      *)
+        echo \"retry replaced the controller: before=\${before} later=\${cid}\" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+esac
+ctr --address /run/edgelet/containerd.sock -n k8s.io containers info \"\${before}\" | grep -Fq 'ghcr.io/eclipse-iofog/controller:3.9.3'"
+
+assert_ok_verbose "pull-miss workloads are removed" \
+    R "set -e
+edgelet ms rm edgelet.pull-miss-queued
+edgelet controlplane delete"
 
 ###############################################################################
 # Summary

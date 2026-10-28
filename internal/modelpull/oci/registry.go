@@ -8,6 +8,7 @@ import (
 
 	"github.com/eclipse-iofog/edgelet/internal/models"
 	"github.com/eclipse-iofog/edgelet/internal/registrytls"
+	"github.com/eclipse-iofog/edgelet/pkg/imageref"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/retry"
@@ -19,6 +20,11 @@ type registryEndpoint struct {
 	Scheme    string
 	PlainHTTP bool
 	RepoRef   string // host/repo for oras NewRepository
+	// AuthHost is the registry row host. Credentials are sent only to this host.
+	AuthHost string
+	// ApplyRegistryConfig is false when spec.repo names a different host.
+	// That pull uses default HTTPS and does not take this row's credentials, CA, or plain HTTP.
+	ApplyRegistryConfig bool
 }
 
 func parseRegistryEndpoint(reg *models.Registry, repo string) (registryEndpoint, error) {
@@ -29,6 +35,9 @@ func parseRegistryEndpoint(reg *models.Registry, repo string) (registryEndpoint,
 	if repo == "" {
 		return registryEndpoint{}, errors.New("repo is required")
 	}
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "/") {
+		return registryEndpoint{}, errors.New("spec.repo must not include a URL scheme")
+	}
 	if strings.TrimSpace(reg.URL) == "" {
 		return registryEndpoint{}, errors.New("registry url is required")
 	}
@@ -36,12 +45,43 @@ func parseRegistryEndpoint(reg *models.Registry, repo string) (registryEndpoint,
 	if err != nil {
 		return registryEndpoint{}, err
 	}
+	path := strings.TrimPrefix(repo, "/")
+	targetHost := ep.Host
+	applyRegistry := true
+	if imageref.HasRegistryHost(path) {
+		refHost, rest, found := strings.Cut(path, "/")
+		rest = strings.TrimPrefix(rest, "/")
+		if !found || strings.TrimSpace(rest) == "" {
+			return registryEndpoint{}, errors.New("repo is required")
+		}
+		if sameRegistryHost(refHost, ep.Host) {
+			path = rest
+		} else {
+			path = rest
+			targetHost = refHost
+			applyRegistry = false
+		}
+	}
+	scheme := ep.Scheme
+	plainHTTP := ep.PlainHTTP
+	if !applyRegistry {
+		scheme = "https"
+		plainHTTP = false
+	}
 	return registryEndpoint{
-		Host:      ep.Host,
-		Scheme:    ep.Scheme,
-		PlainHTTP: ep.PlainHTTP,
-		RepoRef:   ep.Host + "/" + strings.TrimPrefix(repo, "/"),
+		Host:                targetHost,
+		Scheme:              scheme,
+		PlainHTTP:           plainHTTP,
+		RepoRef:             targetHost + "/" + path,
+		AuthHost:            ep.Host,
+		ApplyRegistryConfig: applyRegistry,
 	}, nil
+}
+
+func sameRegistryHost(a, b string) bool {
+	left := imageref.SanitizeRegistryHost(a)
+	right := imageref.SanitizeRegistryHost(b)
+	return left != "" && strings.EqualFold(left, right)
 }
 
 func httpClientForRegistry(reg *models.Registry) (*http.Client, error) {
@@ -61,9 +101,15 @@ func newRemoteRepository(reg *models.Registry, repo string, httpClient *http.Cli
 		return nil, nil, registryEndpoint{}, err
 	}
 	if httpClient == nil {
-		httpClient, err = httpClientForRegistry(reg)
-		if err != nil {
-			return nil, nil, registryEndpoint{}, err
+		if ep.ApplyRegistryConfig {
+			httpClient, err = httpClientForRegistry(reg)
+			if err != nil {
+				return nil, nil, registryEndpoint{}, err
+			}
+		} else {
+			base := retry.DefaultClient
+			copied := *base
+			httpClient = &copied
 		}
 	}
 	authClient := &auth.Client{
@@ -73,8 +119,8 @@ func newRemoteRepository(reg *models.Registry, repo string, httpClient *http.Cli
 			"User-Agent": {"edgelet-model-pull"},
 		},
 	}
-	if !reg.IsPublic && (strings.TrimSpace(reg.UserName) != "" || strings.TrimSpace(reg.Password) != "") {
-		authClient.Credential = auth.StaticCredential(ep.Host, auth.Credential{
+	if ep.ApplyRegistryConfig && !reg.IsPublic && (strings.TrimSpace(reg.UserName) != "" || strings.TrimSpace(reg.Password) != "") {
+		authClient.Credential = auth.StaticCredential(ep.AuthHost, auth.Credential{
 			Username: reg.UserName,
 			Password: reg.Password,
 		})

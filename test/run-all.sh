@@ -6,6 +6,7 @@
 #   ./test/run-all.sh --suite=embedded [--skip-build] [--skip-start]
 #   ./test/run-all.sh --suite=embedded-cgroup-v1
 #   ./test/run-all.sh --suite=engine-lifecycle
+#   ./test/run-all.sh --suite=image-pull-failure
 #   ./test/run-all.sh --suite=init
 #   ./test/run-all.sh --suite=nested-docker
 #   ./test/run-all.sh --suite=unit
@@ -33,6 +34,7 @@ Suites:
   embedded              Full embedded matrix on iofog-test
   embedded-cgroup-v1    Hybrid cgroup v1 gate on iofog-test-v1 (optional)
   engine-lifecycle      Cold engine switch
+  image-pull-failure    Missing image stays queued; running controller stays up
   init                  Init packaging smokes
   nested-docker         Build edgelet image + nested Docker smokes (Mac host)
   unit                  go test internal/cgroups + supervisor (short)
@@ -63,6 +65,9 @@ run_suite() {
             ;;
         engine-lifecycle)
             exec "${REPO_ROOT}/test/engine-lifecycle/run-all.sh" "${FORWARD_ARGS[@]}"
+            ;;
+        image-pull-failure)
+            exec "${REPO_ROOT}/test/image-pull-failure/run-all.sh" "${FORWARD_ARGS[@]}"
             ;;
         init)
             exec "${REPO_ROOT}/test/init/run-all.sh" "${FORWARD_ARGS[@]}"

@@ -225,7 +225,7 @@ metadata:
   name: llama-2-7b-q2k        # required — DNS-1123 label; on-disk directory name
   labels: {}                  # optional
 spec:
-  repo: org/name              # required — upstream path, no scheme or host
+  repo: org/name              # required — path or host/path; no URL scheme
   revision: <pin>             # optional — see revision table
   registry: 3                 # required — registry row id (type selects the adapter)
   files:                      # HF only; ignored for oci
@@ -236,7 +236,7 @@ spec:
 | Field | Notes |
 |-------|--------|
 | `metadata.name` | Lowercase DNS-1123 label (no `/`). Upsert key. |
-| `spec.repo` | Hub repo id or OCI repository path **without** registry host. |
+| `spec.repo` | Hub repo id or OCI repository path. A host in the path (`ghcr.io/org/name`) is the OCI registry that is contacted. A path with no host (`org/name`) uses `spec.registry`. A Hugging Face registry accepts its own host and rejects a different one. No URL scheme. |
 | `spec.revision` | OCI empty → `latest`; `sha256:` + 64 hex → digest; else tag. HF empty → `main`; 40-char hex → commit. Floating refs (`latest`, `main`, branches, tags) set `revisionFloating: true` and log a warning. |
 | `spec.registry` | Required. Must exist; `hf` vs `oci` must match the source. |
 | `spec.files` | **HF only.** Empty list → Hub snapshot at the pinned revision. Multi-`*.gguf` repos require an explicit list or glob. Globs: `*`, `**`, `?`. **Ignored for OCI** (full artifact). |
@@ -267,7 +267,7 @@ metadata:
   name: product-docs          # required — DNS-1123 label; on-disk directory name
   labels: {}                  # optional
 spec:
-  repo: org/name              # required — Hub dataset id or OCI path, no scheme or host
+  repo: org/name              # required — path or host/path; no URL scheme
   revision: <pin>             # optional — see revision table
   registry: 3                 # required — registry row id (type selects the adapter)
   files:                      # HF only; ignored for oci
@@ -278,7 +278,7 @@ spec:
 | Field | Notes |
 |-------|--------|
 | `metadata.name` | Lowercase DNS-1123 label (no `/`). Upsert key. Separate namespace from Model names. |
-| `spec.repo` | Hub **dataset** id or OCI repository path **without** registry host. |
+| `spec.repo` | Hub dataset id or OCI repository path. A host in the path (`ghcr.io/org/name`) is the OCI registry that is contacted. A path with no host (`org/name`) uses `spec.registry`. A Hugging Face registry accepts its own host and rejects a different one. No URL scheme. |
 | `spec.revision` | OCI empty → `latest`; `sha256:` + 64 hex → digest; else tag. HF empty → `main`; 40-char hex → commit. Floating refs (`latest`, `main`, branches, tags) set `revisionFloating: true` and log a warning. |
 | `spec.registry` | Required. Must exist; `hf` vs `oci` must match the source. Hugging Face Knowledge always uses the Hub **dataset** API. |
 | `spec.files` | **HF only.** Empty list → Hub dataset snapshot at the pinned revision (full tree). Globs: `*`, `**`, `?`. Empty `files` on a huge dataset is allowed (operator choice); disk pre-check still applies. **Ignored for OCI** (full artifact). |

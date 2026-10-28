@@ -406,6 +406,24 @@ func TestFormatEdgeletAPIHuman_MSInspectDurabilityKeys(t *testing.T) {
 	}
 }
 
+func TestFormatEdgeletAPIHuman_MSInspectImagePullStatus(t *testing.T) {
+	out := FormatEdgeletAPIHuman("/v1/ms/ms-1", map[string]any{
+		"uuid":            "ms-1",
+		"name":            "infer",
+		"state":           "running",
+		"errorMessage":    "unable to pull registry.example/app:2: denied",
+		"imagePullStatus": "failed",
+	})
+	if !strings.Contains(out, "imagePullStatus: failed") {
+		t.Fatalf("expected imagePullStatus in inspect, got: %s", out)
+	}
+	errIdx := strings.Index(out, "errorMessage:")
+	pullIdx := strings.Index(out, "imagePullStatus:")
+	if errIdx < 0 || pullIdx < errIdx {
+		t.Fatalf("expected errorMessage then imagePullStatus, got: %s", out)
+	}
+}
+
 func TestFormatEdgeletAPIHuman_RegistryListShowsType(t *testing.T) {
 	out := FormatEdgeletAPIHuman("/v1/deploy/registries", map[string]any{
 		"items": []any{

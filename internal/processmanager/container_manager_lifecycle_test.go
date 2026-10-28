@@ -2,6 +2,7 @@ package processmanager
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,10 @@ type lifecycleTestEngine struct {
 	startErr      error
 	createErr     error
 	configDrifted bool
+	startCalls    int
+	pullErr       error
+	missingImage  bool
+	ops           []string
 }
 
 func (e *lifecycleTestEngine) GetContainer(msUUID string) (*engine.Container, error) {
@@ -55,13 +60,21 @@ func (e *lifecycleTestEngine) GetContainerByID(id string) (*engine.Container, er
 
 func (e *lifecycleTestEngine) GetContainerSandboxID(string) (string, error) { return "sandbox-1", nil }
 
-func (e *lifecycleTestEngine) FindLocalImage(string, string, bool) (bool, error) { return true, nil }
+func (e *lifecycleTestEngine) note(op string) {
+	e.ops = append(e.ops, op)
+}
+
+func (e *lifecycleTestEngine) FindLocalImage(string, string, bool) (bool, error) {
+	return !e.missingImage, nil
+}
 
 func (e *lifecycleTestEngine) PullImage(string, *models.Registry, *engine.PullImageOptions) error {
-	return nil
+	e.note("pull")
+	return e.pullErr
 }
 
 func (e *lifecycleTestEngine) CreateContainer(*models.Microservice, string) (string, error) {
+	e.note("create")
 	if e.createErr != nil {
 		return "", e.createErr
 	}
@@ -98,11 +111,15 @@ func (e *lifecycleTestEngine) AreMicroserviceAndContainerEqual(string, *models.M
 	return !e.configDrifted
 }
 
-func (e *lifecycleTestEngine) StartContainer(string) error { return e.startErr }
+func (e *lifecycleTestEngine) StartContainer(string) error {
+	e.startCalls++
+	return e.startErr
+}
 
 func (e *lifecycleTestEngine) StopContainer(string) error { return nil }
 
 func (e *lifecycleTestEngine) RemoveContainer(string, bool) error {
+	e.note("remove")
 	e.workload = nil
 	return nil
 }
@@ -257,4 +274,151 @@ func TestUpdateContainer_EmitsPhaseEvents(t *testing.T) {
 	if !containsSubsequence(names, want) {
 		t.Fatalf("missing update phase subsequence in %v", names)
 	}
+	assertPullOnceBeforeRemove(t, eng.ops)
+}
+
+func TestUpdateContainer_PullsOnceBeforeRemove(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+
+	eng := &lifecycleTestEngine{
+		workload: &engine.Container{
+			ID:    "cid-old",
+			Image: "nginx:old",
+			Labels: map[string]string{
+				workloadmeta.LabelAppManagedBy:    workloadmeta.ManagedByValue,
+				workloadmeta.LabelMicroserviceUID: "ms-pull-once",
+			},
+		},
+	}
+	cm := newLifecycleCM(eng, &models.Registry{URL: "https://registry.example"})
+	ms := models.NewMicroservice("ms-pull-once", "nginx:latest")
+	ms.RegistryID = 1
+
+	if err := cm.UpdateContainer(context.Background(), ms, false); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	assertPullOnceBeforeRemove(t, eng.ops)
+	if eng.createdID != "cid-new" {
+		t.Fatalf("created id %q", eng.createdID)
+	}
+}
+
+func TestUpdateContainer_FailedPullUsesCacheWithoutSecondPull(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+
+	eng := &lifecycleTestEngine{
+		pullErr: errors.New("registry down"),
+		workload: &engine.Container{
+			ID:    "cid-old",
+			Image: "nginx:latest",
+			Labels: map[string]string{
+				workloadmeta.LabelAppManagedBy:    workloadmeta.ManagedByValue,
+				workloadmeta.LabelMicroserviceUID: "ms-pull-fail",
+			},
+		},
+	}
+	cm := newLifecycleCM(eng, &models.Registry{URL: "https://registry.example"})
+	ms := models.NewMicroservice("ms-pull-fail", "nginx:latest")
+	ms.RegistryID = 1
+
+	if err := cm.UpdateContainer(context.Background(), ms, false); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	assertPullOnceBeforeRemove(t, eng.ops)
+	if eng.createdID != "cid-new" {
+		t.Fatalf("created id %q", eng.createdID)
+	}
+	got := statusreporter.GetInstance().GetProcessManagerStatus().LookupMicroserviceStatus("ms-pull-fail")
+	if got != nil && got.ImagePullStatus != "" {
+		t.Fatalf("cached image must omit imagePullStatus, got %q", got.ImagePullStatus)
+	}
+}
+
+func TestUpdateContainer_MissingImageDoesNotStop(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+
+	eng := &lifecycleTestEngine{
+		pullErr:      errors.New("registry down"),
+		missingImage: true,
+		workload: &engine.Container{
+			ID:    "cid-old",
+			Image: "nginx:old",
+			Labels: map[string]string{
+				workloadmeta.LabelAppManagedBy:    workloadmeta.ManagedByValue,
+				workloadmeta.LabelMicroserviceUID: "ms-missing",
+			},
+		},
+	}
+	cm := newLifecycleCM(eng, &models.Registry{URL: "https://registry.example"})
+	ms := models.NewMicroservice("ms-missing", "nginx:new")
+	ms.RegistryID = 1
+
+	err := cm.UpdateContainer(context.Background(), ms, false)
+	if err == nil {
+		t.Fatal("expected update to fail when the image is not cached")
+	}
+	if !isImagePullMiss(err) || !strings.Contains(err.Error(), "registry down") {
+		t.Fatalf("expected registry pull miss, got %v", err)
+	}
+	if countOp(eng.ops, "pull") != 1 {
+		t.Fatalf("pulls=%v", eng.ops)
+	}
+	if countOp(eng.ops, "remove") != 0 || countOp(eng.ops, "create") != 0 {
+		t.Fatalf("running container must stay, ops=%v", eng.ops)
+	}
+}
+
+func TestAddContainer_StillPulls(t *testing.T) {
+	openLocalReconcileTestDB(t)
+	t.Cleanup(func() { statusreporter.GetInstance().ResetProcessManagerStatus() })
+
+	eng := &lifecycleTestEngine{}
+	cm := newLifecycleCM(eng, &models.Registry{URL: "https://registry.example"})
+	ms := models.NewMicroservice("ms-add", "nginx:latest")
+	ms.RegistryID = 1
+
+	if err := cm.AddContainer(context.Background(), ms); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if countOp(eng.ops, "pull") != 1 || countOp(eng.ops, "create") != 1 {
+		t.Fatalf("ops=%v", eng.ops)
+	}
+	if eng.createdID != "cid-new" {
+		t.Fatalf("created id %q", eng.createdID)
+	}
+}
+
+func assertPullOnceBeforeRemove(t *testing.T, ops []string) {
+	t.Helper()
+	if countOp(ops, "pull") != 1 {
+		t.Fatalf("expected one pull, ops=%v", ops)
+	}
+	pullAt := opIndex(ops, "pull")
+	removeAt := opIndex(ops, "remove")
+	createAt := opIndex(ops, "create")
+	if pullAt < 0 || removeAt < 0 || createAt < 0 || pullAt > removeAt || removeAt > createAt {
+		t.Fatalf("expected pull, remove, create, ops=%v", ops)
+	}
+}
+
+func opIndex(ops []string, name string) int {
+	for i, op := range ops {
+		if op == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func countOp(ops []string, name string) int {
+	n := 0
+	for _, op := range ops {
+		if op == name {
+			n++
+		}
+	}
+	return n
 }

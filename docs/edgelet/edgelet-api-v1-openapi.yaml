@@ -2529,7 +2529,7 @@ components:
           type: string
         repo:
           type: string
-          description: Repository path without host. Required with registryId when upserting.
+          description: Repository path, with or without a registry host. Required with registryId when upserting.
         revision:
           type: string
         registryId:
@@ -2667,7 +2667,7 @@ components:
           type: string
         repo:
           type: string
-          description: Repository path without host. Required with registryId when upserting.
+          description: Repository path, with or without a registry host. Required with registryId when upserting.
         revision:
           type: string
         registryId:

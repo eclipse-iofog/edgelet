@@ -610,6 +610,24 @@ func TestAdapterPull_DatasetResumeInterruptedFile(t *testing.T) {
 	}
 }
 
+func TestNormalizeHubRepo(t *testing.T) {
+	hub := models.NewRegistryBuilder().SetURL("https://huggingface.co").SetType(models.RegistryTypeHF).Build()
+	got, err := normalizeHubRepo("huggingface.co/org/name", hub)
+	if err != nil || got != "org/name" {
+		t.Fatalf("strip matching host: got %q err %v", got, err)
+	}
+	got, err = normalizeHubRepo("org/name", hub)
+	if err != nil || got != "org/name" {
+		t.Fatalf("path-only: got %q err %v", got, err)
+	}
+	if _, err := normalizeHubRepo("ghcr.io/org/name", hub); err == nil || !strings.Contains(err.Error(), "ghcr.io") {
+		t.Fatalf("expected foreign host rejection, got %v", err)
+	}
+	if _, err := normalizeHubRepo("https://huggingface.co/org/name", hub); err == nil || !strings.Contains(err.Error(), "spec.repo") {
+		t.Fatalf("expected scheme rejection, got %v", err)
+	}
+}
+
 func TestAdapterPull_RejectsNonHFRegistry(t *testing.T) {
 	oci := models.NewRegistryBuilder().SetID(1).SetURL("docker.io").SetType(models.RegistryTypeOCI).Build()
 	_, err := (&Adapter{}).Pull(context.Background(), modelpull.Request{

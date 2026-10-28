@@ -13,6 +13,8 @@ import (
 
 	"github.com/eclipse-iofog/edgelet/internal/modelpull"
 	"github.com/eclipse-iofog/edgelet/internal/models"
+	"github.com/eclipse-iofog/edgelet/internal/registrytls"
+	"github.com/eclipse-iofog/edgelet/pkg/imageref"
 )
 
 // Adapter pulls Hugging Face Hub artifacts into {metadata.name}/content/.
@@ -29,6 +31,11 @@ func (a *Adapter) Pull(ctx context.Context, req modelpull.Request) (*modelpull.R
 	if err := a.validateRequest(req); err != nil {
 		return nil, err
 	}
+	repo, err := normalizeHubRepo(req.Repo, req.Registry)
+	if err != nil {
+		return nil, err
+	}
+	req.Repo = repo
 	resolved := modelpull.ResolveHFRevision(req.Revision)
 
 	class := a.repoClass()
@@ -266,4 +273,38 @@ func (a *Adapter) validateRequest(req modelpull.Request) error {
 		return fmt.Errorf("registry type %q cannot pull Hugging Face artifacts", req.Registry.NormalizedType())
 	}
 	return nil
+}
+
+// normalizeHubRepo strips a host that matches the Hugging Face registry.
+// A different host is an error. The registry type stays Hugging Face.
+func normalizeHubRepo(repo string, reg *models.Registry) (string, error) {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return "", errors.New("repo is required")
+	}
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "/") {
+		return "", errors.New("spec.repo must not include a URL scheme")
+	}
+	if !imageref.HasRegistryHost(repo) {
+		return repo, nil
+	}
+	refHost, rest, found := strings.Cut(repo, "/")
+	rest = strings.TrimPrefix(rest, "/")
+	if !found || strings.TrimSpace(rest) == "" {
+		return "", errors.New("repo is required")
+	}
+	ep, err := registrytls.Parse(reg)
+	if err != nil {
+		return "", err
+	}
+	if sameHubHost(refHost, ep.Host) {
+		return rest, nil
+	}
+	return "", fmt.Errorf("repo host %s does not match Hugging Face registry %s", refHost, ep.Host)
+}
+
+func sameHubHost(a, b string) bool {
+	left := imageref.SanitizeRegistryHost(a)
+	right := imageref.SanitizeRegistryHost(b)
+	return left != "" && strings.EqualFold(left, right)
 }

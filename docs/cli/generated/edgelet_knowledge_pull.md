@@ -27,7 +27,7 @@ edgelet knowledge pull wiki-faiss --repo acme/wiki --revision 9f3c11112222333344
       --format string       Format hint (markdown, pdf, jsonl, parquet, arrow, sqlite, faiss, chroma, lance, unknown)
   -h, --help                help for pull
   -r, --registry int        Registry id
-      --repo string         Repository path without host
+      --repo string         Repository path, with or without a registry host
       --revision string     Tag, digest, branch, or commit
 ```
 
