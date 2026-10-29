@@ -1132,7 +1132,7 @@
       "version": "v2.9.0"
     },
     {
-      "bom-ref": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.4",
+      "bom-ref": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -1145,10 +1145,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.4",
+      "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
       "scope": "required",
       "type": "library",
-      "version": "v4.1.4"
+      "version": "v4.1.6"
     },
     {
       "bom-ref": "pkg:golang/github.com/go-logr/logr@v1.4.3",
@@ -3240,7 +3240,7 @@
         "pkg:golang/github.com/felixge/httpsnoop@v1.1.0",
         "pkg:golang/github.com/fsnotify/fsnotify@v1.10.1",
         "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.0",
-        "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.4",
+        "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
         "pkg:golang/github.com/go-logr/logr@v1.4.3",
         "pkg:golang/github.com/go-logr/stdr@v1.2.2",
         "pkg:golang/github.com/go-ole/go-ole@v1.2.6",
@@ -3383,7 +3383,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:d395dee4-856d-5b0e-b1ab-fe0689baa684",
+  "serialNumber": "urn:uuid:73a2cbb3-2961-5734-9620-d80f14ab9d1b",
   "specVersion": "1.6",
   "version": 1
 }

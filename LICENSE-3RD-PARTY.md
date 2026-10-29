@@ -690,7 +690,7 @@ Components:
 - github.com/containerd/stargz-snapshotter/estargz@v0.18.2 (Apache-2.0)
 - github.com/containerd/zfs/v2@v2.0.0 (Apache-2.0)
 - github.com/envoyproxy/protoc-gen-validate@v1.3.3 (Apache-2.0)
-- github.com/go-jose/go-jose/v4@v4.1.4 (Apache-2.0)
+- github.com/go-jose/go-jose/v4@v4.1.6 (Apache-2.0)
 - github.com/go-openapi/jsonpointer@v0.21.0 (Apache-2.0)
 - github.com/go-openapi/jsonreference@v0.20.2 (Apache-2.0)
 - github.com/go-openapi/swag@v0.23.0 (Apache-2.0)

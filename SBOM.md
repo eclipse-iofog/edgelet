@@ -86,7 +86,7 @@ Required 169, optional 0, excluded 223.
 | github.com/felixge/httpsnoop | v1.1.0 | MIT | darwin, linux-fat, windows |
 | github.com/fsnotify/fsnotify | v1.10.1 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
 | github.com/fxamacker/cbor/v2 | v2.9.0 | MIT | linux-fat |
-| github.com/go-jose/go-jose/v4 | v4.1.4 | Apache-2.0 | linux-fat |
+| github.com/go-jose/go-jose/v4 | v4.1.6 | Apache-2.0 | linux-fat |
 | github.com/go-logr/logr | v1.4.3 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/go-logr/stdr | v1.2.2 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/go-ole/go-ole | v1.2.6 | MIT | windows |
