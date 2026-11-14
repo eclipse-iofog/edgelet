@@ -12,7 +12,7 @@ func TestParsePins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pins.Go != "1.26.10" || pins.Crun != "1.28" || pins.CNI != "v1.9.1-k3s1" {
+	if pins.Go != "1.26.11" || pins.Crun != "1.30.1" || pins.CNI != "v1.9.1-k3s1" {
 		t.Fatalf("unexpected pins: %+v", pins)
 	}
 	if pins.PauseRepo != "portainer/pause" {

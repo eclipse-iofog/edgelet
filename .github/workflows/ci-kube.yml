@@ -1,0 +1,116 @@
+name: edgelet-kube CI
+
+on:
+  push:
+    branches: [ main, develop, edgelet-kube/** ]
+    paths:
+      - 'kube/**'
+      - '.github/workflows/ci-kube.yml'
+  pull_request:
+    branches: [ main, develop, edgelet-kube/** ]
+    paths:
+      - 'kube/**'
+      - '.github/workflows/ci-kube.yml'
+  workflow_dispatch:
+
+permissions: read-all
+
+env:
+  GO_VERSION: '1.26.11'
+  GOWORK: 'off'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: kube/go.sum
+
+      - name: No Go workspace
+        run: test ! -f go.work
+
+      - name: go vet
+        run: make vet-kube
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        with:
+          version: v2.12.2
+          working-directory: kube
+          args: --timeout=5m0s --config=.golangci.yaml
+
+      - name: Static security analysis
+        working-directory: kube
+        run: |
+          if ! command -v gosec >/dev/null 2>&1; then
+            go install github.com/securego/gosec/v2/cmd/gosec@latest
+          fi
+          GOWORK=off gosec ./cmd/... ./internal/...
+
+  build:
+    name: Build linux/amd64
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: kube/go.sum
+
+      - name: No Go workspace
+        run: test ! -f go.work
+
+      - name: Test dispatch
+        working-directory: kube
+        run: go test ./internal/... -skip '^TestChildUsesRuntimePaths$'
+
+      - name: Test containerd runtime paths
+        working-directory: kube
+        run: |
+          go test -c -o /tmp/containerd.test ./internal/containerd/
+          sudo /tmp/containerd.test -test.count=1 -test.v -test.run '^TestChildUsesRuntimePaths$'
+
+      - name: Aux build dependencies
+        run: sudo TARGETARCH=amd64 ./scripts/install-embed-build-deps
+
+      - name: Build linux/amd64
+        working-directory: kube
+        run: bash scripts/build.sh
+
+      - name: Extract and exec
+        working-directory: kube
+        run: bash scripts/smoke.sh
+
+  build-arm64:
+    name: Build linux/arm64
+    runs-on: ubuntu-24.04-arm
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: kube/go.sum
+
+      - name: No Go workspace
+        run: test ! -f go.work
+
+      - name: Aux build dependencies
+        run: sudo TARGETARCH=arm64 ./scripts/install-embed-build-deps
+
+      - name: Build linux/arm64
+        working-directory: kube
+        env:
+          ARCH: arm64
+        run: bash scripts/build.sh

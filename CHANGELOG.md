@@ -17,8 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Embedded runtime:** containerd fork **v2.3.7-k3s1**, cri-api **v1.37.2-k3s1**, crun **1.30.1**, and k3s-root **v0.15.4**, matching the current k3s tree.
 - **Security / vulncheck:** bump `golang.org/x/net` to **v0.62.0** (with `golang.org/x/crypto` **v0.58.0** and `golang.org/x/text` **v0.43.0**) for **GO-2026-6866** and **GO-2026-6860**. Bump `github.com/klauspost/compress` to **v1.20.3** for **GHSA-fpmh-frq8-7rj8**. Bump `oras.land/oras-go/v2` to **v2.7.0** for the auth and file-store fixes; private bearer token realms stay allowed. Bump indirect `github.com/go-jose/go-jose/v4` to **v4.1.6** for **GHSA-4w3g-jfj2-cw2q**, **GHSA-vvm8-gf78-28g4**, and **GHSA-mgcc-cww5-fp2q**. These are on the Linux OCI image-encryption path (`ocicrypt` JWE).
 - **Go dependencies:** `golang.org/x/sync` **v0.24.0**. No edgelet API changes. Regenerated `SBOM.md`, `LICENSE-3RD-PARTY.md`, `sbom.cdx.json`, and `sbom.spdx.json`.
+- **Go 1.26.11** minimum (see `go.mod`). CI and the govulncheck workflow use the same toolchain. Clears [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) ( HTTP/1 server crash due to MaxBytesReader header race in `net/http`). 
+- Image digests refreshed for `golang:1.26-trixie`.
 
 ## [v1.1.3]
 

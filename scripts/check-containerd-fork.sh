@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 GO=${GO-go}
 MODULE=github.com/containerd/containerd/v2
 WANT_PATH=github.com/k3s-io/containerd/v2
-WANT_VERSION=v2.3.2-k3s2
+WANT_VERSION=v2.3.7-k3s1
 
 resolved_path=$("${GO}" list -mod=readonly -m -f '{{if .Replace}}{{.Replace.Path}}{{else}}{{.Path}}{{end}}' "${MODULE}")
 resolved_version=$("${GO}" list -mod=readonly -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' "${MODULE}")

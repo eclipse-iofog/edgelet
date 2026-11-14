@@ -62,6 +62,8 @@ build/data-staging/
 build/images/
 build/*.tar
 pkg/data/embed/*.tar.zst
+kube/cmd/edgelet-kube/embed/*.tar.zst
+kube/build/
 dist/
 
 

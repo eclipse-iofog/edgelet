@@ -4,9 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+      - '!edgelet-kube-*'
+      - '!*\+edgelet*'
 
 env:
-  GO_VERSION: '1.26.10'
+  GO_VERSION: '1.26.11'
   REGISTRY: ghcr.io
   IMAGE: ${{ vars.EDGELET_CONTAINER_IMAGE }}
   DEBUGGER_IMAGE: ${{ vars.DEBUGGER_CONTAINER_IMAGE }}

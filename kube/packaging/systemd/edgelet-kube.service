@@ -1,0 +1,33 @@
+[Unit]
+Description=Edgelet Kubernetes
+Documentation=https://github.com/eclipse-iofog/edgelet
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# A restart signals the server process. The server stops its containerd child.
+# Shims and pods keep running. The new process reuses containerd state,
+# SQLite, and the TLS directory.
+KillMode=process
+Delegate=yes
+User=root
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Restart=always
+RestartSec=5s
+# Loads br_netfilter and sets net.ipv4.ip_forward=1 and
+# net.bridge.bridge-nf-call-iptables=1 when protect-kernel-defaults is false.
+# When that setting is true, the program does not change sysctls.
+ExecStartPre=/usr/libexec/edgelet-kube/prepare-kernel
+ExecStart=/usr/local/bin/edgelet-kube server
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=edgelet-kube
+
+[Install]
+WantedBy=multi-user.target

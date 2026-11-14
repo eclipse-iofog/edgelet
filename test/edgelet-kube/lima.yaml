@@ -1,0 +1,58 @@
+# Lima VM for installing edgelet-kube and checking a Ready node.
+# The guest arch is chosen at create time so it matches the Linux binary.
+
+vmType: vz
+os: Linux
+
+cpus: 4
+memory: "8GiB"
+disk: "40GiB"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+mounts:
+  - location: "~"
+    writable: false
+
+rosetta:
+  enabled: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      export DEBIAN_FRONTEND=noninteractive
+      modprobe overlay 2>/dev/null || true
+      modprobe br_netfilter 2>/dev/null || true
+      modprobe ip_tables 2>/dev/null || true
+      modprobe iptable_nat 2>/dev/null || true
+      modprobe nf_conntrack 2>/dev/null || true
+      apt-get update -qq
+      apt-get install -y --no-install-recommends \
+          ca-certificates conntrack curl iptables iproute2 kmod
+      systemctl disable --now containerd 2>/dev/null || true
+      systemctl disable --now docker 2>/dev/null || true
+      install -d /var/tmp
+      echo ready >/var/tmp/edgelet-kube-vm-ready
+
+networks:
+  - vzNAT: true
+
+portForwards:
+  - guestPortRange: [1, 65535]
+    ignore: true
+
+probes:
+  - script: |
+      #!/bin/bash
+      grep -q overlay /proc/filesystems || modprobe overlay 2>/dev/null
+    hint: "Waiting for overlayfs..."
+
+message: |
+  The edgelet-kube test VM is ready.
+  Open a shell with: limactl shell edgelet-kube-test

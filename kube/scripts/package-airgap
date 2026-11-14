@@ -1,0 +1,73 @@
+#!/bin/bash
+# Export the pinned image list as edgelet-kube-airgap-images-<arch>.tar.zst.
+# The archive is published beside the binary. It is not part of the runtime.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+export GOWORK=off
+
+arch="${ARCH:-amd64}"
+case "$arch" in
+amd64) platform=linux/amd64 ;;
+arm64) platform=linux/arm64 ;;
+arm) platform=linux/arm/v7 ;;
+riscv64) platform=linux/riscv64 ;;
+*)
+	echo "package-airgap: unsupported architecture: $arch" >&2
+	exit 1
+	;;
+esac
+
+asset="edgelet-kube-airgap-images-${arch}.tar.zst"
+out="${OUT:-build/${asset}}"
+if [ "$(basename "$out")" != "$asset" ]; then
+	echo "package-airgap: asset must be ${asset}" >&2
+	exit 1
+fi
+
+out_abs="$out"
+case "$out_abs" in
+/*) ;;
+*) out_abs="$(pwd)/$out_abs" ;;
+esac
+embed="$(pwd)/cmd/edgelet-kube/embed/"
+case "$out_abs" in
+"$embed"*)
+	echo "package-airgap: the archive is published beside the binary" >&2
+	exit 1
+	;;
+esac
+
+ctr="${CTR:-ctr}"
+images=()
+while IFS= read -r line || [ -n "$line" ]; do
+	[ -z "$line" ] && continue
+	images+=("$line")
+done < <(go run ./scripts/airgap/zstdcmd -images "$arch")
+expect=12
+if [ "$arch" = riscv64 ]; then
+	expect=6
+fi
+if [ "${#images[@]}" -ne "$expect" ]; then
+	echo "package-airgap: the pin list has ${#images[@]} images" >&2
+	exit 1
+fi
+
+mkdir -p "$(dirname "$out")"
+"$ctr" namespaces create k8s.io >/dev/null 2>&1 || true
+platform_flag="--platform=${platform}"
+for image in "${images[@]}"; do
+	"$ctr" -n k8s.io images pull "$platform_flag" "$image"
+done
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+"$ctr" -n k8s.io images export "$platform_flag" "$tmp" "${images[@]}"
+go run ./scripts/airgap/zstdcmd -in "$tmp" -out "$out"
+
+listed="$(go run ./scripts/airgap/zstdcmd -list "$out")"
+want="$(printf '%s\n' "${images[@]}")"
+if [ "$listed" != "$want" ]; then
+	echo "package-airgap: archive image names do not match the pin list" >&2
+	exit 1
+fi

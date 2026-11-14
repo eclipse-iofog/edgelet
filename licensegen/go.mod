@@ -1,3 +1,3 @@
 module github.com/eclipse-iofog/edgelet/licensegen
 
-go 1.26.10
+go 1.26.11

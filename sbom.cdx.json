@@ -2,7 +2,7 @@
   "bomFormat": "CycloneDX",
   "components": [
     {
-      "bom-ref": "pkg:generic/go@1.26.10",
+      "bom-ref": "pkg:generic/go@1.26.11",
       "description": "Toolchain pin from scripts/version.sh. The SBOM does not record the patch level of the machine that generated it.",
       "licenses": [
         {
@@ -10,18 +10,18 @@
         }
       ],
       "name": "Go",
-      "purl": "pkg:generic/go@1.26.10",
+      "purl": "pkg:generic/go@1.26.11",
       "scope": "required",
       "type": "library",
-      "version": "1.26.10"
+      "version": "1.26.11"
     },
     {
-      "bom-ref": "pkg:generic/k3s-root@v0.15.0?arch=amd64",
+      "bom-ref": "pkg:generic/k3s-root@v0.15.4?arch=amd64",
       "description": "Upstream tarball pin. The embed stages bin/busybox, bin/ip, and bin/aux from this archive. The hash is of the tarball, not of the staged subset. The k3s-root source repository at this tag is Apache-2.0 (https://github.com/k3s-io/k3s-root). That license covers the build scripts and Buildroot config. It does not license the programs inside the tarball. Those programs are the contained GPL components.",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "20066815d9941185fce3934cc3bae2fa3e2dbb46ca7e63462efb2ea59f1b15c4"
+          "content": "658581f9dba924b24dcca14fcbb7237d69c9d3cd56995558d56efcd522263ea9"
         }
       ],
       "licenses": [
@@ -41,21 +41,21 @@
         },
         {
           "name": "edgelet:download",
-          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.0/k3s-root-amd64.tar"
+          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.4/k3s-root-amd64.tar"
         }
       ],
-      "purl": "pkg:generic/k3s-root@v0.15.0?arch=amd64",
+      "purl": "pkg:generic/k3s-root@v0.15.4?arch=amd64",
       "scope": "required",
       "type": "file",
-      "version": "v0.15.0"
+      "version": "v0.15.4"
     },
     {
-      "bom-ref": "pkg:generic/k3s-root@v0.15.0?arch=arm",
+      "bom-ref": "pkg:generic/k3s-root@v0.15.4?arch=arm",
       "description": "Upstream tarball pin. The embed stages bin/busybox, bin/ip, and bin/aux from this archive. The hash is of the tarball, not of the staged subset. The k3s-root source repository at this tag is Apache-2.0 (https://github.com/k3s-io/k3s-root). That license covers the build scripts and Buildroot config. It does not license the programs inside the tarball. Those programs are the contained GPL components.",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "2e43dac7750da52a756a9d4e8598d6e89937d565582660b26ca124bd9c8dbfaa"
+          "content": "2a09ec8b4ab7a7fd41f9caa0b04a15cc631c2682f27f6f3605a77684717f3ac4"
         }
       ],
       "licenses": [
@@ -75,21 +75,21 @@
         },
         {
           "name": "edgelet:download",
-          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.0/k3s-root-arm.tar"
+          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.4/k3s-root-arm.tar"
         }
       ],
-      "purl": "pkg:generic/k3s-root@v0.15.0?arch=arm",
+      "purl": "pkg:generic/k3s-root@v0.15.4?arch=arm",
       "scope": "required",
       "type": "file",
-      "version": "v0.15.0"
+      "version": "v0.15.4"
     },
     {
-      "bom-ref": "pkg:generic/k3s-root@v0.15.0?arch=arm64",
+      "bom-ref": "pkg:generic/k3s-root@v0.15.4?arch=arm64",
       "description": "Upstream tarball pin. The embed stages bin/busybox, bin/ip, and bin/aux from this archive. The hash is of the tarball, not of the staged subset. The k3s-root source repository at this tag is Apache-2.0 (https://github.com/k3s-io/k3s-root). That license covers the build scripts and Buildroot config. It does not license the programs inside the tarball. Those programs are the contained GPL components.",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "4bdfc715dc8b5e2c4956f8686b895a56386f4cc6468215dcd22130a680650577"
+          "content": "80b65fd619c8534a5cfe09310217a588e7cbb43f2f95b5f3dedcf2b39495dafc"
         }
       ],
       "licenses": [
@@ -109,21 +109,21 @@
         },
         {
           "name": "edgelet:download",
-          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.0/k3s-root-arm64.tar"
+          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.4/k3s-root-arm64.tar"
         }
       ],
-      "purl": "pkg:generic/k3s-root@v0.15.0?arch=arm64",
+      "purl": "pkg:generic/k3s-root@v0.15.4?arch=arm64",
       "scope": "required",
       "type": "file",
-      "version": "v0.15.0"
+      "version": "v0.15.4"
     },
     {
-      "bom-ref": "pkg:generic/k3s-root@v0.15.0?arch=riscv64",
+      "bom-ref": "pkg:generic/k3s-root@v0.15.4?arch=riscv64",
       "description": "Upstream tarball pin. The embed stages bin/busybox, bin/ip, and bin/aux from this archive. The hash is of the tarball, not of the staged subset. The k3s-root source repository at this tag is Apache-2.0 (https://github.com/k3s-io/k3s-root). That license covers the build scripts and Buildroot config. It does not license the programs inside the tarball. Those programs are the contained GPL components.",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "0e79998acaa156059ba1ff676a4e5f290069e25f799de43ee016a0e780f9d4d3"
+          "content": "fd5e0b38c0e13fba14ff45df2c0cb89fc8ae8b1c6f5a7480fd24f1d2b644b29e"
         }
       ],
       "licenses": [
@@ -143,13 +143,13 @@
         },
         {
           "name": "edgelet:download",
-          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.0/k3s-root-riscv64.tar"
+          "value": "https://github.com/k3s-io/k3s-root/releases/download/v0.15.4/k3s-root-riscv64.tar"
         }
       ],
-      "purl": "pkg:generic/k3s-root@v0.15.0?arch=riscv64",
+      "purl": "pkg:generic/k3s-root@v0.15.4?arch=riscv64",
       "scope": "required",
       "type": "file",
-      "version": "v0.15.0"
+      "version": "v0.15.4"
     },
     {
       "bom-ref": "pkg:generic/sqlite@3.53.4",
@@ -176,7 +176,7 @@
       "version": "3.53.4"
     },
     {
-      "bom-ref": "pkg:github/containers/crun@1.28",
+      "bom-ref": "pkg:github/containers/crun@1.30.1",
       "description": "Source of the static crun ELF in the embed bundle.",
       "licenses": [
         {
@@ -191,13 +191,13 @@
         },
         {
           "name": "edgelet:source",
-          "value": "https://github.com/containers/crun/tree/1.28"
+          "value": "https://github.com/containers/crun/tree/1.30.1"
         }
       ],
-      "purl": "pkg:github/containers/crun@1.28",
+      "purl": "pkg:github/containers/crun@1.30.1",
       "scope": "required",
       "type": "application",
-      "version": "1.28"
+      "version": "1.30.1"
     },
     {
       "bom-ref": "pkg:github/rancher/plugins@v1.9.1-k3s1",
@@ -695,7 +695,7 @@
       "version": "v0.1.0"
     },
     {
-      "bom-ref": "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.4",
+      "bom-ref": "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.5",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -708,10 +708,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.4",
+      "purl": "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.5",
       "scope": "required",
       "type": "library",
-      "version": "v1.0.0-rc.4"
+      "version": "v1.0.0-rc.5"
     },
     {
       "bom-ref": "pkg:golang/github.com/containerd/plugin@v1.1.0",
@@ -1113,7 +1113,7 @@
       "version": "v1.10.1"
     },
     {
-      "bom-ref": "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.0",
+      "bom-ref": "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.1",
       "licenses": [
         {
           "expression": "MIT"
@@ -1126,10 +1126,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.0",
+      "purl": "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.1",
       "scope": "required",
       "type": "library",
-      "version": "v2.9.0"
+      "version": "v2.9.1"
     },
     {
       "bom-ref": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
@@ -1360,7 +1360,7 @@
       "version": "v0.12.0"
     },
     {
-      "bom-ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2",
+      "bom-ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -1377,13 +1377,13 @@
           "value": "github.com/containerd/containerd/v2"
         }
       ],
-      "purl": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2",
+      "purl": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1",
       "scope": "required",
       "type": "library",
-      "version": "v2.3.2-k3s2"
+      "version": "v2.3.7-k3s1"
     },
     {
-      "bom-ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2#cmd/containerd-shim-runc-v2",
+      "bom-ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1#cmd/containerd-shim-runc-v2",
       "description": "Separate ELF built from the same containerd module that is linked into the fat runtime. It is not a second copy of that module's version.",
       "licenses": [
         {
@@ -1397,13 +1397,13 @@
           "value": "linux"
         }
       ],
-      "purl": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2#cmd/containerd-shim-runc-v2",
+      "purl": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1#cmd/containerd-shim-runc-v2",
       "scope": "required",
       "type": "application",
-      "version": "v2.3.2-k3s2"
+      "version": "v2.3.7-k3s1"
     },
     {
-      "bom-ref": "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.36.2-k3s2",
+      "bom-ref": "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.37.2-k3s1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -1420,10 +1420,10 @@
           "value": "k8s.io/cri-api"
         }
       ],
-      "purl": "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.36.2-k3s2",
+      "purl": "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.37.2-k3s1",
       "scope": "required",
       "type": "library",
-      "version": "v1.36.2-k3s2"
+      "version": "v1.37.2-k3s1"
     },
     {
       "bom-ref": "pkg:golang/github.com/klauspost/compress@v1.20.3",
@@ -1977,7 +1977,7 @@
       "version": "v1.9.5"
     },
     {
-      "bom-ref": "pkg:golang/github.com/prometheus/client_golang@v1.23.2",
+      "bom-ref": "pkg:golang/github.com/prometheus/client_golang@v1.24.0",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -1990,10 +1990,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/prometheus/client_golang@v1.23.2",
+      "purl": "pkg:golang/github.com/prometheus/client_golang@v1.24.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.23.2"
+      "version": "v1.24.0"
     },
     {
       "bom-ref": "pkg:golang/github.com/prometheus/client_model@v0.6.2",
@@ -2015,7 +2015,7 @@
       "version": "v0.6.2"
     },
     {
-      "bom-ref": "pkg:golang/github.com/prometheus/common@v0.67.5",
+      "bom-ref": "pkg:golang/github.com/prometheus/common@v0.70.0",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2028,13 +2028,13 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/prometheus/common@v0.67.5",
+      "purl": "pkg:golang/github.com/prometheus/common@v0.70.0",
       "scope": "required",
       "type": "library",
-      "version": "v0.67.5"
+      "version": "v0.70.0"
     },
     {
-      "bom-ref": "pkg:golang/github.com/prometheus/procfs@v0.19.2",
+      "bom-ref": "pkg:golang/github.com/prometheus/procfs@v0.21.1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2047,10 +2047,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/github.com/prometheus/procfs@v0.19.2",
+      "purl": "pkg:golang/github.com/prometheus/procfs@v0.21.1",
       "scope": "required",
       "type": "library",
-      "version": "v0.19.2"
+      "version": "v0.21.1"
     },
     {
       "bom-ref": "pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
@@ -2566,7 +2566,7 @@
       "version": "v1.44.0"
     },
     {
-      "bom-ref": "pkg:golang/go.yaml.in/yaml/v2@v2.4.3",
+      "bom-ref": "pkg:golang/go.yaml.in/yaml/v2@v2.4.4",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2579,10 +2579,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/go.yaml.in/yaml/v2@v2.4.3",
+      "purl": "pkg:golang/go.yaml.in/yaml/v2@v2.4.4",
       "scope": "required",
       "type": "library",
-      "version": "v2.4.3"
+      "version": "v2.4.4"
     },
     {
       "bom-ref": "pkg:golang/go.yaml.in/yaml/v3@v3.0.5",
@@ -2870,7 +2870,7 @@
       "version": "v3.0.1"
     },
     {
-      "bom-ref": "pkg:golang/k8s.io/apimachinery@v0.36.2",
+      "bom-ref": "pkg:golang/k8s.io/apimachinery@v0.37.1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2883,13 +2883,13 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/k8s.io/apimachinery@v0.36.2",
+      "purl": "pkg:golang/k8s.io/apimachinery@v0.37.1",
       "scope": "required",
       "type": "library",
-      "version": "v0.36.2"
+      "version": "v0.37.1"
     },
     {
-      "bom-ref": "pkg:golang/k8s.io/client-go@v0.36.2",
+      "bom-ref": "pkg:golang/k8s.io/client-go@v0.37.1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2902,13 +2902,13 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/k8s.io/client-go@v0.36.2",
+      "purl": "pkg:golang/k8s.io/client-go@v0.37.1",
       "scope": "required",
       "type": "library",
-      "version": "v0.36.2"
+      "version": "v0.37.1"
     },
     {
-      "bom-ref": "pkg:golang/k8s.io/cri-streaming@v0.36.2",
+      "bom-ref": "pkg:golang/k8s.io/cri-streaming@v0.37.1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2921,10 +2921,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/k8s.io/cri-streaming@v0.36.2",
+      "purl": "pkg:golang/k8s.io/cri-streaming@v0.37.1",
       "scope": "required",
       "type": "library",
-      "version": "v0.36.2"
+      "version": "v0.37.1"
     },
     {
       "bom-ref": "pkg:golang/k8s.io/klog/v2@v2.140.0",
@@ -2946,7 +2946,7 @@
       "version": "v2.140.0"
     },
     {
-      "bom-ref": "pkg:golang/k8s.io/streaming@v0.36.2",
+      "bom-ref": "pkg:golang/k8s.io/streaming@v0.37.1",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2959,13 +2959,13 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/k8s.io/streaming@v0.36.2",
+      "purl": "pkg:golang/k8s.io/streaming@v0.37.1",
       "scope": "required",
       "type": "library",
-      "version": "v0.36.2"
+      "version": "v0.37.1"
     },
     {
-      "bom-ref": "pkg:golang/k8s.io/utils@v0.0.0-20260319190234-28399d86e0b5",
+      "bom-ref": "pkg:golang/k8s.io/utils@v0.0.0-20260626114624-be93311217bd",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -2978,10 +2978,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/k8s.io/utils@v0.0.0-20260319190234-28399d86e0b5",
+      "purl": "pkg:golang/k8s.io/utils@v0.0.0-20260626114624-be93311217bd",
       "scope": "required",
       "type": "library",
-      "version": "v0.0.0-20260319190234-28399d86e0b5"
+      "version": "v0.0.0-20260626114624-be93311217bd"
     },
     {
       "bom-ref": "pkg:golang/modernc.org/libc@v1.77.1",
@@ -3184,13 +3184,13 @@
   "dependencies": [
     {
       "dependsOn": [
-        "pkg:generic/go@1.26.10",
-        "pkg:generic/k3s-root@v0.15.0?arch=amd64",
-        "pkg:generic/k3s-root@v0.15.0?arch=arm",
-        "pkg:generic/k3s-root@v0.15.0?arch=arm64",
-        "pkg:generic/k3s-root@v0.15.0?arch=riscv64",
+        "pkg:generic/go@1.26.11",
+        "pkg:generic/k3s-root@v0.15.4?arch=amd64",
+        "pkg:generic/k3s-root@v0.15.4?arch=arm",
+        "pkg:generic/k3s-root@v0.15.4?arch=arm64",
+        "pkg:generic/k3s-root@v0.15.4?arch=riscv64",
         "pkg:generic/sqlite@3.53.4",
-        "pkg:github/containers/crun@1.28",
+        "pkg:github/containers/crun@1.30.1",
         "pkg:github/rancher/plugins@v1.9.1-k3s1",
         "pkg:golang/dario.cat/mergo@v1.0.2",
         "pkg:golang/github.com/Microsoft/go-winio@v0.6.3-0.20251027160822-ad3df93bed29",
@@ -3217,7 +3217,7 @@
         "pkg:golang/github.com/containerd/log@v0.1.0",
         "pkg:golang/github.com/containerd/nri@v0.12.0",
         "pkg:golang/github.com/containerd/otelttrpc@v0.1.0",
-        "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.4",
+        "pkg:golang/github.com/containerd/platforms@v1.0.0-rc.5",
         "pkg:golang/github.com/containerd/plugin@v1.1.0",
         "pkg:golang/github.com/containerd/ttrpc@v1.2.8",
         "pkg:golang/github.com/containerd/typeurl/v2@v2.3.0",
@@ -3239,7 +3239,7 @@
         "pkg:golang/github.com/fatih/color@v1.7.0",
         "pkg:golang/github.com/felixge/httpsnoop@v1.1.0",
         "pkg:golang/github.com/fsnotify/fsnotify@v1.10.1",
-        "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.0",
+        "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.1",
         "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
         "pkg:golang/github.com/go-logr/logr@v1.4.3",
         "pkg:golang/github.com/go-logr/stdr@v1.2.2",
@@ -3252,9 +3252,9 @@
         "pkg:golang/github.com/grpc-ecosystem/go-grpc-middleware/v2@v2.1.0",
         "pkg:golang/github.com/inconshreveable/mousetrap@v1.1.0",
         "pkg:golang/github.com/intel/goresctrl@v0.12.0",
-        "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2",
-        "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.2-k3s2#cmd/containerd-shim-runc-v2",
-        "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.36.2-k3s2",
+        "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1",
+        "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.7-k3s1#cmd/containerd-shim-runc-v2",
+        "pkg:golang/github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.37.2-k3s1",
         "pkg:golang/github.com/klauspost/compress@v1.20.3",
         "pkg:golang/github.com/knqyf263/go-plugin@v0.9.0",
         "pkg:golang/github.com/mattn/go-colorable@v0.1.2",
@@ -3284,10 +3284,10 @@
         "pkg:golang/github.com/opencontainers/selinux@v1.13.1",
         "pkg:golang/github.com/pelletier/go-toml/v2@v2.3.0",
         "pkg:golang/github.com/pelletier/go-toml@v1.9.5",
-        "pkg:golang/github.com/prometheus/client_golang@v1.23.2",
+        "pkg:golang/github.com/prometheus/client_golang@v1.24.0",
         "pkg:golang/github.com/prometheus/client_model@v0.6.2",
-        "pkg:golang/github.com/prometheus/common@v0.67.5",
-        "pkg:golang/github.com/prometheus/procfs@v0.19.2",
+        "pkg:golang/github.com/prometheus/common@v0.70.0",
+        "pkg:golang/github.com/prometheus/procfs@v0.21.1",
         "pkg:golang/github.com/remyoudompheng/bigfft@v0.0.0-20230129092748-24d4a6f8daec",
         "pkg:golang/github.com/russross/blackfriday/v2@v2.1.0",
         "pkg:golang/github.com/shirou/gopsutil/v4@v4.26.9",
@@ -3315,7 +3315,7 @@
         "pkg:golang/go.opentelemetry.io/otel/metric@v1.44.0",
         "pkg:golang/go.opentelemetry.io/otel/trace@v1.44.0",
         "pkg:golang/go.opentelemetry.io/otel@v1.44.0",
-        "pkg:golang/go.yaml.in/yaml/v2@v2.4.3",
+        "pkg:golang/go.yaml.in/yaml/v2@v2.4.4",
         "pkg:golang/go.yaml.in/yaml/v3@v3.0.5",
         "pkg:golang/golang.org/x/crypto@v0.58.0",
         "pkg:golang/golang.org/x/mod@v0.41.0",
@@ -3331,12 +3331,12 @@
         "pkg:golang/gopkg.in/inf.v0@v0.9.1",
         "pkg:golang/gopkg.in/tomb.v1@v1.0.0-20141024135613-dd632973f1e7",
         "pkg:golang/gopkg.in/yaml.v3@v3.0.1",
-        "pkg:golang/k8s.io/apimachinery@v0.36.2",
-        "pkg:golang/k8s.io/client-go@v0.36.2",
-        "pkg:golang/k8s.io/cri-streaming@v0.36.2",
+        "pkg:golang/k8s.io/apimachinery@v0.37.1",
+        "pkg:golang/k8s.io/client-go@v0.37.1",
+        "pkg:golang/k8s.io/cri-streaming@v0.37.1",
         "pkg:golang/k8s.io/klog/v2@v2.140.0",
-        "pkg:golang/k8s.io/streaming@v0.36.2",
-        "pkg:golang/k8s.io/utils@v0.0.0-20260319190234-28399d86e0b5",
+        "pkg:golang/k8s.io/streaming@v0.37.1",
+        "pkg:golang/k8s.io/utils@v0.0.0-20260626114624-be93311217bd",
         "pkg:golang/modernc.org/libc@v1.77.1",
         "pkg:golang/modernc.org/mathutil@v1.7.1",
         "pkg:golang/modernc.org/memory@v1.12.1",
@@ -3383,7 +3383,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:73a2cbb3-2961-5734-9620-d80f14ab9d1b",
+  "serialNumber": "urn:uuid:72f96428-2c3c-5986-905e-c0f31c0140b7",
   "specVersion": "1.6",
   "version": 1
 }

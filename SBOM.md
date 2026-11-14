@@ -16,7 +16,7 @@ Container image attestations are not in this document.
 | optional | Compiled into tests only |
 | excluded | Present in `go list -m all` and compiled into nothing here |
 
-Required 169, optional 0, excluded 223.
+Required 169, optional 0, excluded 232.
 
 ## Inventory
 
@@ -26,17 +26,17 @@ Required 169, optional 0, excluded 223.
 | --- | --- | --- | --- |
 | busybox | — | GPL-2.0-only | linux |
 | ebtables | — | GPL-2.0-only | linux |
-| Go | 1.26.10 | BSD-3-Clause | — |
+| Go | 1.26.11 | BSD-3-Clause | — |
 | iproute2 | — | GPL-2.0-only | linux |
 | iptables | — | GPL-2.0-or-later | linux |
-| k3s-root (amd64) | v0.15.0 | NOASSERTION | linux |
-| k3s-root (arm) | v0.15.0 | NOASSERTION | linux |
-| k3s-root (arm64) | v0.15.0 | NOASSERTION | linux |
-| k3s-root (riscv64) | v0.15.0 | NOASSERTION | linux |
+| k3s-root (amd64) | v0.15.4 | NOASSERTION | linux |
+| k3s-root (arm) | v0.15.4 | NOASSERTION | linux |
+| k3s-root (arm64) | v0.15.4 | NOASSERTION | linux |
+| k3s-root (riscv64) | v0.15.4 | NOASSERTION | linux |
 | nftables | — | GPL-2.0-only | linux |
 | SQLite | 3.53.4 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
 | util-linux | — | GPL-2.0-or-later | linux |
-| crun | 1.28 | GPL-2.0-or-later | linux |
+| crun | 1.30.1 | GPL-2.0-or-later | linux |
 | cni-plugins | v1.9.1-k3s1 | Apache-2.0 | linux |
 | dario.cat/mergo | v1.0.2 | BSD-3-Clause | linux-fat |
 | github.com/Microsoft/go-winio | v0.6.3-0.20251027160822-ad3df93bed29 | MIT | windows |
@@ -63,7 +63,7 @@ Required 169, optional 0, excluded 223.
 | github.com/containerd/log | v0.1.0 | Apache-2.0 | linux-fat |
 | github.com/containerd/nri | v0.12.0 | Apache-2.0 | linux-fat |
 | github.com/containerd/otelttrpc | v0.1.0 | Apache-2.0 | linux-fat |
-| github.com/containerd/platforms | v1.0.0-rc.4 | Apache-2.0 | linux-fat |
+| github.com/containerd/platforms | v1.0.0-rc.5 | Apache-2.0 | linux-fat |
 | github.com/containerd/plugin | v1.1.0 | Apache-2.0 | linux-fat |
 | github.com/containerd/ttrpc | v1.2.8 | Apache-2.0 | linux-fat |
 | github.com/containerd/typeurl/v2 | v2.3.0 | Apache-2.0 | linux-fat |
@@ -85,7 +85,7 @@ Required 169, optional 0, excluded 223.
 | github.com/fatih/color | v1.7.0 | MIT | darwin, linux-thin, windows |
 | github.com/felixge/httpsnoop | v1.1.0 | MIT | darwin, linux-fat, windows |
 | github.com/fsnotify/fsnotify | v1.10.1 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
-| github.com/fxamacker/cbor/v2 | v2.9.0 | MIT | linux-fat |
+| github.com/fxamacker/cbor/v2 | v2.9.1 | MIT | linux-fat |
 | github.com/go-jose/go-jose/v4 | v4.1.6 | Apache-2.0 | linux-fat |
 | github.com/go-logr/logr | v1.4.3 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/go-logr/stdr | v1.2.2 | Apache-2.0 | darwin, linux-fat, windows |
@@ -98,9 +98,9 @@ Required 169, optional 0, excluded 223.
 | github.com/grpc-ecosystem/go-grpc-middleware/v2 | v2.1.0 | Apache-2.0 | linux-fat |
 | github.com/inconshreveable/mousetrap | v1.1.0 | Apache-2.0 | windows |
 | github.com/intel/goresctrl | v0.12.0 | Apache-2.0 | linux-fat |
-| github.com/k3s-io/containerd/v2 | v2.3.2-k3s2 | Apache-2.0 | linux-fat |
-| containerd-shim-runc-v2 | v2.3.2-k3s2 | Apache-2.0 | linux |
-| github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api | v1.36.2-k3s2 | Apache-2.0 | linux-fat |
+| github.com/k3s-io/containerd/v2 | v2.3.7-k3s1 | Apache-2.0 | linux-fat |
+| containerd-shim-runc-v2 | v2.3.7-k3s1 | Apache-2.0 | linux |
+| github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api | v1.37.2-k3s1 | Apache-2.0 | linux-fat |
 | github.com/klauspost/compress | v1.20.3 | Apache-2.0 OR BSD-3-Clause OR MIT | linux-fat, linux-thin |
 | github.com/knqyf263/go-plugin | v0.9.0 | MIT | linux-fat |
 | github.com/mattn/go-colorable | v0.1.2 | MIT | darwin, linux-thin, windows |
@@ -130,10 +130,10 @@ Required 169, optional 0, excluded 223.
 | github.com/opencontainers/selinux | v1.13.1 | Apache-2.0 | linux-fat |
 | github.com/pelletier/go-toml/v2 | v2.3.0 | MIT | linux-fat |
 | github.com/pelletier/go-toml | v1.9.5 | Apache-2.0 OR MIT | darwin, linux-fat, windows |
-| github.com/prometheus/client_golang | v1.23.2 | Apache-2.0 | linux-fat |
+| github.com/prometheus/client_golang | v1.24.0 | Apache-2.0 | linux-fat |
 | github.com/prometheus/client_model | v0.6.2 | Apache-2.0 | linux-fat |
-| github.com/prometheus/common | v0.67.5 | Apache-2.0 | linux-fat |
-| github.com/prometheus/procfs | v0.19.2 | Apache-2.0 | linux-fat |
+| github.com/prometheus/common | v0.70.0 | Apache-2.0 | linux-fat |
+| github.com/prometheus/procfs | v0.21.1 | Apache-2.0 | linux-fat |
 | github.com/remyoudompheng/bigfft | v0.0.0-20230129092748-24d4a6f8daec | BSD-3-Clause | darwin, linux-fat, windows |
 | github.com/russross/blackfriday/v2 | v2.1.0 | BSD-2-Clause | darwin, linux-fat, linux-thin, windows |
 | github.com/shirou/gopsutil/v4 | v4.26.9 | BSD-3-Clause | darwin, linux-fat, windows |
@@ -161,7 +161,7 @@ Required 169, optional 0, excluded 223.
 | go.opentelemetry.io/otel/metric | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
 | go.opentelemetry.io/otel/trace | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
 | go.opentelemetry.io/otel | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
-| go.yaml.in/yaml/v2 | v2.4.3 | Apache-2.0 | linux-fat |
+| go.yaml.in/yaml/v2 | v2.4.4 | Apache-2.0 | linux-fat |
 | go.yaml.in/yaml/v3 | v3.0.5 | Apache-2.0 OR MIT | darwin, linux-fat, linux-thin, windows |
 | golang.org/x/crypto | v0.58.0 | BSD-3-Clause | darwin, linux-fat, windows |
 | golang.org/x/mod | v0.41.0 | BSD-3-Clause | linux-fat |
@@ -177,12 +177,12 @@ Required 169, optional 0, excluded 223.
 | gopkg.in/inf.v0 | v0.9.1 | BSD-3-Clause | linux-fat |
 | gopkg.in/tomb.v1 | v1.0.0-20141024135613-dd632973f1e7 | BSD-3-Clause | linux-fat |
 | gopkg.in/yaml.v3 | v3.0.1 | Apache-2.0 OR MIT | darwin, linux-fat, linux-thin, windows |
-| k8s.io/apimachinery | v0.36.2 | Apache-2.0 | linux-fat |
-| k8s.io/client-go | v0.36.2 | Apache-2.0 | linux-fat |
-| k8s.io/cri-streaming | v0.36.2 | Apache-2.0 | linux-fat |
+| k8s.io/apimachinery | v0.37.1 | Apache-2.0 | linux-fat |
+| k8s.io/client-go | v0.37.1 | Apache-2.0 | linux-fat |
+| k8s.io/cri-streaming | v0.37.1 | Apache-2.0 | linux-fat |
 | k8s.io/klog/v2 | v2.140.0 | Apache-2.0 | linux-fat |
-| k8s.io/streaming | v0.36.2 | Apache-2.0 | linux-fat |
-| k8s.io/utils | v0.0.0-20260319190234-28399d86e0b5 | Apache-2.0 | linux-fat |
+| k8s.io/streaming | v0.37.1 | Apache-2.0 | linux-fat |
+| k8s.io/utils | v0.0.0-20260626114624-be93311217bd | Apache-2.0 | linux-fat |
 | modernc.org/libc | v1.77.1 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/mathutil | v1.7.1 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/memory | v1.12.1 | BSD-3-Clause | darwin, linux-fat, windows |
@@ -259,9 +259,20 @@ Required 169, optional 0, excluded 223.
 | github.com/go-ini/ini | v1.67.0 | Apache-2.0 | — |
 | github.com/go-kit/kit | v0.8.0 | MIT | — |
 | github.com/go-logfmt/logfmt | v0.4.0 | MIT | — |
-| github.com/go-openapi/jsonpointer | v0.21.0 | Apache-2.0 | — |
-| github.com/go-openapi/jsonreference | v0.20.2 | Apache-2.0 | — |
-| github.com/go-openapi/swag | v0.23.0 | Apache-2.0 | — |
+| github.com/go-openapi/jsonpointer | v1.0.0 | Apache-2.0 | — |
+| github.com/go-openapi/jsonreference | v1.0.0 | Apache-2.0 | — |
+| github.com/go-openapi/swag/cmdutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/conv | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/fileutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/jsonutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/loading | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/mangling | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/netutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/pools | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/stringutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/typeutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag/yamlutils | v0.27.1 | Apache-2.0 | — |
+| github.com/go-openapi/swag | v0.27.1 | Apache-2.0 | — |
 | github.com/go-quicktest/qt | v1.101.1-0.20240301121107-c6c8733fa1e6 | MIT | — |
 | github.com/go-stack/stack | v1.8.0 | MIT | — |
 | github.com/go-task/slim-sprig/v3 | v3.0.0 | MIT | — |
@@ -286,7 +297,7 @@ Required 169, optional 0, excluded 223.
 | github.com/googleapis/gax-go/v2 | v2.17.0 | BSD-3-Clause | — |
 | github.com/gorilla/mux | v1.8.1 | BSD-3-Clause | — |
 | github.com/grafana/regexp | v0.0.0-20240518133315-a468a5bfb3bc | BSD-3-Clause | — |
-| github.com/grpc-ecosystem/grpc-gateway/v2 | v2.28.0 | BSD-3-Clause | — |
+| github.com/grpc-ecosystem/grpc-gateway/v2 | v2.29.0 | BSD-3-Clause | — |
 | github.com/hanwen/go-fuse/v2 | v2.9.0 | BSD-3-Clause | — |
 | github.com/hashicorp/errwrap | v1.1.0 | MPL-2.0 | — |
 | github.com/hashicorp/go-cleanhttp | v0.5.2 | MPL-2.0 | — |
@@ -295,7 +306,6 @@ Required 169, optional 0, excluded 223.
 | github.com/hashicorp/golang-lru/v2 | v2.0.7 | MPL-2.0 | — |
 | github.com/insomniacslk/dhcp | v0.0.0-20240829085014-a3a4c1f04475 | BSD-3-Clause | — |
 | github.com/josephspurrier/goversioninfo | v1.5.0 | MIT | — |
-| github.com/josharian/intern | v1.0.0 | MIT | — |
 | github.com/josharian/native | v1.1.0 | MIT | — |
 | github.com/jpillora/backoff | v1.0.0 | MIT | — |
 | github.com/jsimonetti/rtnetlink/v2 | v2.0.1 | MIT | — |
@@ -315,7 +325,6 @@ Required 169, optional 0, excluded 223.
 | github.com/lestrrat-go/option | v1.0.1 | MIT | — |
 | github.com/linuxkit/virtsock | v0.0.0-20241009230534-cb6a20cc0422 | Apache-2.0 | — |
 | github.com/lufia/plan9stats | v0.0.0-20211012122336-39d0f177ccd0 | BSD-3-Clause | — |
-| github.com/mailru/easyjson | v0.7.7 | MIT | — |
 | github.com/mattn/go-shellwords | v1.0.12 | MIT | — |
 | github.com/matttproud/golang_protobuf_extensions | v1.0.1 | Apache-2.0 | — |
 | github.com/mdlayher/netlink | v1.7.2 | MIT | — |
@@ -355,7 +364,7 @@ Required 169, optional 0, excluded 223.
 | github.com/seccomp/libseccomp-golang | v0.10.0 | BSD-2-Clause | — |
 | github.com/spiffe/go-spiffe/v2 | v2.7.0 | Apache-2.0 | — |
 | github.com/stoewer/go-strcase | v1.3.0 | MIT | — |
-| github.com/stretchr/objx | v0.5.2 | MIT | — |
+| github.com/stretchr/objx | v0.5.3 | MIT | — |
 | github.com/stretchr/testify | v1.12.1 | MIT | — |
 | github.com/u-root/uio | v0.0.0-20240224005618-d2acac8f3701 | BSD-3-Clause | — |
 | github.com/ulikunitz/xz | v0.5.15 | BSD-2-Clause | — |
@@ -374,9 +383,9 @@ Required 169, optional 0, excluded 223.
 | go.opentelemetry.io/contrib/detectors/gcp | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc | v1.42.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp | v1.42.0 | Apache-2.0 OR BSD-3-Clause | — |
-| go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc | v1.43.0 | Apache-2.0 OR BSD-3-Clause | — |
+| go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp | v1.43.0 | Apache-2.0 OR BSD-3-Clause | — |
-| go.opentelemetry.io/otel/exporters/otlp/otlptrace | v1.43.0 | Apache-2.0 OR BSD-3-Clause | — |
+| go.opentelemetry.io/otel/exporters/otlp/otlptrace | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/prometheus | v0.60.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/stdout/stdoutmetric | v1.42.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/sdk/metric | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
@@ -403,10 +412,10 @@ Required 169, optional 0, excluded 223.
 | gopkg.in/yaml.v2 | v2.4.0 | Apache-2.0 | — |
 | gotest.tools/v3 | v3.5.2 | Apache-2.0 | — |
 | honnef.co/go/tools | v0.7.0 | BSD-3-Clause OR MIT | — |
-| k8s.io/api | v0.36.2 | Apache-2.0 | — |
-| k8s.io/component-base | v0.36.2 | Apache-2.0 | — |
-| k8s.io/cri-client | v0.36.2 | Apache-2.0 | — |
-| k8s.io/kube-openapi | v0.0.0-20260319004828-5883c5ee87b9 | Apache-2.0 | — |
+| k8s.io/api | v0.37.1 | Apache-2.0 | — |
+| k8s.io/component-base | v0.37.1 | Apache-2.0 | — |
+| k8s.io/cri-client | v0.37.1 | Apache-2.0 | — |
+| k8s.io/kube-openapi | v0.0.0-20260721132016-d427ff9ee9ad | Apache-2.0 | — |
 | modernc.org/cc/v4 | v4.29.7 | BSD-3-Clause | — |
 | modernc.org/ccgo/v4 | v4.36.1 | BSD-3-Clause | — |
 | modernc.org/fileutil | v1.4.0 | BSD-3-Clause | — |
@@ -420,7 +429,7 @@ Required 169, optional 0, excluded 223.
 | pgregory.net/rapid | v1.2.0 | MPL-2.0 | — |
 | sigs.k8s.io/knftables | v0.0.18 | Apache-2.0 | — |
 | sigs.k8s.io/randfill | v1.0.0 | Apache-2.0 | — |
-| sigs.k8s.io/structured-merge-diff/v6 | v6.3.2 | Apache-2.0 | — |
+| sigs.k8s.io/structured-merge-diff/v6 | v6.4.2 | Apache-2.0 | — |
 
 ## Embed bundle
 

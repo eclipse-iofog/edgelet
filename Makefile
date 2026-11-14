@@ -1,4 +1,4 @@
-.PHONY: build build-cli build-daemon build-daemon-embedded build-edgelet build-edgelet-linux build-edgelet-local deps test test-linux test-linux-race test-linux-race-arm64 test-linux-race-amd64 test-race lint lint-fix clean docker-build install install-dev start-dev stop-dev setup-dev-env export-dev-env fmt vet static staticcheck staticcheck-standalone install-staticcheck help build-all-archs build-release-matrix build-linux-amd64 build-linux-arm64 build-linux-arm build-linux-riscv64 release-binaries build-desktop-darwin build-desktop-windows test-embedded test-embedded-ci cli-docs cli-docs-check cli-help-check cli-completion test-embedded-docker ci-docker quality-linux quality-linux-arm64 quality-linux-amd64 install-scripts install-scripts-check test-lifecycle test-lifecycle-race test-deadlock pre-it
+.PHONY: build build-cli build-daemon build-daemon-embedded build-edgelet build-edgelet-linux build-edgelet-local deps test test-linux test-linux-race test-linux-race-arm64 test-linux-race-amd64 test-race lint lint-fix clean docker-build install install-dev start-dev stop-dev setup-dev-env export-dev-env fmt vet static staticcheck staticcheck-standalone install-staticcheck help build-all-archs build-release-matrix build-linux-amd64 build-linux-arm64 build-linux-arm build-linux-riscv64 release-binaries build-desktop-darwin build-desktop-windows test-embedded test-embedded-ci cli-docs cli-docs-check cli-help-check cli-completion test-embedded-docker ci-docker quality-linux quality-linux-arm64 quality-linux-amd64 vet-kube lint-kube quality-linux-kube install-scripts install-scripts-check test-lifecycle test-lifecycle-race test-deadlock pre-it
 
 GOBIN ?= $(shell go env GOBIN)
 ifeq ($(GOBIN),)
@@ -542,9 +542,10 @@ build-size: build ## Show binary sizes
 	@echo "Binary sizes:"
 	@ls -lh build/edgelet* 2>/dev/null | awk '{print $$5 "\t" $$9}' || true
 
-# Security tooling — pinned govulncheck; gosec scoped to edgelet module trees only.
+# Security tooling — pinned govulncheck; gosec on the root module, then the kube module.
 GOVULNCHECK_VERSION ?= v1.1.4
 GOSEC_SCOPE           := ./cmd/... ./internal/... ./pkg/...
+GOSEC_KUBE_SCOPE      := ./cmd/... ./internal/...
 
 vulncheck: ## Run dependency vulnerability scan (govulncheck + go mod verify)
 	@echo "🔐 Running govulncheck..."
@@ -564,6 +565,20 @@ security-code: ## Run static Go security analysis (gosec)
 		go install github.com/securego/gosec/v2/cmd/gosec@latest; \
 	fi
 	@gosec -exclude-dir=build $(GOSEC_SCOPE)
+	@echo "🔍 Running Go static security analysis (kube)..."
+	@cd kube && GOWORK=off gosec $(GOSEC_KUBE_SCOPE)
+
+vet-kube: ## Run go vet in the kube module
+	@echo "Running go vet (kube)..."
+	@cd kube && GOWORK=off go vet ./...
+
+lint-kube: $(GOLANGCI_LINT) ## Run golangci-lint in the kube module
+	@echo "Running golangci-lint $(GOLANGCI_LINT_VERSION) (kube)..."
+	@cd kube && GOWORK=off $(GOLANGCI_LINT) run --config .golangci.yaml
+
+quality-linux-kube: ## Vet and lint the kube module (Docker on macOS)
+	@chmod +x kube/scripts/quality-linux.sh
+	@kube/scripts/quality-linux.sh
 
 quality-linux-arm64: test-linux ## Run test-linux and then lint, vulncheck, security-code in Linux arm64 Docker
 	@chmod +x scripts/quality-linux.sh
