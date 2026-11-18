@@ -368,7 +368,7 @@ Components:
 - golang.org/x/crypto@v0.58.0 (BSD-3-Clause)
 - golang.org/x/exp/typeparams@v0.0.0-20260209203927-2842357ff358 (BSD-3-Clause)
 - golang.org/x/exp@v0.0.0-20241108190413-2d47ceb2692f (BSD-3-Clause)
-- golang.org/x/mod@v0.41.0 (BSD-3-Clause)
+- golang.org/x/mod@v0.42.0 (BSD-3-Clause)
 - golang.org/x/net@v0.62.0 (BSD-3-Clause)
 - golang.org/x/oauth2@v0.36.0 (BSD-3-Clause)
 - golang.org/x/sync@v0.24.0 (BSD-3-Clause)
@@ -376,7 +376,7 @@ Components:
 - golang.org/x/term@v0.47.0 (BSD-3-Clause)
 - golang.org/x/text@v0.43.0 (BSD-3-Clause)
 - golang.org/x/time@v0.15.0 (BSD-3-Clause)
-- golang.org/x/tools@v0.51.0 (BSD-3-Clause)
+- golang.org/x/tools@v0.52.0 (BSD-3-Clause)
 
 ```
 Copyright 2009 The Go Authors.
@@ -425,7 +425,7 @@ The k3s-root source repository at this tag is Apache-2.0 (https://github.com/k3s
 
 Components:
 
-- SQLite@3.53.4 (LicenseRef-SQLite-PublicDomain)
+- SQLite@3.54.1 (LicenseRef-SQLite-PublicDomain)
 
 ```
 SQLite Is Public Domain
@@ -709,7 +709,7 @@ Components:
 - github.com/google/deck@v0.0.0-20230104221208-105ad94aa8ae (Apache-2.0)
 - github.com/google/go-containerregistry@v0.20.6 (Apache-2.0)
 - github.com/google/gofuzz@v1.2.0 (Apache-2.0)
-- github.com/google/pprof@v0.0.0-20260802141513-ef3492d7dac3 (Apache-2.0)
+- github.com/google/pprof@v0.0.0-20261016150608-1facf8f91b50 (Apache-2.0)
 - github.com/google/s2a-go@v0.1.9 (Apache-2.0)
 - github.com/googleapis/enterprise-certificate-proxy@v0.3.11 (Apache-2.0)
 - github.com/kylelemons/godebug@v1.1.0 (Apache-2.0)
@@ -2327,7 +2327,7 @@ THE SOFTWARE.
 
 Components:
 
-- github.com/bmatcuk/doublestar/v4@v4.10.3 (MIT)
+- github.com/bmatcuk/doublestar/v4@v4.10.4 (MIT)
 
 ```
 The MIT License (MIT)
@@ -2709,7 +2709,7 @@ Components:
 - github.com/envoyproxy/go-control-plane/envoy@v1.37.0 (Apache-2.0)
 - github.com/envoyproxy/go-control-plane/ratelimit@v0.1.0 (Apache-2.0)
 - github.com/envoyproxy/go-control-plane@v0.14.0 (Apache-2.0)
-- github.com/go-logr/logr@v1.4.3 (Apache-2.0)
+- github.com/go-logr/logr@v1.4.4 (Apache-2.0)
 - github.com/k3s-io/kubernetes/staging/src/k8s.io/cri-api@v1.37.2-k3s1 (Apache-2.0)
 - github.com/mwitkow/go-conntrack@v0.0.0-20190716064945-2f068394615f (Apache-2.0)
 - github.com/opencontainers/cgroups@v0.0.4 (Apache-2.0)
@@ -6272,7 +6272,7 @@ See also https://www.apache.org/dev/crypto.html and/or seek legal counsel.
 
 Components:
 
-- github.com/dustin/go-humanize@v1.0.1 (MIT)
+- github.com/dustin/go-humanize@v1.1.0 (MIT)
 
 ```
 Copyright (c) 2005-2008  Dustin Sallings <dustin@spy.net>
@@ -13604,7 +13604,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Components:
 
-- github.com/ncruces/go-strftime@v1.0.0 (MIT)
+- github.com/ncruces/go-strftime@v1.1.0 (MIT)
 
 ```
 MIT License
@@ -18905,11 +18905,13 @@ Components:
 - go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
 - go.opentelemetry.io/otel/exporters/prometheus@v0.60.0 (Apache-2.0 OR BSD-3-Clause)
 - go.opentelemetry.io/otel/exporters/stdout/stdoutmetric@v1.42.0 (Apache-2.0 OR BSD-3-Clause)
-- go.opentelemetry.io/otel/metric@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
-- go.opentelemetry.io/otel/sdk/metric@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
-- go.opentelemetry.io/otel/sdk@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
-- go.opentelemetry.io/otel/trace@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
-- go.opentelemetry.io/otel@v1.44.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/log@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/metric/x@v0.69.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/metric@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/sdk/metric@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/sdk@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel/trace@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
+- go.opentelemetry.io/otel@v1.47.0 (Apache-2.0 OR BSD-3-Clause)
 
 ```
                                  Apache License
@@ -20159,7 +20161,7 @@ resulting binaries. These projects are:
 
 Components:
 
-- modernc.org/cc/v4@v4.29.7 (BSD-3-Clause)
+- modernc.org/cc/v4@v4.30.3 (BSD-3-Clause)
 
 ```
 Copyright (c) 2014 The CC Authors. All rights reserved.
@@ -20195,7 +20197,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Components:
 
-- modernc.org/ccgo/v4@v4.36.1 (BSD-3-Clause)
+- modernc.org/ccgo/v4@v4.37.0 (BSD-3-Clause)
 
 ```
 Copyright (c) 2017 The CCGO Authors. All rights reserved.
@@ -20268,7 +20270,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Components:
 
 - modernc.org/gc/v2@v2.6.5 (BSD-3-Clause)
-- modernc.org/gc/v3@v3.1.5 (BSD-3-Clause)
+- modernc.org/gc/v3@v3.2.0 (BSD-3-Clause)
 
 ```
 -------------------------------------------------------------------------------
@@ -20381,7 +20383,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Components:
 
-- modernc.org/libc@v1.77.1 (BSD-3-Clause)
+- modernc.org/libc@v1.79.0 (BSD-3-Clause)
 
 ```
 Copyright (c) 2017 The Libc Authors. All rights reserved.
@@ -20621,7 +20623,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Components:
 
-- modernc.org/sqlite@v1.60.1 (LicenseRef-SQLite-PublicDomain)
+- modernc.org/sqlite@v1.61.0 (LicenseRef-SQLite-PublicDomain)
 
 ```
 --- LICENSE ---

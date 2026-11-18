@@ -152,7 +152,7 @@
       "version": "v0.15.4"
     },
     {
-      "bom-ref": "pkg:generic/sqlite@3.53.4",
+      "bom-ref": "pkg:generic/sqlite@3.54.1",
       "description": "Linked inside modernc.org/sqlite. The version is the SQLITE_VERSION constant in that module, which go list does not report.",
       "licenses": [
         {
@@ -167,13 +167,13 @@
         },
         {
           "name": "edgelet:contained-by",
-          "value": "pkg:golang/modernc.org/sqlite@v1.60.1"
+          "value": "pkg:golang/modernc.org/sqlite@v1.61.0"
         }
       ],
-      "purl": "pkg:generic/sqlite@3.53.4",
+      "purl": "pkg:generic/sqlite@3.54.1",
       "scope": "required",
       "type": "library",
-      "version": "3.53.4"
+      "version": "3.54.1"
     },
     {
       "bom-ref": "pkg:github/containers/crun@1.30.1",
@@ -315,7 +315,7 @@
       "version": "v1.0.1"
     },
     {
-      "bom-ref": "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.3",
+      "bom-ref": "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.4",
       "licenses": [
         {
           "expression": "MIT"
@@ -328,10 +328,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.3",
+      "purl": "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.4",
       "scope": "required",
       "type": "library",
-      "version": "v4.10.3"
+      "version": "v4.10.4"
     },
     {
       "bom-ref": "pkg:golang/github.com/briandowns/spinner@v1.23.2",
@@ -999,7 +999,7 @@
       "version": "v0.5.0"
     },
     {
-      "bom-ref": "pkg:golang/github.com/dustin/go-humanize@v1.0.1",
+      "bom-ref": "pkg:golang/github.com/dustin/go-humanize@v1.1.0",
       "licenses": [
         {
           "expression": "MIT"
@@ -1012,10 +1012,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/github.com/dustin/go-humanize@v1.0.1",
+      "purl": "pkg:golang/github.com/dustin/go-humanize@v1.1.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.0.1"
+      "version": "v1.1.0"
     },
     {
       "bom-ref": "pkg:golang/github.com/ebitengine/purego@v0.11.1",
@@ -1151,7 +1151,7 @@
       "version": "v4.1.6"
     },
     {
-      "bom-ref": "pkg:golang/github.com/go-logr/logr@v1.4.3",
+      "bom-ref": "pkg:golang/github.com/go-logr/logr@v1.4.4",
       "licenses": [
         {
           "expression": "Apache-2.0"
@@ -1164,10 +1164,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/github.com/go-logr/logr@v1.4.3",
+      "purl": "pkg:golang/github.com/go-logr/logr@v1.4.4",
       "scope": "required",
       "type": "library",
-      "version": "v1.4.3"
+      "version": "v1.4.4"
     },
     {
       "bom-ref": "pkg:golang/github.com/go-logr/stdr@v1.2.2",
@@ -1806,7 +1806,7 @@
       "version": "v0.0.0-20191010083416-a7dc8b61c822"
     },
     {
-      "bom-ref": "pkg:golang/github.com/ncruces/go-strftime@v1.0.0",
+      "bom-ref": "pkg:golang/github.com/ncruces/go-strftime@v1.1.0",
       "licenses": [
         {
           "expression": "MIT"
@@ -1819,10 +1819,10 @@
           "value": "darwin,windows"
         }
       ],
-      "purl": "pkg:golang/github.com/ncruces/go-strftime@v1.0.0",
+      "purl": "pkg:golang/github.com/ncruces/go-strftime@v1.1.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.0.0"
+      "version": "v1.1.0"
     },
     {
       "bom-ref": "pkg:golang/github.com/nxadm/tail@v1.4.11",
@@ -2509,7 +2509,26 @@
       "version": "v0.69.0"
     },
     {
-      "bom-ref": "pkg:golang/go.opentelemetry.io/otel/metric@v1.44.0",
+      "bom-ref": "pkg:golang/go.opentelemetry.io/otel/log@v1.47.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR BSD-3-Clause"
+        }
+      ],
+      "name": "go.opentelemetry.io/otel/log",
+      "properties": [
+        {
+          "name": "edgelet:closures",
+          "value": "darwin,linux-fat,windows"
+        }
+      ],
+      "purl": "pkg:golang/go.opentelemetry.io/otel/log@v1.47.0",
+      "scope": "required",
+      "type": "library",
+      "version": "v1.47.0"
+    },
+    {
+      "bom-ref": "pkg:golang/go.opentelemetry.io/otel/metric@v1.47.0",
       "licenses": [
         {
           "expression": "Apache-2.0 OR BSD-3-Clause"
@@ -2522,13 +2541,13 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@v1.44.0",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/metric@v1.47.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.44.0"
+      "version": "v1.47.0"
     },
     {
-      "bom-ref": "pkg:golang/go.opentelemetry.io/otel/trace@v1.44.0",
+      "bom-ref": "pkg:golang/go.opentelemetry.io/otel/trace@v1.47.0",
       "licenses": [
         {
           "expression": "Apache-2.0 OR BSD-3-Clause"
@@ -2541,13 +2560,13 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@v1.44.0",
+      "purl": "pkg:golang/go.opentelemetry.io/otel/trace@v1.47.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.44.0"
+      "version": "v1.47.0"
     },
     {
-      "bom-ref": "pkg:golang/go.opentelemetry.io/otel@v1.44.0",
+      "bom-ref": "pkg:golang/go.opentelemetry.io/otel@v1.47.0",
       "licenses": [
         {
           "expression": "Apache-2.0 OR BSD-3-Clause"
@@ -2560,10 +2579,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/go.opentelemetry.io/otel@v1.44.0",
+      "purl": "pkg:golang/go.opentelemetry.io/otel@v1.47.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.44.0"
+      "version": "v1.47.0"
     },
     {
       "bom-ref": "pkg:golang/go.yaml.in/yaml/v2@v2.4.4",
@@ -2623,7 +2642,7 @@
       "version": "v0.58.0"
     },
     {
-      "bom-ref": "pkg:golang/golang.org/x/mod@v0.41.0",
+      "bom-ref": "pkg:golang/golang.org/x/mod@v0.42.0",
       "licenses": [
         {
           "expression": "BSD-3-Clause"
@@ -2636,10 +2655,10 @@
           "value": "linux-fat"
         }
       ],
-      "purl": "pkg:golang/golang.org/x/mod@v0.41.0",
+      "purl": "pkg:golang/golang.org/x/mod@v0.42.0",
       "scope": "required",
       "type": "library",
-      "version": "v0.41.0"
+      "version": "v0.42.0"
     },
     {
       "bom-ref": "pkg:golang/golang.org/x/net@v0.62.0",
@@ -2984,7 +3003,7 @@
       "version": "v0.0.0-20260626114624-be93311217bd"
     },
     {
-      "bom-ref": "pkg:golang/modernc.org/libc@v1.77.1",
+      "bom-ref": "pkg:golang/modernc.org/libc@v1.79.0",
       "licenses": [
         {
           "expression": "BSD-3-Clause"
@@ -2997,10 +3016,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/modernc.org/libc@v1.77.1",
+      "purl": "pkg:golang/modernc.org/libc@v1.79.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.77.1"
+      "version": "v1.79.0"
     },
     {
       "bom-ref": "pkg:golang/modernc.org/mathutil@v1.7.1",
@@ -3041,7 +3060,7 @@
       "version": "v1.12.1"
     },
     {
-      "bom-ref": "pkg:golang/modernc.org/sqlite@v1.60.1",
+      "bom-ref": "pkg:golang/modernc.org/sqlite@v1.61.0",
       "licenses": [
         {
           "expression": "LicenseRef-SQLite-PublicDomain"
@@ -3054,10 +3073,10 @@
           "value": "darwin,linux-fat,windows"
         }
       ],
-      "purl": "pkg:golang/modernc.org/sqlite@v1.60.1",
+      "purl": "pkg:golang/modernc.org/sqlite@v1.61.0",
       "scope": "required",
       "type": "library",
-      "version": "v1.60.1"
+      "version": "v1.61.0"
     },
     {
       "bom-ref": "pkg:golang/oras.land/oras-go/v2@v2.7.0",
@@ -3189,7 +3208,7 @@
         "pkg:generic/k3s-root@v0.15.4?arch=arm",
         "pkg:generic/k3s-root@v0.15.4?arch=arm64",
         "pkg:generic/k3s-root@v0.15.4?arch=riscv64",
-        "pkg:generic/sqlite@3.53.4",
+        "pkg:generic/sqlite@3.54.1",
         "pkg:github/containers/crun@1.30.1",
         "pkg:github/rancher/plugins@v1.9.1-k3s1",
         "pkg:golang/dario.cat/mergo@v1.0.2",
@@ -3197,7 +3216,7 @@
         "pkg:golang/github.com/Microsoft/hcsshim@v0.15.0-rc.1",
         "pkg:golang/github.com/ProtonMail/go-crypto@v1.4.1",
         "pkg:golang/github.com/beorn7/perks@v1.0.1",
-        "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.3",
+        "pkg:golang/github.com/bmatcuk/doublestar/v4@v4.10.4",
         "pkg:golang/github.com/briandowns/spinner@v1.23.2",
         "pkg:golang/github.com/cespare/xxhash/v2@v2.3.0",
         "pkg:golang/github.com/checkpoint-restore/checkpointctl@v1.5.0",
@@ -3233,7 +3252,7 @@
         "pkg:golang/github.com/docker/go-events@v0.0.0-20190806004212-e31b211e4f1c",
         "pkg:golang/github.com/docker/go-metrics@v0.0.1",
         "pkg:golang/github.com/docker/go-units@v0.5.0",
-        "pkg:golang/github.com/dustin/go-humanize@v1.0.1",
+        "pkg:golang/github.com/dustin/go-humanize@v1.1.0",
         "pkg:golang/github.com/ebitengine/purego@v0.11.1",
         "pkg:golang/github.com/emicklei/go-restful/v3@v3.13.0",
         "pkg:golang/github.com/fatih/color@v1.7.0",
@@ -3241,7 +3260,7 @@
         "pkg:golang/github.com/fsnotify/fsnotify@v1.10.1",
         "pkg:golang/github.com/fxamacker/cbor/v2@v2.9.1",
         "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.6",
-        "pkg:golang/github.com/go-logr/logr@v1.4.3",
+        "pkg:golang/github.com/go-logr/logr@v1.4.4",
         "pkg:golang/github.com/go-logr/stdr@v1.2.2",
         "pkg:golang/github.com/go-ole/go-ole@v1.2.6",
         "pkg:golang/github.com/godbus/dbus/v5@v5.1.0",
@@ -3275,7 +3294,7 @@
         "pkg:golang/github.com/moby/sys/user@v0.4.1",
         "pkg:golang/github.com/moby/sys/userns@v0.1.0",
         "pkg:golang/github.com/munnerz/goautoneg@v0.0.0-20191010083416-a7dc8b61c822",
-        "pkg:golang/github.com/ncruces/go-strftime@v1.0.0",
+        "pkg:golang/github.com/ncruces/go-strftime@v1.1.0",
         "pkg:golang/github.com/nxadm/tail@v1.4.11",
         "pkg:golang/github.com/opencontainers/go-digest@v1.0.0",
         "pkg:golang/github.com/opencontainers/image-spec@v1.1.1",
@@ -3312,13 +3331,14 @@
         "pkg:golang/go.opentelemetry.io/auto/sdk@v1.2.1",
         "pkg:golang/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@v0.68.0",
         "pkg:golang/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.69.0",
-        "pkg:golang/go.opentelemetry.io/otel/metric@v1.44.0",
-        "pkg:golang/go.opentelemetry.io/otel/trace@v1.44.0",
-        "pkg:golang/go.opentelemetry.io/otel@v1.44.0",
+        "pkg:golang/go.opentelemetry.io/otel/log@v1.47.0",
+        "pkg:golang/go.opentelemetry.io/otel/metric@v1.47.0",
+        "pkg:golang/go.opentelemetry.io/otel/trace@v1.47.0",
+        "pkg:golang/go.opentelemetry.io/otel@v1.47.0",
         "pkg:golang/go.yaml.in/yaml/v2@v2.4.4",
         "pkg:golang/go.yaml.in/yaml/v3@v3.0.5",
         "pkg:golang/golang.org/x/crypto@v0.58.0",
-        "pkg:golang/golang.org/x/mod@v0.41.0",
+        "pkg:golang/golang.org/x/mod@v0.42.0",
         "pkg:golang/golang.org/x/net@v0.62.0",
         "pkg:golang/golang.org/x/sync@v0.24.0",
         "pkg:golang/golang.org/x/sys@v0.49.0",
@@ -3337,10 +3357,10 @@
         "pkg:golang/k8s.io/klog/v2@v2.140.0",
         "pkg:golang/k8s.io/streaming@v0.37.1",
         "pkg:golang/k8s.io/utils@v0.0.0-20260626114624-be93311217bd",
-        "pkg:golang/modernc.org/libc@v1.77.1",
+        "pkg:golang/modernc.org/libc@v1.79.0",
         "pkg:golang/modernc.org/mathutil@v1.7.1",
         "pkg:golang/modernc.org/memory@v1.12.1",
-        "pkg:golang/modernc.org/sqlite@v1.60.1",
+        "pkg:golang/modernc.org/sqlite@v1.61.0",
         "pkg:golang/oras.land/oras-go/v2@v2.7.0",
         "pkg:golang/sigs.k8s.io/json@v0.0.0-20250730193827-2d320260d730",
         "pkg:golang/sigs.k8s.io/yaml@v1.6.0",
@@ -3352,9 +3372,9 @@
     },
     {
       "dependsOn": [
-        "pkg:generic/sqlite@3.53.4"
+        "pkg:generic/sqlite@3.54.1"
       ],
-      "ref": "pkg:golang/modernc.org/sqlite@v1.60.1"
+      "ref": "pkg:golang/modernc.org/sqlite@v1.61.0"
     }
   ],
   "metadata": {
@@ -3383,7 +3403,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:72f96428-2c3c-5986-905e-c0f31c0140b7",
+  "serialNumber": "urn:uuid:b77962aa-a31e-5e60-991f-cbf728f6c1de",
   "specVersion": "1.6",
   "version": 1
 }

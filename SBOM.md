@@ -16,7 +16,7 @@ Container image attestations are not in this document.
 | optional | Compiled into tests only |
 | excluded | Present in `go list -m all` and compiled into nothing here |
 
-Required 169, optional 0, excluded 232.
+Required 170, optional 0, excluded 233.
 
 ## Inventory
 
@@ -34,7 +34,7 @@ Required 169, optional 0, excluded 232.
 | k3s-root (arm64) | v0.15.4 | NOASSERTION | linux |
 | k3s-root (riscv64) | v0.15.4 | NOASSERTION | linux |
 | nftables | — | GPL-2.0-only | linux |
-| SQLite | 3.53.4 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
+| SQLite | 3.54.1 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
 | util-linux | — | GPL-2.0-or-later | linux |
 | crun | 1.30.1 | GPL-2.0-or-later | linux |
 | cni-plugins | v1.9.1-k3s1 | Apache-2.0 | linux |
@@ -43,7 +43,7 @@ Required 169, optional 0, excluded 232.
 | github.com/Microsoft/hcsshim | v0.15.0-rc.1 | MIT | linux-fat |
 | github.com/ProtonMail/go-crypto | v1.4.1 | BSD-3-Clause | linux-fat |
 | github.com/beorn7/perks | v1.0.1 | MIT | linux-fat |
-| github.com/bmatcuk/doublestar/v4 | v4.10.3 | MIT | darwin, linux-fat, windows |
+| github.com/bmatcuk/doublestar/v4 | v4.10.4 | MIT | darwin, linux-fat, windows |
 | github.com/briandowns/spinner | v1.23.2 | Apache-2.0 | darwin, linux-thin, windows |
 | github.com/cespare/xxhash/v2 | v2.3.0 | MIT | darwin, linux-fat, windows |
 | github.com/checkpoint-restore/checkpointctl | v1.5.0 | Apache-2.0 | linux-fat |
@@ -79,7 +79,7 @@ Required 169, optional 0, excluded 232.
 | github.com/docker/go-events | v0.0.0-20190806004212-e31b211e4f1c | Apache-2.0 | linux-fat |
 | github.com/docker/go-metrics | v0.0.1 | Apache-2.0 | linux-fat |
 | github.com/docker/go-units | v0.5.0 | Apache-2.0 | darwin, linux-fat, windows |
-| github.com/dustin/go-humanize | v1.0.1 | MIT | darwin, linux-fat, windows |
+| github.com/dustin/go-humanize | v1.1.0 | MIT | darwin, linux-fat, windows |
 | github.com/ebitengine/purego | v0.11.1 | Apache-2.0 | darwin |
 | github.com/emicklei/go-restful/v3 | v3.13.0 | MIT | linux-fat |
 | github.com/fatih/color | v1.7.0 | MIT | darwin, linux-thin, windows |
@@ -87,7 +87,7 @@ Required 169, optional 0, excluded 232.
 | github.com/fsnotify/fsnotify | v1.10.1 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
 | github.com/fxamacker/cbor/v2 | v2.9.1 | MIT | linux-fat |
 | github.com/go-jose/go-jose/v4 | v4.1.6 | Apache-2.0 | linux-fat |
-| github.com/go-logr/logr | v1.4.3 | Apache-2.0 | darwin, linux-fat, windows |
+| github.com/go-logr/logr | v1.4.4 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/go-logr/stdr | v1.2.2 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/go-ole/go-ole | v1.2.6 | MIT | windows |
 | github.com/godbus/dbus/v5 | v5.1.0 | BSD-2-Clause | linux-fat |
@@ -121,7 +121,7 @@ Required 169, optional 0, excluded 232.
 | github.com/moby/sys/user | v0.4.1 | Apache-2.0 | linux-fat |
 | github.com/moby/sys/userns | v0.1.0 | Apache-2.0 | linux-fat |
 | github.com/munnerz/goautoneg | v0.0.0-20191010083416-a7dc8b61c822 | BSD-3-Clause | linux-fat |
-| github.com/ncruces/go-strftime | v1.0.0 | MIT | darwin, windows |
+| github.com/ncruces/go-strftime | v1.1.0 | MIT | darwin, windows |
 | github.com/nxadm/tail | v1.4.11 | MIT | linux-fat |
 | github.com/opencontainers/go-digest | v1.0.0 | Apache-2.0 | darwin, linux-fat, windows |
 | github.com/opencontainers/image-spec | v1.1.1 | Apache-2.0 | darwin, linux-fat, windows |
@@ -158,13 +158,14 @@ Required 169, optional 0, excluded 232.
 | go.opentelemetry.io/auto/sdk | v1.2.1 | Apache-2.0 | darwin, linux-fat, windows |
 | go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc | v0.68.0 | Apache-2.0 OR BSD-3-Clause | linux-fat |
 | go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp | v0.69.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
-| go.opentelemetry.io/otel/metric | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
-| go.opentelemetry.io/otel/trace | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
-| go.opentelemetry.io/otel | v1.44.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
+| go.opentelemetry.io/otel/log | v1.47.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
+| go.opentelemetry.io/otel/metric | v1.47.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
+| go.opentelemetry.io/otel/trace | v1.47.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
+| go.opentelemetry.io/otel | v1.47.0 | Apache-2.0 OR BSD-3-Clause | darwin, linux-fat, windows |
 | go.yaml.in/yaml/v2 | v2.4.4 | Apache-2.0 | linux-fat |
 | go.yaml.in/yaml/v3 | v3.0.5 | Apache-2.0 OR MIT | darwin, linux-fat, linux-thin, windows |
 | golang.org/x/crypto | v0.58.0 | BSD-3-Clause | darwin, linux-fat, windows |
-| golang.org/x/mod | v0.41.0 | BSD-3-Clause | linux-fat |
+| golang.org/x/mod | v0.42.0 | BSD-3-Clause | linux-fat |
 | golang.org/x/net | v0.62.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
 | golang.org/x/sync | v0.24.0 | BSD-3-Clause | darwin, linux-fat, windows |
 | golang.org/x/sys | v0.49.0 | BSD-3-Clause | darwin, linux-fat, linux-thin, windows |
@@ -183,10 +184,10 @@ Required 169, optional 0, excluded 232.
 | k8s.io/klog/v2 | v2.140.0 | Apache-2.0 | linux-fat |
 | k8s.io/streaming | v0.37.1 | Apache-2.0 | linux-fat |
 | k8s.io/utils | v0.0.0-20260626114624-be93311217bd | Apache-2.0 | linux-fat |
-| modernc.org/libc | v1.77.1 | BSD-3-Clause | darwin, linux-fat, windows |
+| modernc.org/libc | v1.79.0 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/mathutil | v1.7.1 | BSD-3-Clause | darwin, linux-fat, windows |
 | modernc.org/memory | v1.12.1 | BSD-3-Clause | darwin, linux-fat, windows |
-| modernc.org/sqlite | v1.60.1 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
+| modernc.org/sqlite | v1.61.0 | LicenseRef-SQLite-PublicDomain | darwin, linux-fat, windows |
 | oras.land/oras-go/v2 | v2.7.0 | Apache-2.0 | darwin, linux-fat, windows |
 | sigs.k8s.io/json | v0.0.0-20250730193827-2d320260d730 | Apache-2.0 OR BSD-3-Clause | linux-fat |
 | sigs.k8s.io/yaml | v1.6.0 | Apache-2.0 OR BSD-3-Clause OR MIT | linux-fat |
@@ -291,7 +292,7 @@ Required 169, optional 0, excluded 232.
 | github.com/google/go-cmp | v0.7.0 | BSD-3-Clause | — |
 | github.com/google/go-containerregistry | v0.20.6 | Apache-2.0 | — |
 | github.com/google/gofuzz | v1.2.0 | Apache-2.0 | — |
-| github.com/google/pprof | v0.0.0-20260802141513-ef3492d7dac3 | Apache-2.0 | — |
+| github.com/google/pprof | v0.0.0-20261016150608-1facf8f91b50 | Apache-2.0 | — |
 | github.com/google/s2a-go | v0.1.9 | Apache-2.0 | — |
 | github.com/googleapis/enterprise-certificate-proxy | v0.3.11 | Apache-2.0 | — |
 | github.com/googleapis/gax-go/v2 | v2.17.0 | BSD-3-Clause | — |
@@ -388,8 +389,9 @@ Required 169, optional 0, excluded 232.
 | go.opentelemetry.io/otel/exporters/otlp/otlptrace | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/prometheus | v0.60.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/otel/exporters/stdout/stdoutmetric | v1.42.0 | Apache-2.0 OR BSD-3-Clause | — |
-| go.opentelemetry.io/otel/sdk/metric | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
-| go.opentelemetry.io/otel/sdk | v1.44.0 | Apache-2.0 OR BSD-3-Clause | — |
+| go.opentelemetry.io/otel/metric/x | v0.69.0 | Apache-2.0 OR BSD-3-Clause | — |
+| go.opentelemetry.io/otel/sdk/metric | v1.47.0 | Apache-2.0 OR BSD-3-Clause | — |
+| go.opentelemetry.io/otel/sdk | v1.47.0 | Apache-2.0 OR BSD-3-Clause | — |
 | go.opentelemetry.io/proto/otlp | v1.10.0 | Apache-2.0 | — |
 | go.uber.org/automaxprocs | v1.6.0 | MIT | — |
 | go.uber.org/goleak | v1.3.0 | MIT | — |
@@ -399,7 +401,7 @@ Required 169, optional 0, excluded 232.
 | golang.org/x/lint | v0.0.0-20190313153728-d0100b6bd8b3 | BSD-3-Clause | — |
 | golang.org/x/oauth2 | v0.36.0 | BSD-3-Clause | — |
 | golang.org/x/telemetry | v0.0.0-20240228155512-f48c80bd79b2 | BSD-3-Clause | — |
-| golang.org/x/tools | v0.51.0 | BSD-3-Clause | — |
+| golang.org/x/tools | v0.52.0 | BSD-3-Clause | — |
 | golang.org/x/xerrors | v0.0.0-20200804184101-5ec99f83aff1 | BSD-3-Clause | — |
 | gonum.org/v1/gonum | v0.17.0 | BSD-3-Clause | — |
 | google.golang.org/appengine | v1.6.8 | Apache-2.0 | — |
@@ -416,11 +418,11 @@ Required 169, optional 0, excluded 232.
 | k8s.io/component-base | v0.37.1 | Apache-2.0 | — |
 | k8s.io/cri-client | v0.37.1 | Apache-2.0 | — |
 | k8s.io/kube-openapi | v0.0.0-20260721132016-d427ff9ee9ad | Apache-2.0 | — |
-| modernc.org/cc/v4 | v4.29.7 | BSD-3-Clause | — |
-| modernc.org/ccgo/v4 | v4.36.1 | BSD-3-Clause | — |
+| modernc.org/cc/v4 | v4.30.3 | BSD-3-Clause | — |
+| modernc.org/ccgo/v4 | v4.37.0 | BSD-3-Clause | — |
 | modernc.org/fileutil | v1.4.0 | BSD-3-Clause | — |
 | modernc.org/gc/v2 | v2.6.5 | BSD-3-Clause | — |
-| modernc.org/gc/v3 | v3.1.5 | BSD-3-Clause | — |
+| modernc.org/gc/v3 | v3.2.0 | BSD-3-Clause | — |
 | modernc.org/goabi0 | v0.2.0 | BSD-3-Clause | — |
 | modernc.org/opt | v0.2.0 | BSD-3-Clause | — |
 | modernc.org/sortutil | v1.2.1 | BSD-3-Clause | — |
