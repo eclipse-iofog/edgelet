@@ -2,7 +2,6 @@ package stage
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 
 func TestMain(m *testing.M) {
 	stageArch = "amd64"
-	os.Exit(m.Run())
+	m.Run()
 }
 
 func TestManifestsUseClusterNetworkAndPinnedImages(t *testing.T) {
