@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Go dependencies:** `golang.org/x/sync` **v0.24.0**. No edgelet API changes. Regenerated `SBOM.md`, `LICENSE-3RD-PARTY.md`, `sbom.cdx.json`, and `sbom.spdx.json`.
 - **Go 1.26.11** minimum (see `go.mod`). CI and the govulncheck workflow use the same toolchain. Clears [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) ( HTTP/1 server crash due to MaxBytesReader header race in `net/http`). 
 - Image digests refreshed for `golang:1.26-trixie`.
+- **Security / vulncheck:** bump indirect OpenTelemetry modules to **v1.47.0** (`otel`, `otel/metric`, `otel/trace`, `otel/sdk`, `otel/sdk/metric`, `otel/log`) for **GHSA-q7gw-24fr-5p69**. No edgelet API changes.
+- **Go dependencies:** `github.com/bmatcuk/doublestar/v4` **v4.10.4**, `modernc.org/sqlite` **v1.61.0** (with `modernc.org/libc` **v1.79.0**). No edgelet API changes.
 
 ## [v1.1.3]
 
