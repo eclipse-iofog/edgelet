@@ -2,7 +2,7 @@
 # macOS dev:
 #   docker build -f build/Dockerfile.embedded -t edgelet-embed-ci .
 #   docker run --rm -v "$(pwd)":/src -w /src edgelet-embed-ci ./scripts/ci
-FROM golang:1.26-trixie@sha256:19ce7a1fdc59527aa568805ea100c380900d059d251e914fb86e11fd0ce68952
+FROM golang:1.26.11-trixie@sha256:cff05dd6b81c901f2e8249eb6f91c69a60451d0f12c26bfef08e476a85b32d4d
 
 COPY scripts/install-embed-build-deps /usr/local/bin/install-embed-build-deps
 RUN chmod +x /usr/local/bin/install-embed-build-deps \
