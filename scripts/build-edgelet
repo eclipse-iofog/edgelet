@@ -90,8 +90,9 @@ build_fat_runtime() {
   _ldflags="${LDFLAGS_BASE}${STATIC_LDFLAGS}"
 
   echo "Building edgelet fat runtime linux/${_arch} (CC=${_cc}) -> ${_out}"
+  # netgo keeps name lookup in Go. Static glibc getaddrinfo loads the host NSS modules and can crash.
   CGO_ENABLED=1 GOOS=linux GOARCH="${_goarch}" GOARM="${_goarm}" CC="${_cc}" \
-    "${GO}" build -trimpath -ldflags "${_ldflags}" -tags "cgo ${STATIC_TAGS}" -o "${_out}" ./cmd/edgelet-server
+    "${GO}" build -trimpath -ldflags "${_ldflags}" -tags "cgo netgo ${STATIC_TAGS}" -o "${_out}" ./cmd/edgelet-server
 }
 
 build_linux_thin() {

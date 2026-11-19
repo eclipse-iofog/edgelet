@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Container update:** an image change or rebuild pulls once while the current container is still running. After that container is stopped, create and start use the image already on disk and do not pull again.
 - **Edgelet engine:** a container whose task is gone is classified from the CRI state. `CONTAINER_EXITED` is `EXITING` and recreated under the normal crash backoff, including a crash while NATS or DNS is briefly down. `CONTAINER_RUNNING` stays running. A container that has never started still starts in place.
 - **Edge Guard:** a NIC that was locked up and later loses carrier (`1` to `0` or `unknown`) is logged locally and does not deprovision the agent, so a modem or peer outage leaves the node provisioned. A locked-down port becoming up, a new or removed MAC, and a USB change still deprovision. The TPM PCR file is not part of the identity hash. The first attestation after upgrade stores a new link lock and does not deprovision.
+- **Startup DNS:** the static fat daemon looks up names with Go instead of glibc `getaddrinfo`. On a host whose `nsswitch.conf` uses `myhostname` or `resolve` (systemd-resolved), the static binary loaded those host NSS modules and died at startup with `SIGFPE` before the supervisor finished opening the database. `/etc/resolv.conf`, the resolved stub, `/etc/hosts`, the controller URL, and registry hostnames resolve as before. The `*.svc.bridge.local` names are still written into containers by Edgelet.
+- **Version banner:** the daemon startup line in `journalctl` and `systemctl status` prints the linked tag once (`v1.1.4`). It was prefixing a second `v`. `edgelet version` is unchanged.
 
 ### Changed
 
