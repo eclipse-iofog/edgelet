@@ -15,6 +15,34 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+func TestNoSchedulerClientCertificate(t *testing.T) {
+	srv := testServer(t)
+	paths, err := ensureCerts(srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(paths.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.Contains(name, "scheduler") {
+			t.Fatalf("issued %s", name)
+		}
+		if !strings.HasSuffix(name, ".crt") {
+			continue
+		}
+		cert := mustCert(t, filepath.Join(paths.Dir, name))
+		if cert.Subject.CommonName == "system:kube-scheduler" || sameOrg(cert, "system:kube-scheduler") {
+			t.Fatalf("certificate %s subject %s %v", name, cert.Subject.CommonName, cert.Subject.Organization)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(paths.Dir, "scheduler.kubeconfig")); !os.IsNotExist(err) {
+		t.Fatalf("scheduler kubeconfig: %v", err)
+	}
+}
+
 func TestDefaultTLSDirectory(t *testing.T) {
 	if got := tlsDir(""); got != "/var/lib/edgelet-kube/server/tls" {
 		t.Fatalf("%s", got)

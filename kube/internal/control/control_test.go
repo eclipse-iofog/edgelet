@@ -21,6 +21,7 @@ import (
 	"github.com/eclipse-iofog/edgelet-kube/internal/datastore"
 	"github.com/eclipse-iofog/edgelet-kube/internal/helm"
 	"github.com/eclipse-iofog/edgelet-kube/internal/network"
+	"github.com/eclipse-iofog/edgelet-kube/internal/place"
 	"github.com/eclipse-iofog/edgelet-kube/internal/stage"
 	"github.com/eclipse-iofog/edgelet-kube/scripts/airgap"
 	"github.com/sirupsen/logrus"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	apioptions "k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 )
 
 func TestMain(m *testing.M) {
@@ -82,7 +84,6 @@ func TestArgumentsUseConfiguredNetworks(t *testing.T) {
 		FrontProxyKey:        "/tmp/certs/front-proxy-client.key",
 		AdminKubeconfig:      "/tmp/certs/admin.kubeconfig",
 		ControllerKubeconfig: "/tmp/certs/controller-manager.kubeconfig",
-		SchedulerKubeconfig:  "/tmp/certs/scheduler.kubeconfig",
 		APIServerCert:        "/tmp/certs/client-kube-apiserver.crt",
 		APIServerKey:         "/tmp/certs/client-kube-apiserver.key",
 	}
@@ -91,7 +92,7 @@ func TestArgumentsUseConfiguredNetworks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := api + "\n" + strings.Join(controller, "\n") + "\n" + strings.Join(schedulerArgs(srv, false, 10259, paths), "\n")
+	joined := api + "\n" + strings.Join(controller, "\n")
 	for _, want := range []string{
 		"--service-cluster-ip-range=10.50.0.0/16",
 		"--cluster-cidr=10.20.0.0/16",
@@ -104,6 +105,7 @@ func TestArgumentsUseConfiguredNetworks(t *testing.T) {
 		"--proxy-client-cert-file=/tmp/certs/front-proxy-client.crt",
 		"--requestheader-client-ca-file=/tmp/certs/front-proxy-ca.crt",
 		"--enable-aggregator-routing=true",
+		"--enable-admission-plugins=NodeRestriction,NodePlace",
 		"--advertise-address=10.20.0.8",
 		"--kubelet-client-certificate=/tmp/certs/client-kube-apiserver.crt",
 		"--kubelet-client-key=/tmp/certs/client-kube-apiserver.key",
@@ -122,11 +124,49 @@ func TestArgumentsUseConfiguredNetworks(t *testing.T) {
 			t.Fatalf("argument list contains %s", absent)
 		}
 	}
+	if strings.Contains(joined, "10259") {
+		t.Fatalf("argument list contains 10259\n%s", joined)
+	}
+}
+
+func TestNodePlaceIsEnabled(t *testing.T) {
+	srv := config.Defaults()
+	srv.ClusterCIDR = "10.20.0.0/16"
+	srv.ServiceCIDR = "10.50.0.0/16"
+	srv.ClusterDNS = "10.50.0.25"
+	srv.ClusterDomain = "example.test"
+	srv.NodePodCIDR = "10.20.0.0/24"
+	srv.NodeName = "node-a"
+	paths := certPaths{Dir: t.TempDir()}
+	opts := apioptions.NewServerRunOptions()
+	opts.Admission.GenericAdmission.RecommendedPluginOrder = place.Register(
+		opts.Admission.GenericAdmission.Plugins,
+		opts.Admission.GenericAdmission.RecommendedPluginOrder,
+		srv.NodeName,
+	)
+	if err := parseFlags("kube-apiserver", opts.Flags(), apiServerArgs(srv, "unix:///tmp/kine.sock", "10.20.0.8", "", paths)); err != nil {
+		t.Fatal(err)
+	}
+	if errs := opts.Admission.Validate(); len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if opts.Admission.GenericAdmission.DefaultOffPlugins.Has(place.PluginName) {
+		t.Fatal("placement plugin is disabled")
+	}
+	enabled := false
+	for _, name := range opts.Admission.GenericAdmission.EnablePlugins {
+		if name == place.PluginName {
+			enabled = true
+		}
+	}
+	if !enabled {
+		t.Fatalf("enable plugins %v", opts.Admission.GenericAdmission.EnablePlugins)
+	}
 }
 
 func TestLeaderElectionFollowsDatastore(t *testing.T) {
 	srv := config.Defaults()
-	paths := certPaths{ControllerKubeconfig: "c", SchedulerKubeconfig: "s"}
+	paths := certPaths{ControllerKubeconfig: "c"}
 	off, err := controllerManagerArgs(srv, false, 10257, paths)
 	if err != nil {
 		t.Fatal(err)
@@ -134,9 +174,12 @@ func TestLeaderElectionFollowsDatastore(t *testing.T) {
 	if !containsArg(off, "--leader-elect=false") {
 		t.Fatalf("controller args %v", off)
 	}
-	on := schedulerArgs(srv, true, 10259, paths)
+	on, err := controllerManagerArgs(srv, true, 10257, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !containsArg(on, "--leader-elect=true") {
-		t.Fatalf("scheduler args %v", on)
+		t.Fatalf("controller args %v", on)
 	}
 }
 
@@ -761,15 +804,54 @@ func kubeletRunning() bool {
 	return false
 }
 
+func TestNoSchedulerImport(t *testing.T) {
+	root := filepath.Join("..", "..")
+	banned := []string{
+		"k8s.io/kubernetes/cmd/kube-scheduler",
+		"k8s.io/kubernetes/pkg/scheduler",
+	}
+	server := filepath.Join(root, "cmd", "edgelet-kube-server")
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case "vendor", "testdata":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(body)
+		for _, item := range banned {
+			if strings.Contains(text, item) {
+				t.Errorf("%s imports %s", path, item)
+			}
+		}
+		if strings.HasPrefix(path, server) && strings.Contains(text, "kube-scheduler") {
+			t.Errorf("%s references kube-scheduler", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPodNetworkRunsBeforeControllers(t *testing.T) {
 	// The ordering test above starts the controllers. This checks the port
 	// helper used when the API port is not the default.
-	controller, scheduler := componentPorts(20000, 0, 0)
-	if controller != 20001 || scheduler != 20002 {
-		t.Fatalf("ports %d %d", controller, scheduler)
+	if got := controllerPort(20000); got != 20001 {
+		t.Fatalf("port %d", got)
 	}
-	controller, scheduler = componentPorts(config.DefaultHTTPSListenPort, 0, 0)
-	if controller != 10257 || scheduler != 10259 {
-		t.Fatalf("default ports %d %d", controller, scheduler)
+	if got := controllerPort(config.DefaultHTTPSListenPort); got != 10257 {
+		t.Fatalf("default port %d", got)
 	}
 }

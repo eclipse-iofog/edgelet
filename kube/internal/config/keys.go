@@ -159,7 +159,6 @@ var setters = map[string]setter{
 	"alsologtostderr":                   boolField("alsologtostderr", func(srv *Server) *bool { return &srv.AlsoLogToStderr }),
 	"kube-apiserver-arg":                listField("kube-apiserver-arg", func(srv *Server) *[]string { return &srv.KubeAPIServerArg }),
 	"kube-controller-manager-arg":       listField("kube-controller-manager-arg", func(srv *Server) *[]string { return &srv.KubeControllerManagerArg }),
-	"kube-scheduler-arg":                listField("kube-scheduler-arg", func(srv *Server) *[]string { return &srv.KubeSchedulerArg }),
 	"kubelet-arg":                       listField("kubelet-arg", func(srv *Server) *[]string { return &srv.KubeletArg }),
 	"kube-proxy-arg":                    listField("kube-proxy-arg", func(srv *Server) *[]string { return &srv.KubeProxyArg }),
 	"helm-controller-arg":               listField("helm-controller-arg", func(srv *Server) *[]string { return &srv.HelmControllerArg }),

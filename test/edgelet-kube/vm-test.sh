@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Checks extract, the containerd socket, the bridge conflist, a Ready node,
 # the iptables family, and that the Mac can reach the API at the guest address
-# on lima0. It then restarts edgelet-kube three times and requires CoreDNS to
-# become Ready after each restart.
+# on lima0. After CoreDNS is Ready it checks placement, then restarts
+# edgelet-kube three times and requires CoreDNS to become Ready after each
+# restart.
 #
 # Usage:
 #   ./test/edgelet-kube/vm-test.sh [--vm-name=edgelet-kube-test] [--ready-timeout=1200]
@@ -177,6 +178,348 @@ ready=$(/usr/local/bin/kubectl --kubeconfig /etc/edgelet-kube/edgelet-kube.yaml 
 test "$ready" = true
 '
 
+# Placement checks use the pause image already imported for the sandbox.
+# Each one deletes the pods it creates so a second run starts clean.
+read -r -d '' PLACEMENT_PRELUDE <<'EOF' || true
+set -eu
+set -o pipefail
+k=/usr/local/bin/kubectl
+export KUBECONFIG=/etc/edgelet-kube/edgelet-kube.yaml
+ns=default
+pause=docker.io/portainer/pause:latest
+node=$(${k} get nodes -o jsonpath='{.items[0].metadata.name}')
+test -n "${node}"
+
+delete_pod() {
+  if ! ${k} delete pod -n "${ns}" "$1" --ignore-not-found --wait=true --grace-period=0 --force >/dev/null 2>&1; then
+    echo "delete pod $1 failed" >&2
+    exit 1
+  fi
+}
+
+pod_node() {
+  ${k} get pod -n "${ns}" "$1" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true
+}
+
+pod_phase() {
+  ${k} get pod -n "${ns}" "$1" -o jsonpath='{.status.phase}' 2>/dev/null || true
+}
+
+recent_stamp() {
+  printf '%s\n' "$1" | awk -v before="$2" 'NF && ($0 == before || $0 > before) { found = 1 } END { exit found ? 0 : 1 }'
+}
+
+wait_running() {
+  local name="$1" i phase got
+  phase=""
+  got=""
+  for i in $(seq 1 120); do
+    phase=$(pod_phase "${name}")
+    got=$(pod_node "${name}")
+    if [ "${phase}" = Running ] && [ "${got}" = "${node}" ]; then
+      return 0
+    fi
+    if [ "${phase}" = Failed ] || [ "${phase}" = Succeeded ]; then
+      echo "${name} is ${phase}" >&2
+      ${k} describe pod -n "${ns}" "${name}" >&2 || true
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "${name} is ${phase:-unknown} on ${got:-<none>}, want Running on ${node}" >&2
+  ${k} describe pod -n "${ns}" "${name}" >&2 || true
+  exit 1
+}
+
+stay_unbound() {
+  local name="$1" i phase got
+  phase=""
+  got=""
+  for i in $(seq 1 5); do
+    phase=$(pod_phase "${name}")
+    got=$(pod_node "${name}")
+    if [ -n "${got}" ]; then
+      echo "${name} is bound to ${got}" >&2
+      ${k} describe pod -n "${ns}" "${name}" >&2 || true
+      exit 1
+    fi
+    if [ "${phase}" = Failed ] || [ "${phase}" = Succeeded ] || [ "${phase}" = Running ]; then
+      echo "${name} is ${phase}" >&2
+      ${k} describe pod -n "${ns}" "${name}" >&2 || true
+      exit 1
+    fi
+    sleep 2
+  done
+  if [ "${phase}" != Pending ]; then
+    echo "${name} is ${phase:-unknown}, want Pending" >&2
+    ${k} describe pod -n "${ns}" "${name}" >&2 || true
+    exit 1
+  fi
+}
+EOF
+
+read -r -d '' SCHEDULER_CHECK <<'EOF' || true
+set -eu
+for dir in /proc/[0-9]*; do
+  comm=$(cat "${dir}/comm" 2>/dev/null || true)
+  case "${comm}" in
+    kube-scheduler)
+      echo "scheduler process ${dir#/proc/}" >&2
+      exit 1
+      ;;
+  esac
+  cmd=$({ tr '\0' ' ' < "${dir}/cmdline" || true; } 2>/dev/null)
+  set -f
+  for word in ${cmd}; do
+    case "${word}" in
+      kube-scheduler|*/kube-scheduler)
+        echo "scheduler process: ${cmd}" >&2
+        exit 1
+        ;;
+    esac
+  done
+  set +f
+done
+test -r /proc/net/tcp
+nets=/proc/net/tcp
+if [ -r /proc/net/tcp6 ]; then
+  nets="${nets} /proc/net/tcp6"
+fi
+# shellcheck disable=SC2086
+if awk 'NR > 1 && $4 == "0A" {
+  split($2, a, ":")
+  if (toupper(a[2]) == "2813") found = 1
+}
+END { exit found ? 0 : 1 }' ${nets}; then
+  echo "something listens on 10259" >&2
+  exit 1
+fi
+EOF
+
+read -r -d '' FREE_POD_CHECK <<'EOF' || true
+${k} uncordon "${node}" >/dev/null
+delete_pod place-free
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-free
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+YAML
+wait_running place-free
+EOF
+
+read -r -d '' SELECTOR_CHECK <<'EOF' || true
+delete_pod place-selector
+before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-selector
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  nodeSelector:
+    kubernetes.io/hostname: not-this-node
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+YAML
+found=0
+for _ in $(seq 1 30); do
+  got=$(pod_node place-selector)
+  if [ -n "${got}" ]; then
+    echo "place-selector is bound to ${got}" >&2
+    exit 1
+  fi
+  stamps=$(${k} get events -n "${ns}" --field-selector involvedObject.name=place-selector,reason=NodeSelector -o jsonpath='{range .items[*]}{.lastTimestamp}{"\n"}{end}' 2>/dev/null || true)
+  if recent_stamp "${stamps}" "${before}"; then
+    found=1
+    break
+  fi
+  sleep 2
+done
+if [ "${found}" != 1 ]; then
+  echo "place-selector has no NodeSelector event" >&2
+  ${k} get events -n "${ns}" --field-selector involvedObject.name=place-selector >&2 || true
+  exit 1
+fi
+stay_unbound place-selector
+EOF
+
+read -r -d '' CORDON_CHECK <<'EOF' || true
+uncordon_node() { ${k} uncordon "${node}" >/dev/null || true; }
+trap uncordon_node EXIT
+uncordon_node
+delete_pod place-cordon
+${k} cordon "${node}" >/dev/null
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-cordon
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+YAML
+stay_unbound place-cordon
+${k} uncordon "${node}" >/dev/null
+wait_running place-cordon
+trap - EXIT
+EOF
+
+read -r -d '' HOST_PORT_CHECK <<'EOF' || true
+${k} uncordon "${node}" >/dev/null
+delete_pod place-port-a
+delete_pod place-port-b
+sleep 2
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-port-a
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+    ports:
+    - name: http
+      containerPort: 18080
+      hostPort: 18080
+      protocol: TCP
+YAML
+wait_running place-port-a
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-port-b
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+    ports:
+    - name: http
+      containerPort: 18080
+      hostPort: 18080
+      protocol: TCP
+YAML
+stay_unbound place-port-b
+test "$(pod_phase place-port-a)" = Running
+test "$(pod_node place-port-a)" = "${node}"
+EOF
+
+read -r -d '' VOLUME_CHECK <<'EOF' || true
+${k} uncordon "${node}" >/dev/null
+delete_pod place-volume
+${k} delete pvc -n "${ns}" place-volume --ignore-not-found --wait=true --timeout=180s >/dev/null
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: place-volume
+  namespace: ${ns}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-volume
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: place-volume
+YAML
+phase=""
+got=""
+ann=""
+for _ in $(seq 1 150); do
+  phase=$(pod_phase place-volume)
+  got=$(pod_node place-volume)
+  ann=$(${k} get pvc -n "${ns}" place-volume -o go-template='{{index .metadata.annotations "volume.kubernetes.io/selected-node"}}' 2>/dev/null || true)
+  case "${ann}" in
+    "<no value>") ann="" ;;
+  esac
+  if [ "${phase}" = Running ] && [ "${got}" = "${node}" ] && [ "${ann}" = "${node}" ]; then
+    exit 0
+  fi
+  if [ "${phase}" = Failed ]; then
+    echo "place-volume failed" >&2
+    ${k} describe pod -n "${ns}" place-volume >&2 || true
+    ${k} describe pvc -n "${ns}" place-volume >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
+echo "place-volume is ${phase:-unknown} on ${got:-<none>}, selected node ${ann:-<none>}" >&2
+${k} describe pod -n "${ns}" place-volume >&2 || true
+${k} describe pvc -n "${ns}" place-volume >&2 || true
+exit 1
+EOF
+
+read -r -d '' FOREIGN_SCHEDULER_CHECK <<'EOF' || true
+delete_pod place-foreign
+before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+${k} apply -n "${ns}" -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata:
+  name: place-foreign
+  namespace: ${ns}
+spec:
+  restartPolicy: Always
+  schedulerName: custom-scheduler
+  containers:
+  - name: pause
+    image: ${pause}
+    imagePullPolicy: IfNotPresent
+YAML
+stay_unbound place-foreign
+lines=$(${k} get events -n "${ns}" --field-selector involvedObject.name=place-foreign -o jsonpath='{range .items[*]}{.reportingController}{" "}{.lastTimestamp}{"\n"}{end}' 2>/dev/null || true)
+if printf '%s\n' "${lines}" | awk -v before="${before}" '$1 == "nodeplace" && ($2 == before || $2 > before) { found = 1 } END { exit found ? 0 : 1 }'; then
+  echo "place-foreign has a placement event" >&2
+  exit 1
+fi
+EOF
+
+placement_eval() {
+    guest_eval "${PLACEMENT_PRELUDE}"$'\n'"$1"
+}
+
 # Three restarts, each bounded by 90 tries of 2s. CoreDNS stays unready
 # until a pod can reach the API. The guest also dials the kubernetes
 # Service, which is the host-side check that ClusterIP forwarding is back.
@@ -256,6 +599,62 @@ if ! wait_guest "CoreDNS Ready" "${READY_TIMEOUT}" "${COREDNS_CHECK}"; then
     show_diagnostics
     exit 1
 fi
+
+log_step "Scheduler"
+if ! guest_eval "${SCHEDULER_CHECK}"; then
+    log_fail "a scheduler process is running or something listens on 10259"
+    show_diagnostics
+    exit 1
+fi
+log_ok "no scheduler process and nothing listens on 10259"
+
+log_step "Unconstrained pod"
+if ! placement_eval "${FREE_POD_CHECK}"; then
+    log_fail "unconstrained pod did not run on this node"
+    show_diagnostics
+    exit 1
+fi
+log_ok "unconstrained pod is Running on this node"
+
+log_step "Node selector"
+if ! placement_eval "${SELECTOR_CHECK}"; then
+    log_fail "node selector for another hostname did not stay Pending"
+    show_diagnostics
+    exit 1
+fi
+log_ok "node selector for another hostname stays Pending"
+
+log_step "Cordon"
+if ! placement_eval "${CORDON_CHECK}"; then
+    log_fail "cordon did not leave the pod unbound, or uncordon did not let it run"
+    show_diagnostics
+    exit 1
+fi
+log_ok "cordon leaves a pod unbound and uncordon lets it run"
+
+log_step "Host port"
+if ! placement_eval "${HOST_PORT_CHECK}"; then
+    log_fail "host port conflict did not leave one pod Running and the other Pending"
+    show_diagnostics
+    exit 1
+fi
+log_ok "one host-port pod is Running and the other stays Pending"
+
+log_step "Local path"
+if ! placement_eval "${VOLUME_CHECK}"; then
+    log_fail "local-path pod did not run with volume.kubernetes.io/selected-node set"
+    show_diagnostics
+    exit 1
+fi
+log_ok "local-path pod is Running and the claim selects this node"
+
+log_step "Other scheduler"
+if ! placement_eval "${FOREIGN_SCHEDULER_CHECK}"; then
+    log_fail "pod with another scheduler name did not stay unbound"
+    show_diagnostics
+    exit 1
+fi
+log_ok "pod with another scheduler name stays unbound"
 
 log_step "Restart storm"
 if ! guest_eval "${RESTART_CHECK}"; then

@@ -16,6 +16,7 @@ import (
 	"github.com/eclipse-iofog/edgelet-kube/internal/helm"
 	"github.com/eclipse-iofog/edgelet-kube/internal/network"
 	"github.com/eclipse-iofog/edgelet-kube/internal/paths"
+	"github.com/eclipse-iofog/edgelet-kube/internal/place"
 	"github.com/eclipse-iofog/edgelet-kube/internal/servicelb"
 	"github.com/eclipse-iofog/edgelet-kube/internal/stage"
 	"k8s.io/client-go/kubernetes"
@@ -69,13 +70,15 @@ func (r *Runtime) Stop() {
 }
 
 // Start runs kube-apiserver against the open datastore, writes the bridge
-// conflist, then starts kube-controller-manager, kube-scheduler, kubelet,
-// and kube-proxy. Image import has already finished. The conflist write does
-// not wait on the apiserver and finishes before kubelet creates a sandbox.
+// conflist, then starts kube-controller-manager, kubelet, and kube-proxy.
+// Image import has already finished. The conflist write does not wait on the
+// apiserver and finishes before kubelet creates a sandbox.
 // Addon manifests are applied after those processes, once the apiserver is ready.
-// The Helm controller starts after that apply, and only once the HelmChart API
-// is served. The load balancer controller starts after the Helm controller and
-// writes the node IP onto LoadBalancer Services. kube-proxy programs forwarding.
+// The placement loop starts with kube-controller-manager and binds a pod that
+// was left pending. The Helm controller starts after the addon apply, and only
+// once the HelmChart API is served. The load balancer controller starts after
+// the Helm controller and writes the node IP onto LoadBalancer Services.
+// kube-proxy programs forwarding.
 // When servicelb is disabled, the load balancer does not start and those
 // Services stay pending. When the Helm controller is disabled, its CRD is not
 // applied, chart objects are not staged, and the controller does not start.
@@ -87,6 +90,10 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	if err := requireServer(cfg.Server); err != nil {
+		return nil, err
+	}
+	thisNode, err := nodeName(cfg.Server)
+	if err != nil {
 		return nil, err
 	}
 	if cfg.Store == nil || cfg.Store.Endpoint == "" {
@@ -121,7 +128,7 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	rt.launch(ctx, "kube-apiserver", errCh, func(ctx context.Context) error {
-		return runAPIServer(ctx, apiServerArgs(cfg.Server, cfg.Store.Endpoint, advertise, encPath, paths))
+		return runAPIServer(ctx, thisNode, apiServerArgs(cfg.Server, cfg.Store.Endpoint, advertise, encPath, paths))
 	})
 	write := cfg.PodNetwork
 	if write == nil {
@@ -133,16 +140,17 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	if err := waitReady(ctx, paths.AdminKubeconfig, errCh); err != nil {
 		return stop(err)
 	}
-	controllerPort, schedulerPort := componentPorts(cfg.Server.HTTPSListenPort, 0, 0)
-	controllerArgs, err := controllerManagerArgs(cfg.Server, cfg.Store.LeaderElect, controllerPort, paths)
+	controllerListen := controllerPort(cfg.Server.HTTPSListenPort)
+	controllerArgs, err := controllerManagerArgs(cfg.Server, cfg.Store.LeaderElect, controllerListen, paths)
 	if err != nil {
 		return stop(err)
 	}
 	rt.launch(ctx, "kube-controller-manager", errCh, func(ctx context.Context) error {
 		return runControllerManager(ctx, controllerArgs)
 	})
-	rt.launch(ctx, "kube-scheduler", errCh, func(ctx context.Context) error {
-		return runScheduler(ctx, schedulerArgs(cfg.Server, cfg.Store.LeaderElect, schedulerPort, paths))
+	adminKubeconfig := paths.AdminKubeconfig
+	rt.launch(ctx, "placement", errCh, func(ctx context.Context) error {
+		return place.Run(ctx, adminKubeconfig, thisNode)
 	})
 	if err := applyBundledPath(cfg.Server.PreferBundledBin, flagValue(kArgs, "cni-bin-dir")); err != nil {
 		return stop(err)
@@ -153,11 +161,8 @@ func Start(ctx context.Context, cfg Config) (*Runtime, error) {
 	rt.launch(ctx, "kube-proxy", errCh, func(ctx context.Context) error {
 		return startKubeProxy(ctx, pArgs)
 	})
-	if err := waitPort(ctx, controllerPort, errCh); err != nil {
+	if err := waitPort(ctx, controllerListen, errCh); err != nil {
 		return stop(fmt.Errorf("kube-controller-manager: %w", err))
-	}
-	if err := waitPort(ctx, schedulerPort, errCh); err != nil {
-		return stop(fmt.Errorf("kube-scheduler: %w", err))
 	}
 	if err := stage.Apply(ctx, paths.AdminKubeconfig, cfg.Server, cfg.Manifests); err != nil {
 		return stop(err)

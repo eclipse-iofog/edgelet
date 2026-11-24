@@ -105,6 +105,19 @@ func TestUnknownKeyNamesItself(t *testing.T) {
 	}
 }
 
+func TestKubeSchedulerArgIsUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeFile(t, path, "kube-scheduler-arg:\n  - v=2\n")
+	_, err := Load([]string{"--config", path}, nil)
+	if err == nil || !strings.Contains(err.Error(), "kube-scheduler-arg") || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("error %v", err)
+	}
+	_, err = Load([]string{"--kube-scheduler-arg=v=2"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "kube-scheduler-arg") || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("flag error %v", err)
+	}
+}
+
 func TestRejectedKeysNameThemselves(t *testing.T) {
 	keys := []string{
 		"token",
@@ -324,8 +337,6 @@ kube-apiserver-arg:
   - audit-log-path=/tmp/audit.log
 kube-controller-manager-arg:
   - node-cidr-mask-size=24
-kube-scheduler-arg:
-  - v=2
 kubelet-arg:
   - config=/etc/kubelet.yaml
 kube-proxy-arg:
@@ -404,7 +415,6 @@ disable-default-registry-endpoint: true
 		AlsoLogToStderr:                true,
 		KubeAPIServerArg:               []string{"audit-log-path=/tmp/audit.log"},
 		KubeControllerManagerArg:       []string{"node-cidr-mask-size=24"},
-		KubeSchedulerArg:               []string{"v=2"},
 		KubeletArg:                     []string{"config=/etc/kubelet.yaml"},
 		KubeProxyArg:                   []string{"proxy-mode=iptables"},
 		HelmControllerArg:              []string{"debug=true"},
@@ -729,7 +739,6 @@ func TestRepeatableKeys(t *testing.T) {
 		"disable",
 		"kube-apiserver-arg",
 		"kube-controller-manager-arg",
-		"kube-scheduler-arg",
 		"kubelet-arg",
 		"kube-proxy-arg",
 		"helm-controller-arg",

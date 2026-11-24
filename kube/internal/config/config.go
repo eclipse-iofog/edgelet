@@ -140,8 +140,6 @@ type Server struct {
 	KubeAPIServerArg []string
 	// KubeControllerManagerArg is the extra kube-controller-manager arguments.
 	KubeControllerManagerArg []string
-	// KubeSchedulerArg is the extra kube-scheduler arguments.
-	KubeSchedulerArg []string
 	// KubeletArg is the extra kubelet arguments.
 	KubeletArg []string
 	// KubeProxyArg is the extra kube-proxy arguments.
