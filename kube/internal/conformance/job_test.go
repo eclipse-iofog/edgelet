@@ -18,13 +18,15 @@ func TestConformanceJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(workflow)
+	for _, absent := range []string{"certified-conformance", "sonobuoy"} {
+		if strings.Contains(text, absent) {
+			t.Fatalf("workflow still runs %s", absent)
+		}
+	}
 	for _, want := range []string{
-		"certified-conformance",
 		"edgelet-kube-linux-amd64",
 		"edgelet-kube-airgap-images-amd64.tar.zst",
 		"runs-on: ubuntu-latest",
-		"timeout-minutes: 240",
-		`CONFORMANCE_TIMEOUT_MINUTES: "240"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("job definition missing %s", want)
