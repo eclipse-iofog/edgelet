@@ -121,11 +121,14 @@ if [ -n "$goarm" ]; then
 	goarm_env=(GOARM="$goarm")
 fi
 cc=$(cc_for_arch "$arch") || exit 1
-CGO_ENABLED=1 GOOS=linux GOARCH="$arch" "${goarm_env[@]}" CC="$cc" \
+# env applies CC and GOARM. A prefix assignment after the empty GOARM array
+# is parsed as the command name.
+env CGO_ENABLED=1 GOOS=linux GOARCH="$arch" CC="$cc" "${goarm_env[@]}" \
 	go build -trimpath -tags "${fat_tags}" -ldflags "${ldflags}" -o build/edgelet-kube-server ./cmd/edgelet-kube-server
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 bash scripts/bundle-stage.sh assemble "$stage" "$root" build/edgelet-kube-server
 env -u GOOS -u GOARCH go run ./scripts/pack -stage "$stage" -out cmd/edgelet-kube/embed
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "${goarm_env[@]}" go build -trimpath -tags "${thin_tags}" -ldflags "-s -w" -o build/edgelet-kube ./cmd/edgelet-kube
+env CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "${goarm_env[@]}" \
+	go build -trimpath -tags "${thin_tags}" -ldflags "-s -w" -o build/edgelet-kube ./cmd/edgelet-kube
