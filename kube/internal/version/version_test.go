@@ -16,11 +16,12 @@ func TestGitVersionMatchesPin(t *testing.T) {
 	if got := baseversion.Get().GitVersion; got != want {
 		t.Fatalf("Get().GitVersion %s", got)
 	}
-	if got := baseversion.Get().Major; got != "1" {
-		t.Fatalf("major %s", got)
+	major, minor := majorMinor(want)
+	if got := baseversion.Get().Major; got != major {
+		t.Fatalf("major %s, pin %s", got, major)
 	}
-	if got := baseversion.Get().Minor; got != "36" {
-		t.Fatalf("minor %s", got)
+	if got := baseversion.Get().Minor; got != minor {
+		t.Fatalf("minor %s, pin %s", got, minor)
 	}
 	if got := clientversion.Get().GitVersion; got != want {
 		t.Fatalf("client gitVersion %s", got)
