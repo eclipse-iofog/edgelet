@@ -3,10 +3,12 @@ package control
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/eclipse-iofog/edgelet-kube/internal/charts"
+	"github.com/eclipse-iofog/edgelet-kube/internal/place"
 	"github.com/spf13/pflag"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -16,8 +18,6 @@ import (
 	cmapp "k8s.io/kubernetes/cmd/kube-controller-manager/app"
 	cmoptions "k8s.io/kubernetes/cmd/kube-controller-manager/app/options"
 	proxyapp "k8s.io/kubernetes/cmd/kube-proxy/app"
-	schedapp "k8s.io/kubernetes/cmd/kube-scheduler/app"
-	schedoptions "k8s.io/kubernetes/cmd/kube-scheduler/app/options"
 	kubeletapp "k8s.io/kubernetes/cmd/kubelet/app"
 	kubeletoptions "k8s.io/kubernetes/cmd/kubelet/app/options"
 )
@@ -27,8 +27,17 @@ var (
 	startKubeProxy = launchKubeProxy
 )
 
-func runAPIServer(ctx context.Context, args []string) error {
+func runAPIServer(ctx context.Context, nodeName string, args []string) error {
+	if nodeName == "" {
+		return errors.New("node name is empty")
+	}
 	opts := apioptions.NewServerRunOptions()
+	// Register before the admission chain is built.
+	opts.Admission.GenericAdmission.RecommendedPluginOrder = place.Register(
+		opts.Admission.GenericAdmission.Plugins,
+		opts.Admission.GenericAdmission.RecommendedPluginOrder,
+		nodeName,
+	)
 	if err := parseFlags("kube-apiserver", opts.Flags(), args); err != nil {
 		return err
 	}
@@ -82,18 +91,6 @@ func runControllerManager(ctx context.Context, args []string) error {
 		return err
 	}
 	return cmapp.Run(ctx, cfg.Complete())
-}
-
-func runScheduler(ctx context.Context, args []string) error {
-	opts := schedoptions.NewOptions()
-	if err := parseFlags("kube-scheduler", *opts.Flags, args); err != nil {
-		return err
-	}
-	completed, sched, err := schedapp.Setup(ctx, opts)
-	if err != nil {
-		return err
-	}
-	return schedapp.Run(ctx, completed, sched)
 }
 
 func launchKubelet(ctx context.Context, args []string) error {

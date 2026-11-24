@@ -13,6 +13,7 @@ import (
 	"github.com/eclipse-iofog/edgelet-kube/internal/bundle"
 	"github.com/eclipse-iofog/edgelet-kube/internal/config"
 	"github.com/eclipse-iofog/edgelet-kube/internal/paths"
+	"github.com/eclipse-iofog/edgelet-kube/internal/place"
 	"github.com/eclipse-iofog/edgelet-kube/internal/version"
 )
 
@@ -48,7 +49,7 @@ func apiServerArgs(srv config.Server, endpoint, advertise, encryptionFile string
 		"requestheader-group-headers":        "X-Remote-Group",
 		"requestheader-username-headers":     "X-Remote-User",
 		"enable-aggregator-routing":          "true",
-		"enable-admission-plugins":           "NodeRestriction",
+		"enable-admission-plugins":           "NodeRestriction," + place.PluginName,
 		"profiling":                          "false",
 		"cert-dir":                           paths.Dir,
 	}
@@ -114,28 +115,6 @@ func controllerManagerArgs(srv config.Server, leader bool, port int, paths certP
 		values["vmodule"] = srv.VModule
 	}
 	return flagArgs(values, srv.KubeControllerManagerArg), nil
-}
-
-func schedulerArgs(srv config.Server, leader bool, port int, paths certPaths) []string {
-	values := map[string]string{
-		"kubeconfig":                paths.SchedulerKubeconfig,
-		"authorization-kubeconfig":  paths.SchedulerKubeconfig,
-		"authentication-kubeconfig": paths.SchedulerKubeconfig,
-		"leader-elect":              strconv.FormatBool(leader),
-		"bind-address":              "127.0.0.1",
-		"secure-port":               strconv.Itoa(port),
-		"tls-cert-file":             paths.ServingCert,
-		"tls-private-key-file":      paths.ServingKey,
-		"cert-dir":                  paths.Dir,
-		"profiling":                 "false",
-	}
-	if srv.V != 0 {
-		values["v"] = strconv.Itoa(srv.V)
-	}
-	if srv.VModule != "" {
-		values["vmodule"] = srv.VModule
-	}
-	return flagArgs(values, srv.KubeSchedulerArg)
 }
 
 func kubeletArgs(srv config.Server, nodeIP string, certs certPaths, cniConfDir, cniBinDir string) ([]string, error) {
@@ -334,20 +313,9 @@ func splitArg(raw string) (string, string) {
 	return key, value
 }
 
-func componentPorts(api, controller, scheduler int) (int, int) {
-	if controller == 0 {
-		if api == config.DefaultHTTPSListenPort {
-			controller = 10257
-		} else {
-			controller = api + 1
-		}
+func controllerPort(api int) int {
+	if api == config.DefaultHTTPSListenPort {
+		return 10257
 	}
-	if scheduler == 0 {
-		if api == config.DefaultHTTPSListenPort {
-			scheduler = 10259
-		} else {
-			scheduler = api + 2
-		}
-	}
-	return controller, scheduler
+	return api + 1
 }

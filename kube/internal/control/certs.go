@@ -40,9 +40,6 @@ type certPaths struct {
 	ControllerCert       string
 	ControllerKey        string
 	ControllerKubeconfig string
-	SchedulerCert        string
-	SchedulerKey         string
-	SchedulerKubeconfig  string
 	KubeletCert          string
 	KubeletKey           string
 	KubeletServingCert   string
@@ -152,7 +149,6 @@ func ensureCerts(srv config.Server) (certPaths, error) {
 	}{
 		{paths.AdminCert, paths.AdminKey, paths.AdminKubeconfig, "system:admin", []string{"system:masters"}, mode},
 		{paths.ControllerCert, paths.ControllerKey, paths.ControllerKubeconfig, "system:kube-controller-manager", []string{"system:kube-controller-manager"}, 0o600},
-		{paths.SchedulerCert, paths.SchedulerKey, paths.SchedulerKubeconfig, "system:kube-scheduler", []string{"system:kube-scheduler"}, 0o600},
 		{paths.KubeletCert, paths.KubeletKey, paths.KubeletKubeconfig, fmt.Sprintf("system:node:%s", name), []string{"system:nodes"}, 0o600},
 		{paths.KubeProxyCert, paths.KubeProxyKey, paths.KubeProxyKubeconfig, "system:kube-proxy", []string{"system:node-proxier"}, 0o600},
 	}
@@ -183,9 +179,6 @@ func certPathsFor(dir, admin string) certPaths {
 		ControllerCert:       filepath.Join(dir, "client-controller-manager.crt"),
 		ControllerKey:        filepath.Join(dir, "client-controller-manager.key"),
 		ControllerKubeconfig: filepath.Join(dir, "controller-manager.kubeconfig"),
-		SchedulerCert:        filepath.Join(dir, "client-scheduler.crt"),
-		SchedulerKey:         filepath.Join(dir, "client-scheduler.key"),
-		SchedulerKubeconfig:  filepath.Join(dir, "scheduler.kubeconfig"),
 		KubeletCert:          filepath.Join(dir, "client-kubelet.crt"),
 		KubeletKey:           filepath.Join(dir, "client-kubelet.key"),
 		KubeletServingCert:   filepath.Join(dir, "kubelet-serving.crt"),
